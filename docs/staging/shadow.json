@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "shadow": true,
+  "storeRoot": null,
+  "shadowDir": null,
+  "budgetTokens": 500,
+  "limit": 5,
+  "oncePerSession": true
+}
