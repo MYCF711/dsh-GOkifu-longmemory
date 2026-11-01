@@ -11,37 +11,36 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-kifuin`（私有） |
 | 包名 | `dsh-kifuin`（**不发 npm**） |
-| 当前版本 | `0.1.0` |
+| 当前版本 | `0.2.0` |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
-## 二、当前状态（2026-11-02 02:40）
+## 二、当前状态（2026-11-02 03:10）
 
 ```
-分支         main（初始提交）
-里程碑       M0 完成（方案 v0.9），M1 未开始
-代码         仅骨架：package.json / scripts / 目录
+分支         main（M1 已合并）
+里程碑       M1 只读考古完成（0.2.0）；下一步 M2 建网成线
+代码         R00/R01/R02/R03/R04/R05/R07/R14 已落地；98 条测试全绿
 ```
 
 | 资产 | 数量 |
 |---|---|
 | 方案 | `方案.md` v0.9 |
 | 必读文档 | AGENTS / 边界 / 拷问记录 / 对标 |
-| 房间 | 见 AGENTS §11（R00–R15，M1 最小集） |
-| 测试 | 0 条（M1 起） |
+| 房间 | R00/R01/R02/R03/R04/R05/R07/R14（M1 集） |
+| 测试 | 98 条（`node --test` 全绿） |
+| 语料 | 90 日志 / 24 局 / 15 棋谱 / 1,230 节点 / 1,397 边 / 753 主题 / 194 相关边 `[本] 2026-11-02` |
 
 ## 三、下一步
 
-**M1 只读考古（零注入）**：
+**M2 建网成线（只写不读）**：
 
-1. `R01 logread`：多帧 zstd 逐帧解码 + 事件包裹层解析（`time`/`seq`/`type`）；单测用小样本。
-2. `R00 episode`：会话 → 棋谱（闭包、时间窗、信号计数）。
-3. `R02 graphread`：`graph.json` + `graph.json.delta.jsonl` 回放。
-4. `R03 extract`：失败边/成功边/约束/工具集合的机械抽取。
-5. `R04 topic` + `R05 link`：主题抽取与多粒度相关边（带 `why`）。
-6. `R07 index`：`index.md` 树。
-7. `R14 cli`：`dump` / `stats` / `walk`。
-8. 验收：86 日志 + 11 棋谱全解析；可复算；零注入；0 写入会话日志。
+1. `R15 persist`：sidecar（`<DSH_HOME>/memory-context/`）、manifest、checksums、append-only。
+2. `R06 thread`：线索（藤的视图，多对多）。
+3. `R08 joseki`：定式候选（每招溯源、preconditions）。
+4. `R09 claim`：claim + validity/preconditions。
+5. 入档管线：episode → 主题/边/线索/定式候选 → 索引。
+6. 验收：幂等、崩溃恢复、原件 0 篡改、manifest 可校验。
 
 ## 四、硬约束
 
