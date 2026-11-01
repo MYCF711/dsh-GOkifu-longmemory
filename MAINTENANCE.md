@@ -34,13 +34,13 @@
 
 ## 三、下一步
 
-**M2 建网成线（只写不读）**：
+**M2 建网成线（只写不读，进行中）**：
 
-1. `R15 persist`：sidecar（`<DSH_HOME>/memory-context/`）、manifest、checksums、append-only。
+1. `R15 persist`：sidecar（`<DSH_HOME>/memory-context/`）、manifest、checksums、append-only、verify/rebuild。
 2. `R06 thread`：线索（藤的视图，多对多）。
 3. `R08 joseki`：定式候选（每招溯源、preconditions）。
 4. `R09 claim`：claim + validity/preconditions。
-5. 入档管线：episode → 主题/边/线索/定式候选 → 索引。
+5. 入档管线 `scripts/archive.mjs`：episode → 主题/边/线索/定式候选/claim → 索引。
 6. 验收：幂等、崩溃恢复、原件 0 篡改、manifest 可校验。
 
 ## 四、硬约束
