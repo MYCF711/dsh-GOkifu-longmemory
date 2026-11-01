@@ -11,6 +11,8 @@
 //   - "无时不入"（缺 occurredAt 的棋谱/claim 不入 hits）、folded-into 子代理局不入、invalidated claim 不入
 //   - 主题匹配口径：精确/包含/实体/主题 id/大小写；CJK 2 字、ASCII 3 字最小长度闸
 //   - token 口径：CJK 1.5 字/token、ASCII 4 字/token；result.tokens = Σ hit.tokens
+//   - 作用域（T8b 修复）：同 scope 可见、跨 scope 不可见、u: 用户层可见、scope 缺失降级为"只放用户层"、
+//     被拒条目计入 omitted.crossScope；与 R13 闸 1 的一致性（walk 可见 ⇒ 闸 1 必可见）
 //
 // 夹具：临时目录 createStore（**不碰真实 $DSH_HOME**）；不新增依赖、只用 node: 内置。
 
@@ -27,16 +29,25 @@ import {
   normalizeSignal,
   estimateTokens,
   clampDepth,
+  normalizeScopeKey,
+  isScopeVisible,
+  resolveScope,
   WalkError,
   HIT_KINDS,
   MAX_DEPTH,
   WALK_DEFAULTS,
   TOKEN_RULE,
 } from '../src/rooms/walk.mjs';
+import {
+  normalizeScope as gateNormalizeScope,
+  isScopeVisible as gateIsScopeVisible,
+} from '../src/rooms/gates.mjs';
 
 const WALK_SOURCE = readFileSync(new URL('../src/rooms/walk.mjs', import.meta.url), 'utf8');
 
 const T0 = 1_760_000_000_000; // 夹具事件时间（固定的过去）
+const SCOPE = 'w:d:/work/demo'; // 夹具工作区（与 episode/claim 的 scopeKey 同值）
+const OTHER_SCOPE = 'w:e:/other-workspace';
 
 // ---- 主题种子（夹具里的 5 个主题）----
 const T = {
@@ -242,6 +253,7 @@ function walk(opts = {}) {
   return walkFromSignals({
     signal: REPO_SIGNAL,
     store,
+    scope: SCOPE,
     depth: 2,
     limit: 10,
     budgetTokens: 10_000,
@@ -412,17 +424,17 @@ test('R11: 排序按档位（失败 > 约束/偏好 > 定式候选），分类�
 test('R11: limit 前缀式截断（omitted.count/reason/byLimit 对得上）', () => {
   const all = walk({ limit: 100 });
   assert.equal(all.hits.length, 7);
-  assert.deepEqual(all.omitted, { count: 0, reason: null, byLimit: 0, byBudget: 0 });
+  assert.deepEqual(all.omitted, { count: 0, reason: null, byLimit: 0, byBudget: 0, crossScope: 0 });
 
   const two = walk({ limit: 2 });
   assert.equal(two.hits.length, 2);
   assert.deepEqual(two.hits.map((hit) => hit.claim ?? hit.episode), all.hits.slice(0, 2).map((hit) => hit.claim ?? hit.episode));
-  assert.deepEqual(two.omitted, { count: 5, reason: 'limit', byLimit: 5, byBudget: 0 });
+  assert.deepEqual(two.omitted, { count: 5, reason: 'limit', byLimit: 5, byBudget: 0, crossScope: 0 });
   assert.equal(two.tokens, two.hits.reduce((sum, hit) => sum + hit.tokens, 0));
 
   const zero = walk({ limit: 0 });
   assert.equal(zero.hits.length, 0);
-  assert.deepEqual(zero.omitted, { count: 7, reason: 'limit', byLimit: 7, byBudget: 0 });
+  assert.deepEqual(zero.omitted, { count: 7, reason: 'limit', byLimit: 7, byBudget: 0, crossScope: 0 });
 
   const dflt = walk({ limit: undefined, budgetTokens: 10_000 });
   assert.equal(dflt.hits.length, WALK_DEFAULTS.limit, '默认 limit=5');
@@ -437,12 +449,12 @@ test('R11: budgetTokens 前缀式截断（token 超了就停，后面的全计�
   const exact = walk({ limit: 100, budgetTokens: first.tokens });
   assert.equal(exact.hits.length, 1, '刚好塞下第一条');
   assert.equal(exact.tokens, first.tokens);
-  assert.deepEqual(exact.omitted, { count: 6, reason: 'budget', byLimit: 0, byBudget: 6 });
+  assert.deepEqual(exact.omitted, { count: 6, reason: 'budget', byLimit: 0, byBudget: 6, crossScope: 0 });
 
   const none = walk({ limit: 100, budgetTokens: 0 });
   assert.equal(none.hits.length, 0);
   assert.equal(none.tokens, 0);
-  assert.deepEqual(none.omitted, { count: 7, reason: 'budget', byLimit: 0, byBudget: 7 });
+  assert.deepEqual(none.omitted, { count: 7, reason: 'budget', byLimit: 0, byBudget: 7, crossScope: 0 });
   assert.ok(none.path.every((hop) => hop.from === 'signal' || hop.kind === 'match'), '没命中就不该有证据路径');
 
   const full = walk({ limit: 100, budgetTokens: 10_000 });
@@ -459,7 +471,7 @@ test('R11: 无命中 ⇒ 空 hits、零 tokens、零 path、omitted.count=0（�
   assert.deepEqual(result.hits, []);
   assert.deepEqual(result.path, []);
   assert.equal(result.tokens, 0);
-  assert.deepEqual(result.omitted, { count: 0, reason: null, byLimit: 0, byBudget: 0 });
+  assert.deepEqual(result.omitted, { count: 0, reason: null, byLimit: 0, byBudget: 0, crossScope: 0 });
   assert.deepEqual(result.matched.topics, []);
   assert.equal(result.dropped.noTopic, 1);
 
@@ -471,7 +483,7 @@ test('R11: 无命中 ⇒ 空 hits、零 tokens、零 path、omitted.count=0（�
 
 test('R11: 空 store（连目录都没有）⇒ 空结果，不建目录不抛', () => {
   const bare = createStore({ root: path.join(tmp, `bare-${(seq += 1)}`), now: T0 });
-  const result = walkFromSignals({ signal: REPO_SIGNAL, store: bare });
+  const result = walkFromSignals({ signal: REPO_SIGNAL, store: bare, scope: SCOPE });
   assert.deepEqual(result.hits, []);
   assert.equal(result.tokens, 0);
 });
@@ -482,7 +494,7 @@ test('R11: 空 store（连目录都没有）⇒ 空结果，不建目录不抛',
 
 test('R11: 不写盘 —— 走之前/之后 store 的 sha256 快照与 journal 行数完全一致', () => {
   const before = fingerprint(store);
-  const result = walkFromSignals({ signal: REPO_SIGNAL, store, depth: 2, limit: 10, budgetTokens: 10_000 });
+  const result = walkFromSignals({ signal: REPO_SIGNAL, store, scope: SCOPE, depth: 2, limit: 10, budgetTokens: 10_000 });
   assert.ok(result.hits.length > 0);
   const after = fingerprint(store);
   assert.deepEqual(after, before, 'walk 不得写盘（条目字节、manifest 计数、journal 全部不变）');
@@ -493,7 +505,7 @@ test('R11: 只读结构 —— 源码不 import 任何模块（连 node: 内置�
   assert.equal(/require\s*\(/.test(WALK_SOURCE), false);
   // 只读 store 面：只需要 list()；给一个只有 list 的 wrapper 也能跑通
   const readOnly = { list: (kind) => store.list(kind) };
-  const result = walkFromSignals({ signal: REPO_SIGNAL, store: readOnly, limit: 3, budgetTokens: 10_000 });
+  const result = walkFromSignals({ signal: REPO_SIGNAL, store: readOnly, scope: SCOPE, limit: 3, budgetTokens: 10_000 });
   assert.equal(result.hits.length, 3);
 });
 
@@ -625,4 +637,181 @@ test('R11: 另外一条信号（CJK 主题）—— claim 文本命中主题 key
   // 无时间戳的 claim 依然"无时不入"
   assert.equal(result.dropped.noTime, 1);
   assert.ok(!claimIds(result).includes('c-noTime-1'));
+});
+
+// ---------------------------------------------------------------------------
+// 8 · 作用域（T8b 修复：闸 1 抓到的越界 —— 候选入 hits 之前先过 scope 闸）
+// ---------------------------------------------------------------------------
+
+const T_SCOPE = { id: 't:term:1000aaa1', kind: 'term', key: 'yaml', df: 4, idfNorm: 0.8 };
+
+function scopeFixture() {
+  const topics = [{
+    id: T_SCOPE.id, kind: T_SCOPE.kind, key: T_SCOPE.key, df: T_SCOPE.df, idfNorm: T_SCOPE.idfNorm,
+    firstSeenAt: T0, lastSeenAt: T0 + 4_000, episodes: ['ep-a1', 'ep-a2', 'ep-b1'],
+  }];
+  const episodes = [
+    episodeRecord({ id: 'ep-a1', topics: [epTopic(T_SCOPE)], failures: 1, at: T0 + 1_000, l0: '同工作区的失败' }),
+    episodeRecord({ id: 'ep-a2', topics: [epTopic(T_SCOPE)], at: T0 + 2_000, l0: '同工作区的参考（盘符大小写/尾斜杠不同）' }),
+    episodeRecord({ id: 'ep-b1', topics: [epTopic(T_SCOPE)], failures: 2, at: T0 + 3_000, l0: '另一个工作区的失败' }),
+    episodeRecord({ id: 'ep-noscope', topics: [epTopic(T_SCOPE)], failures: 1, at: T0 + 3_500, l0: '没有 scopeKey 的棋谱' }),
+  ];
+  episodes[1].scopeKey = String.raw`w:D:\work\demo`; // 同工作区的另一种写法（反斜杠 + 盘符大写；归一后 == SCOPE）
+  episodes[2].scopeKey = OTHER_SCOPE;
+  delete episodes[3].scopeKey;
+
+  const links = [
+    linkRecord({ id: 'link-scope-1', a: 'ep-a1', b: 'ep-a2', topics: [T_SCOPE.id], why: T_SCOPE.key, weight: 1, occurredAt: T0 + 2_500 }),
+    linkRecord({ id: 'link-scope-2', a: 'ep-a1', b: 'ep-b1', topics: [T_SCOPE.id], why: T_SCOPE.key, weight: 1, occurredAt: T0 + 3_100 }),
+  ];
+  const claims = [
+    claimRecord({
+      id: 'c-scope-a', kind: 'antipattern', text: '同工作区的失败：先 npm view 再装',
+      support: [{ episode: 'ep-a1', seq: 3, occurredAt: T0 + 1_100 }], occurredAt: T0 + 1_100, scopeKey: SCOPE,
+    }),
+    claimRecord({
+      id: 'c-scope-u', kind: 'preference', text: 'yaml 装不上时先 npm view 再装（用户层偏好）',
+      support: [{ episode: 'ep-a1', seq: 4, occurredAt: T0 + 1_400 }], occurredAt: T0 + 1_400, scopeKey: 'u:owner',
+    }),
+    claimRecord({
+      id: 'c-scope-b', kind: 'fact', text: '另一个工作区的事实：端口 3425',
+      support: [{ episode: 'ep-b1', seq: 5, occurredAt: T0 + 1_200 }], occurredAt: T0 + 1_200, scopeKey: OTHER_SCOPE,
+    }),
+    claimRecord({
+      id: 'c-scope-cross2', kind: 'fact', text: 'yaml 要先查版本（同域证据、别域的结论）',
+      support: [{ episode: 'ep-a1', seq: 8, occurredAt: T0 + 1_500 }], occurredAt: T0 + 1_500, scopeKey: OTHER_SCOPE,
+    }),
+    claimRecord({
+      id: 'c-scope-noscope', kind: 'fact', text: '没有 scopeKey 的 claim',
+      support: [{ episode: 'ep-a1', seq: 6 }], occurredAt: T0 + 1_300, scopeKey: null,
+    }),
+  ];
+  return { topics, episodes, links, claims };
+}
+
+let scopeSeq = 0;
+function scopeStore() {
+  const target = createStore({ root: path.join(tmp, `scope-store-${(scopeSeq += 1)}`), now: T0 });
+  target.ensureDirs();
+  const fixture = scopeFixture();
+  target.putMany('episodes', fixture.episodes, { at: T0 });
+  target.putMany('topics', fixture.topics, { at: T0 });
+  target.putMany('links', fixture.links, { at: T0 });
+  target.putMany('claims', fixture.claims, { at: T0 });
+  return target;
+}
+
+function walkScope(target, opts = {}) {
+  return walkFromSignals({
+    signal: { kind: 'root-message', terms: ['yaml'], entities: [], at: T0 + 9_000 },
+    store: target,
+    scope: SCOPE,
+    limit: 10,
+    budgetTokens: 10_000,
+    ...opts,
+  });
+}
+
+test('R11 作用域: 同 scope 命中（含写法归一）、跨 scope 不命中、u: 用户层可见', () => {
+  const target = scopeStore();
+  const result = walkScope(target);
+  assertInvariants(result);
+
+  const episodes = episodeIds(result).sort();
+  assert.deepEqual(episodes, ['ep-a1', 'ep-a2'], '同工作区可见（盘符大小写/反斜杠/尾斜杠归一）；跨域与无域不可见');
+
+  const claims = claimIds(result).sort();
+  assert.deepEqual(claims, ['c-scope-a', 'c-scope-u'], 'claim 自己的 scopeKey 才是判据；u: 用户层跨工作区可见');
+
+  assert.equal(result.scope.current, SCOPE);
+  assert.equal(result.scope.mode, 'same-scope+user-layer');
+  assert.equal(result.omitted.count, 0, '作用域拒掉的不算 limit/budget 的 omitted.count');
+  assert.equal(result.omitted.crossScope, 4, '相关但被闸挡下：ep-b1 + c-scope-cross2（跨域）+ ep-noscope + c-scope-noscope（缺域）');
+  assert.equal(result.dropped.crossScope, 2);
+  assert.equal(result.dropped.scopeMissing, 2);
+  for (const hit of result.hits) {
+    assert.ok([SCOPE, 'u:owner'].includes(hit.scopeKey), `hit 的 scopeKey 越界: ${hit.scopeKey}`);
+  }
+});
+
+test('R11 作用域: 跨域相关边不进 path（不留跨工作区指针）', () => {
+  const result = walkScope(scopeStore());
+  assert.equal(result.path.some((hop) => hop.to === 'ep-b1' || hop.from === 'ep-b1'), false);
+  assert.equal(result.path.some((hop) => hop.link === 'link-scope-2'), false, '跨域边不跳、不记录');
+  assert.ok(result.path.some((hop) => hop.link === 'link-scope-1'), '同域边照常记录（why 可查）');
+});
+
+test('R11 作用域: scope 缺失 ⇒ 降级为「只放用户层」（默认拒绝跨域）', () => {
+  const target = scopeStore();
+  const result = walkFromSignals({
+    signal: { kind: 'root-message', terms: ['yaml'], entities: [], at: T0 + 9_000 },
+    store: target,
+    limit: 10,
+    budgetTokens: 10_000,
+  });
+  assertInvariants(result);
+  assert.equal(result.scope.current, null);
+  assert.equal(result.scope.mode, 'user-layer-only');
+  assert.deepEqual(episodeIds(result), [], '拿不到当前工作区 ⇒ 一个 w: 棋谱都不放');
+  assert.deepEqual(claimIds(result), ['c-scope-u'], '只放 u: 用户层（claim 靠文本命中主题 key 进来）');
+  assert.equal(result.omitted.crossScope, 5, '3 个 w: 棋谱 + c-scope-cross2 跨域，ep-noscope 缺域');
+  assert.equal(result.dropped.crossScope, 4);
+  assert.equal(result.dropped.scopeMissing, 1);
+});
+
+test('R11 作用域: 解析优先级（opts > signal.scope > signal.scopeKey > store.scopeKey）与归一化', () => {
+  assert.equal(resolveScope({ scope: SCOPE }), SCOPE);
+  assert.equal(resolveScope({ scope: OTHER_SCOPE, signal: { scope: SCOPE } }), OTHER_SCOPE);
+  assert.equal(resolveScope({ signal: { scope: SCOPE } }), SCOPE);
+  assert.equal(resolveScope({ signal: { scopeKey: String.raw`w:D:\work\demo` } }), SCOPE);
+  assert.equal(resolveScope({ store: { scopeKey: SCOPE } }), SCOPE);
+  assert.equal(resolveScope({ store: { currentScope: SCOPE } }), SCOPE);
+  assert.equal(resolveScope({ signal: {}, store: {} }), null);
+  assert.equal(resolveScope({ scope: 'w:unknown' }), null, '未知哨兵不算作用域');
+  assert.equal(resolveScope({ scope: 'w:<unknown>' }), null);
+  assert.equal(resolveScope({}), null);
+
+  assert.equal(normalizeScopeKey(String.raw`w:D:\work\demo`), SCOPE);
+  assert.equal(normalizeScopeKey('D:/work/demo/'), SCOPE);
+  assert.equal(normalizeScopeKey('u:Owner'), 'u:owner');
+  assert.equal(normalizeScopeKey(''), '');
+
+  // opts.scope 优先：把当前作用域指到另一个工作区 ⇒ 只看那边
+  const other = walkScope(scopeStore(), { scope: OTHER_SCOPE, signal: { kind: 'root-message', terms: ['yaml'], scopeKey: SCOPE } });
+  assert.deepEqual(episodeIds(other), ['ep-b1']);
+  assert.deepEqual(claimIds(other).sort(), ['c-scope-b', 'c-scope-cross2', 'c-scope-u']);
+});
+
+test('R11 作用域: 与 R13 闸 1 同口径（walk 可见 ⇒ 闸 1 必可见；归一化一致）', () => {
+  const scopes = [
+    'w:d:/work/demo', 'w:D:/Work/Demo', 'w:d:/work/demo/', 'w:e:/other-workspace', 'w:d:/work',
+    'w:d:/work/demo/sub', 'u:owner', 'u:other', 'w:unknown', 'w:<unknown>', '',
+  ];
+  for (const s of scopes) assert.equal(normalizeScopeKey(s), gateNormalizeScope(s), `归一化与闸 1 不一致: ${s}`);
+
+  let allowed = 0;
+  for (const entry of scopes) {
+    for (const current of scopes) {
+      if (!isScopeVisible(entry, current)) continue;
+      allowed += 1;
+      assert.equal(gateIsScopeVisible(entry, current), true, `walk 可见但闸 1 会判红: ${entry} @ ${current}`);
+    }
+  }
+  assert.ok(allowed > 0);
+
+  // 已知且是故意的差异：闸 1 允许「子看父」的 w: 路径前缀；walk 更严（不跨工作区）
+  assert.equal(gateIsScopeVisible('w:d:/work', 'w:d:/work/demo'), true);
+  assert.equal(isScopeVisible('w:d:/work', 'w:d:/work/demo'), false);
+});
+
+test('R11 作用域: omitted.crossScope 与 limit/budget 分开记（可审计、不混算）', () => {
+  const target = scopeStore();
+  const full = walkScope(target);
+  assert.equal(full.omitted.crossScope, full.dropped.crossScope + full.dropped.scopeMissing);
+  assert.ok(full.omitted.crossScope > 0);
+
+  const tight = walkScope(target, { limit: 1 });
+  assert.equal(tight.omitted.reason, 'limit');
+  assert.equal(tight.omitted.crossScope, full.omitted.crossScope, '作用域先行 ⇒ limit 截断不改变 crossScope');
+  assert.equal(tight.omitted.byLimit, full.hits.length - 1);
 });

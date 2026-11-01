@@ -21,7 +21,7 @@ for (const f of ['AGENTS.md', 'MAINTENANCE.md', '方案.md', 'docs/记忆的职�
 }
 
 // 房间目录与 AGENTS §11 的清单对得上（M1 起逐步增加）
-const rooms = ['src/rooms/episode.mjs', 'src/rooms/logread.mjs', 'src/rooms/graphread.mjs', 'src/rooms/extract.mjs', 'src/rooms/topic.mjs', 'src/rooms/link.mjs', 'src/rooms/index.mjs', 'src/rooms/cli.mjs', 'src/rooms/persist.mjs', 'src/rooms/thread.mjs', 'src/rooms/joseki.mjs', 'src/rooms/claim.mjs', 'src/rooms/walk.mjs', 'src/rooms/inject.mjs', 'src/rooms/gates.mjs'];
+const rooms = ['src/rooms/episode.mjs', 'src/rooms/logread.mjs', 'src/rooms/graphread.mjs', 'src/rooms/extract.mjs', 'src/rooms/topic.mjs', 'src/rooms/link.mjs', 'src/rooms/index.mjs', 'src/rooms/cli.mjs', 'src/rooms/persist.mjs', 'src/rooms/thread.mjs', 'src/rooms/joseki.mjs', 'src/rooms/claim.mjs', 'src/rooms/walk.mjs', 'src/rooms/inject.mjs', 'src/rooms/gates.mjs', 'src/rooms/adjudicate.mjs'];
 const missing = rooms.filter((r) => !existsSync(new URL(`../${r}`, import.meta.url)));
 const strictRooms = process.argv.includes('--strict-rooms');
 if (missing.length && strictRooms) fail.push(`房间未建：${missing.join(', ')}`);

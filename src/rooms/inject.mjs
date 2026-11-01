@@ -175,6 +175,72 @@ export function scopeKeyFromPath(p) {
   return `w:${posix.replace(/([A-Za-z]):/, (_, d) => `${d.toLowerCase()}:`)}`;
 }
 
+/** scopeKey 规范化（`u:` 层保持小写；`w:` 与裸路径走同一口径）。作用是让"同一作用域"只有一种写法。 */
+export function normalizeScopeKey(scopeKey) {
+  const s = String(scopeKey ?? '').trim();
+  if (!s) return '';
+  if (/^u:/i.test(s)) return `u:${s.slice(2).toLowerCase()}`;
+  if (/^w:/i.test(s)) return scopeKeyFromPath(s.slice(2));
+  return scopeKeyFromPath(s);
+}
+
+/**
+ * "拿不到当前工作区"的哨兵：R00 的 `w:unknown`、R12 的 `w:<unknown>`、空体。
+ * 命中它时**不判**作用域（判不了），交给上层按"未核"处理，而不是把整卡判成越界。
+ */
+export function isUnknownScope(scopeKey) {
+  const n = normalizeScopeKey(scopeKey);
+  return n === '' || n === 'w:unknown' || n === 'w:<unknown>' || n === 'w:';
+}
+
+/**
+ * 条目作用域在当前作用域下是否可见（方案 §4.10「只允许显式祖先；默认不可见」）：
+ *   - 完全相同 ⇒ 可见
+ *   - `u:` 用户层 ⇒ 任何 `w:` 作用域都可见（跨项目的"你"）
+ *   - 当前 scope 是该条目的**子路径**（`w:d:/work/repo/plugin` 看 `w:d:/work/repo`）⇒ 可见
+ *   - 反向（父看子）/ 完全不同的工作区 ⇒ 不可见
+ * R12 用它过滤 walk 命中，R13 闸 1 用它判越界 —— 同一份实现，不复制。
+ */
+export function isScopeVisible(entryScope, currentScope) {
+  const entry = normalizeScopeKey(entryScope);
+  const current = normalizeScopeKey(currentScope);
+  if (!entry || !current) return false;
+  if (entry === current) return true;
+  if (entry.startsWith('u:') && current.startsWith('w:')) return true;
+  if (entry.startsWith('w:') && current.startsWith('w:')) {
+    const base = entry.slice(2);
+    const leaf = current.slice(2);
+    return leaf === base || leaf.startsWith(`${base}/`);
+  }
+  return false;
+}
+
+/**
+ * 按当前作用域过滤 walk 命中（R11 暂不接收 scope 参数时的 R12 侧兜底）。
+ * 判据同闸 1：**证明不了在本域可见的就不注入**（`u:` 层例外）。
+ * 丢掉的两类分开计数，好让省略行说清"为什么少了"：
+ *   - `dropped`：明确在别的作用域（crossScope）
+ *   - `droppedUnknown`：命中没带 scopeKey，无法证明可见（默认不可见）
+ */
+export function filterHitsByScope(hits, scope) {
+  const list = Array.isArray(hits) ? hits : [];
+  const current = normalizeScopeKey(scope);
+  if (!current || isUnknownScope(current)) return { hits: list.slice(), dropped: 0, droppedUnknown: 0, scope: null };
+  const kept = [];
+  let dropped = 0;
+  let droppedUnknown = 0;
+  for (const hit of list) {
+    const entryScope = typeof hit?.scopeKey === 'string' && hit.scopeKey.trim() !== '' ? hit.scopeKey : '';
+    if (!entryScope) {
+      droppedUnknown += 1;
+      continue;
+    }
+    if (isScopeVisible(entryScope, current)) kept.push(hit);
+    else dropped += 1;
+  }
+  return { hits: kept, dropped, droppedUnknown, scope: current };
+}
+
 // ---------------------------------------------------------------------------
 // store 读视图（只读；只用 list/get/counts 三个方法，缺 store 时全部降级为空）
 // ---------------------------------------------------------------------------
@@ -430,13 +496,15 @@ function renderEntryLine(entry, clip) {
   return `- [${entry.marker}] ${body} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})`;
 }
 
-function renderSection({ entries, beyond, droppedProvenance, limit, budgetTokens, clip, withMarkers = true }) {
+function renderSection({ entries, beyond, droppedProvenance, limit, budgetTokens, clip, withMarkers = true, droppedCrossScope = 0, droppedUnknownScope = 0, scopeKey = null }) {
   const body = entries.map((e) => renderEntryLine(e, clip));
-  const total = beyond + droppedProvenance;
+  const total = beyond + droppedProvenance + droppedCrossScope + droppedUnknownScope;
   if (total > 0) {
     const parts = [];
     if (beyond > 0) parts.push(`超出 ${limit} 条上限/预算 ${budgetTokens} tokens 的 ${beyond} 条`);
     if (droppedProvenance > 0) parts.push(`无源不入 ${droppedProvenance} 条（缺 occurredAt 或 seq）`);
+    if (droppedCrossScope > 0) parts.push(`跨作用域未纳入 ${droppedCrossScope} 条 [scope=${scopeKey}]`);
+    if (droppedUnknownScope > 0) parts.push(`作用域未知未纳入 ${droppedUnknownScope} 条`);
     body.push(`omitted: ${total} items（${parts.join(' · ')}）— see index.md（未列出 ≠ 不存在）`);
   }
   const head = withMarkers ? ['<memory-ledger>', MARKERS_LINE] : ['<memory-ledger>'];
@@ -473,7 +541,14 @@ export function buildMemoryCard({
   budgetTokens = BUDGET_TOKENS,
   indexPath = null,
   episodeCount = null,
+  droppedCrossScope = 0,
+  droppedUnknownScope = 0,
+  walkCrossScope = 0,
 } = {}) {
+  const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
+  const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
+  // walk 在遍历时拒掉的条数（R11 自己按作用域过滤的统计）：只作审计字段，不算"卡里少了几条"。
+  const crossScopeWalk = Number.isFinite(walkCrossScope) && walkCrossScope > 0 ? walkCrossScope : 0;
   const view = storeView(store);
   const hits = Array.isArray(walkResult?.hits) ? walkResult.hits : [];
   const idxPath = indexPath ?? view.indexPath ?? 'memory-context/index.md';
@@ -485,21 +560,33 @@ export function buildMemoryCard({
   const indexLine = renderIndexLine({ indexPath: idxPath, scope: scopeKey, episodes });
   const indexTokens = estimateTokens(indexLine);
 
+  // 兜底省略行：命中被作用域挡掉时，即使零展开也要说清"为什么什么都没有"。
+  const scopeOmitted = crossScope + unknownScope + crossScopeWalk;
+  const scopeOmissionText = scopeOmitted > 0
+    ? `omitted: ${scopeOmitted} items（${[
+      (crossScope + crossScopeWalk) > 0 ? `跨作用域未纳入 ${crossScope + crossScopeWalk} 条 [scope=${scopeKey}]` : null,
+      unknownScope > 0 ? `作用域未知未纳入 ${unknownScope} 条` : null,
+    ].filter(Boolean).join(' · ')}）— see index.md（未列出 ≠ 不存在）`
+    : null;
+
   if (!hits.length) {
     // 不命中 ⇒ 零注入（只有首轮那一行事实）。
     return {
       indexLine,
       section: null,
       claims: [],
-      omissions: null,
+      omissions: scopeOmissionText,
       tokens: indexTokens,
       shadow: true,
-      omittedCount: 0,
+      omittedCount: scopeOmitted,
       hitCount: 0,
       indexTokens,
       limit,
       budgetTokens,
       cardVersion: CARD_VERSION,
+      crossScope,
+      unknownScope,
+      crossScopeWalk,
       signalAt: Number.isFinite(now) ? now : null,
     };
   }
@@ -532,6 +619,9 @@ export function buildMemoryCard({
           budgetTokens,
           clip,
           withMarkers,
+          droppedCrossScope: crossScope,
+          droppedUnknownScope: unknownScope,
+          scopeKey,
         });
         if (indexTokens + estimateTokens(candidate) <= budgetTokens) {
           chosen = sel;
@@ -547,10 +637,12 @@ export function buildMemoryCard({
   // 连空壳都放不进预算（预算小到不合理）⇒ 零展开，但**省略必须如实记数**（不许静默丢）。
   if (section === null) beyond = sorted.length;
 
-  const omittedTotal = beyond + droppedProvenance;
+  const omittedTotal = beyond + droppedProvenance + crossScope + unknownScope;
   const omittedParts = [];
   if (beyond > 0) omittedParts.push(`超出 ${limit} 条上限/预算 ${budgetTokens} tokens 的 ${beyond} 条`);
   if (droppedProvenance > 0) omittedParts.push(`无源不入 ${droppedProvenance} 条（缺 occurredAt 或 seq）`);
+  if (crossScope > 0) omittedParts.push(`跨作用域未纳入 ${crossScope} 条 [scope=${scopeKey}]`);
+  if (unknownScope > 0) omittedParts.push(`作用域未知未纳入 ${unknownScope} 条`);
   const omissions = omittedTotal > 0
     ? `omitted: ${omittedTotal} items（${omittedParts.join(' · ')}）— see index.md（未列出 ≠ 不存在）`
     : null;
@@ -571,6 +663,9 @@ export function buildMemoryCard({
       limit,
       budgetTokens,
       cardVersion: CARD_VERSION,
+      crossScope,
+      unknownScope,
+      crossScopeWalk,
       signalAt: Number.isFinite(now) ? now : null,
       clip: clipUsed,
     };
@@ -601,6 +696,9 @@ export function buildMemoryCard({
     limit,
     budgetTokens,
     cardVersion: CARD_VERSION,
+    crossScope,
+    unknownScope,
+    crossScopeWalk,
     signalAt: Number.isFinite(now) ? now : null,
     clip: clipUsed,
   };
@@ -678,6 +776,8 @@ export function degradedWalk({ signal = null, store = null, limit = ENTRY_LIMIT 
         kind: failures > 0 ? 'failure' : 'episode',
         depth: 1,
         needle,
+        // 与 R11 walk 的 hit 同形态：带棋谱自己的 scopeKey，R12/R13 判作用域时用
+        scopeKey: typeof rec?.scopeKey === 'string' ? rec.scopeKey : null,
       });
       pathRows.push({ from: signal?.kind ?? 'signal', to: topic.key, why: [topic.key] });
     }
@@ -809,7 +909,12 @@ function formatInjectText({ card, gates, signal, walk, shadow }) {
   const gateOk = gates?.ok ? 'OK' : 'FAIL';
   lines.push(`inject · shadow=true（只记录，未注入模型上下文）· 命中 ${card.hitCount} · 渲染 ${card.claims.length} · tokens ${card.tokens}/${card.budgetTokens} · gates ${gateOk}`);
   lines.push(`signal: kind=${signal.kind} · terms=${signal.terms.length} · entities=${signal.entities.length}${signal.terms.length ? ` · ${signal.terms.slice(0, 8).join(', ')}` : ''}`);
-  lines.push(`walk: ${walk.degraded ? '降级（R11 walk 未落地：词面命中 → 主题 → 棋局，深度 1）' : `R11 walk（深度 ${walk.depth ?? walk.maxDepth ?? '?'}）`} · hits=${walk.hits?.length ?? 0}`);
+  const crossScope = Number.isFinite(card.crossScope) ? card.crossScope : 0;
+  const crossScopeWalk = Number.isFinite(card.crossScopeWalk) ? card.crossScopeWalk : 0;
+  const unknownScope = Number.isFinite(card.unknownScope) ? card.unknownScope : 0;
+  const hitTotal = Number.isFinite(walk.hitCount) ? walk.hitCount : (walk.hits?.length ?? 0);
+  const inScope = Array.isArray(walk.hits) ? walk.hits.length : 0;
+  lines.push(`walk: ${walk.degraded ? '降级（R11 walk 未落地：词面命中 → 主题 → 棋局，深度 1）' : `R11 walk（深度 ${walk.depth ?? walk.maxDepth ?? '?'}）`} · 命中 ${hitTotal} · 同域 ${inScope}${(crossScope + crossScopeWalk) ? ` · 跨域已滤 ${crossScope + crossScopeWalk}` : ''}${unknownScope ? ` · 作用域未知 ${unknownScope}` : ''}`);
   lines.push('');
   lines.push(card.indexLine);
   if (card.section) {
@@ -821,7 +926,9 @@ function formatInjectText({ card, gates, signal, walk, shadow }) {
   if (shadow) lines.push(`shadow: ${shadow.path}（追加 ${shadow.appended} 行）`);
   else lines.push('shadow: 未写（加 --shadow 才落 evidence/shadow/）');
   if (gates?.ok) {
-    lines.push(`gates: OK（闸 0 / 6 / 6b / 边界：0 错）`);
+    const unver = Array.isArray(gates?.checks?.unverified) ? gates.checks.unverified : [];
+    const unverText = unver.length ? ` · unverified ${unver.reduce((n, u) => n + (u.count ?? 0), 0)}（${[...new Set(unver.map((u) => `闸${u.gate}`))].join('/')}）` : '';
+    lines.push(`gates: OK（10 道闸 + 边界：0 错${unverText}）`);
   } else {
     lines.push(`gates: FAIL（${gates?.errors?.length ?? 0} 错）`);
     for (const e of (gates?.errors ?? []).slice(0, 10)) lines.push(`  - [闸${e.gate}] ${e.code}: ${JSON.stringify(e.detail ?? null)}`);
@@ -850,13 +957,15 @@ export async function runInject({ flags = {}, positional = [], root = '' } = {})
   const at = Date.now();
   const signal = signalFromText(rawSignal, { at, kind: typeof flags.kind === 'string' ? flags.kind : 'root-message' });
   signal.scopeKey = scopeKeyFromPath(process.cwd());
+  const scope = signal.scopeKey;
 
   let walk = null;
   let walkError = null;
   const walkFn = await loadWalkRoom();
   if (walkFn) {
     try {
-      walk = walkFn({ signal, store, depth: 2, limit: ENTRY_LIMIT, budgetTokens: BUDGET_TOKENS }) ?? null;
+      // `scope` 一起传：R11 支持按作用域过滤时直接用；不支持时被忽略，由下面的 R12 侧过滤兜底。
+      walk = walkFn({ signal, store, scope, depth: 2, limit: ENTRY_LIMIT, budgetTokens: BUDGET_TOKENS }) ?? null;
     } catch (err) {
       walkError = String(err?.message ?? err);
       walk = null;
@@ -864,9 +973,38 @@ export async function runInject({ flags = {}, positional = [], root = '' } = {})
   }
   if (!walk) walk = degradedWalk({ signal, store, limit: ENTRY_LIMIT });
 
-  const card = buildMemoryCard({ signal, walkResult: walk, store, scope: signal.scopeKey, now: at });
+  // R12 侧兜底：证明不了在本域可见的命中一律不注入（方案 §4.10 默认不可见；闸 1 同判据）。
+  const hitCountRaw = Array.isArray(walk.hits) ? walk.hits.length : 0;
+  const scoped = filterHitsByScope(walk.hits ?? [], scope);
+  // R11 若已按作用域过滤（它自己记在 dropped/omitted 里），R12 侧过滤就是兜底（通常为 0）；
+  // 两边计数不重叠：walk 拒掉的根本没进 hits，所以不会和 scoped.dropped 重复。
+  const walkDropped = walk?.dropped && typeof walk.dropped === 'object' ? walk.dropped : {};
+  const walkCross = (Number.isFinite(walkDropped.crossScope) ? walkDropped.crossScope : 0)
+    + (Number.isFinite(walkDropped.scopeMissing) ? walkDropped.scopeMissing : 0);
+
+  // 之后一律用过滤后的 walk：hitCount 记过滤前的全量，hits 记真正会进卡的。
+  walk = {
+    ...walk,
+    hitCount: hitCountRaw,
+    hits: scoped.hits,
+    crossScope: scoped.dropped,
+    unknownScope: scoped.droppedUnknown,
+    crossScopeWalk: walkCross,
+  };
+
+  const card = buildMemoryCard({
+    signal,
+    walkResult: walk,
+    store,
+    scope,
+    now: at,
+    droppedCrossScope: scoped.dropped,
+    droppedUnknownScope: scoped.droppedUnknown,
+    walkCrossScope: walkCross,
+  });
+  // store + scope 一起传：闸 1/2/3/4/5/7 才能真的核（否则只是 unverified）。
   const { runGates } = await import('./gates.mjs');
-  const gates = runGates({ card, walkResult: walk });
+  const gates = runGates({ card, walkResult: walk, store, scope });
 
   let shadow = null;
   let shadowError = null;
@@ -888,7 +1026,16 @@ export async function runInject({ flags = {}, positional = [], root = '' } = {})
         ok: gates.ok && !shadowError,
         scope: signal.scopeKey,
         signal,
-        walk: { hits: walk.hits?.length ?? 0, depth: walk.depth ?? walk.maxDepth ?? null, degraded: Boolean(walk.degraded), error: walkError },
+        walk: {
+          hits: walk.hits?.length ?? 0,
+          hitTotal: Number.isFinite(walk.hitCount) ? walk.hitCount : (walk.hits?.length ?? 0),
+          crossScope: Number.isFinite(walk.crossScope) ? walk.crossScope : 0,
+          unknownScope: Number.isFinite(walk.unknownScope) ? walk.unknownScope : 0,
+          crossScopeWalk: Number.isFinite(walk.crossScopeWalk) ? walk.crossScopeWalk : 0,
+          depth: walk.depth ?? walk.maxDepth ?? null,
+          degraded: Boolean(walk.degraded),
+          error: walkError,
+        },
         card,
         gates,
         shadow,
