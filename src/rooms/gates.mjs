@@ -22,6 +22,11 @@
 // 纯函数：不读时钟、不写盘、不调模型。只有显式传入 `store` 时才读它（只读 get）。
 // 正则与行格式从 R12 inject 单源引入；裁决口径从 R10 adjudicate 单源引入 —— 两处都不复制规则。
 
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
 import {
   BUDGET_TOKENS,
   ENTRY_LIMIT,
@@ -200,6 +205,232 @@ export function looksLikeSummary(text) {
 }
 
 // ---------------------------------------------------------------------------
+// 闸 3 的真核验（validity probes）
+//
+// 契约：方案 §5.3「能机械核的才核，核不了的不装」——file（存在 + 可选 hash/mtime）、
+//       version（读 package.json 比 version）、commit（`git cat-file -e`）、none（不核）。
+// 分工：**本文件只负责"怎么核"**（`probeValidity` / `runValidityCheck`）；
+//       `runGates` 本身仍然不读盘 —— 核验结果由调用方传进 `validityResults`，
+//       没传就记 unverified（不假装合规）。
+// 纪律：单条失败只记 reason，**绝不抛**（一个坏 claim 不该让整次核验失败）。
+// ---------------------------------------------------------------------------
+
+export const VALIDITY_TYPES = Object.freeze(['none', 'file', 'version', 'commit']);
+
+/** 结果键（`claims:c-…` / `joseki:j-…`）：脚本、eval、plugin 三处共用同一口径。 */
+export function validityKeyOf(record) {
+  const id = typeof record?.id === 'string' ? record.id : '';
+  if (!id) return '';
+  return `${id.startsWith('j-') ? 'joseki' : 'claims'}:${id}`;
+}
+
+function sha256OfFile(file) {
+  return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+}
+
+/** 默认探针（真实 IO；测试可整体替换）。 */
+export const REAL_PROBE = Object.freeze({
+  stat: (p) => {
+    try {
+      return fs.statSync(p);
+    } catch {
+      return null;
+    }
+  },
+  readJson: (p) => JSON.parse(fs.readFileSync(p, 'utf8')),
+  sha256: (p) => sha256OfFile(p),
+  gitHasCommit: (sha, cwd) => {
+    try {
+      execFileSync('git', ['cat-file', '-e', `${sha}^{commit}`], { cwd, stdio: 'ignore', timeout: 5000 });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+});
+
+/**
+ * 记录里的路径 → 磁盘路径。两种历史写法都要认：
+ *   · Windows 原生：`d:/主工作区/…`、`D:\主工作区\…`
+ *   · Git Bash 风格：`/d/主工作区/…`（真实语料里确实这么写）⇒ 还原成 `d:/主工作区/…`
+ * 相对路径按 workspace 解析。
+ */
+export function resolveValidityPath(value, workspace) {
+  let raw = String(value ?? '').trim();
+  if (raw === '') return '';
+  if (/^\/[A-Za-z]\//.test(raw)) raw = `${raw.slice(1, 2)}:${raw.slice(2)}`; // /d/a/b → d:/a/b
+  if (/^[A-Za-z]:[\\/]/.test(raw)) return path.normalize(raw.replace(/\//g, path.sep));
+  if (path.isAbsolute(raw)) return path.normalize(raw);
+  if (!workspace) return '';
+  return path.resolve(String(workspace), raw);
+}
+
+/**
+ * 记录自己所属的工作区（scopeKey = `w:<path>`）：**每条按自己的作用域核**，
+ * 避免"拿 A 工作区的基准去核 B 工作区的记忆"。`fallback` 只在记录没有 scopeKey 时用。
+ */
+export function workspaceOf(record, fallback = null) {
+  const scope = typeof record?.scopeKey === 'string' ? record.scopeKey.trim() : '';
+  if (scope.startsWith('w:')) {
+    const tail = scope.slice(2);
+    if (tail && tail !== 'unknown' && tail !== '<unknown>') return path.normalize(tail.replace(/\//g, path.sep));
+  }
+  return fallback ? path.resolve(String(fallback)) : null;
+}
+
+/** `pkg@1.2.3` → `{name, version}`；不是这种形态返回 null。 */
+export function parsePackageAtVersion(value) {
+  const raw = String(value ?? '').trim();
+  const at = raw.lastIndexOf('@');
+  if (at <= 0) return null;
+  const name = raw.slice(0, at);
+  const version = raw.slice(at + 1);
+  if (!name || !version || /\s/.test(raw)) return null;
+  if (!/^(?:@[^/@\s]+\/)?[^@/\s]+$/.test(name)) return null;
+  if (!/^[0-9A-Za-z.+-]+$/.test(version)) return null;
+  return { name, version };
+}
+
+function resolveInWorkspace(value, workspace) {
+  return resolveValidityPath(value, workspace);
+}
+
+/**
+ * 核一条记录的 validity。**永不抛**：任何异常都变成 `{ok:false, reason}`。
+ *
+ * @param {object} record  claim / joseki 记录（用 `validity` 字段）
+ * @param {{workspace?:string, now?:number, probe?:object}} [opts]
+ * @returns {{type:string, value:any, ok:boolean, reason:string|null, checkedAt:number,
+ *            exists?:boolean, actual?:any, expected?:any, path?:string}}
+ */
+export function probeValidity(record, { workspace = null, now = null, probe = null } = {}) {
+  const checkedAt = Number.isFinite(now) ? Number(now) : Date.now();
+  const validity = record?.validity && typeof record.validity === 'object' ? record.validity : null;
+  const type = typeof validity?.type === 'string' ? validity.type : 'none';
+  const value = validity?.value ?? null;
+  const base = { type, value, checkedAt };
+
+  if (!VALIDITY_TYPES.includes(type)) {
+    return { ...base, ok: false, reason: `unknown-validity-type:${type}` };
+  }
+  if (type === 'none') {
+    return { ...base, ok: true, reason: null };
+  }
+
+  const io = { ...REAL_PROBE, ...(probe && typeof probe === 'object' ? probe : {}) };
+  try {
+    if (type === 'file') {
+      const file = resolveInWorkspace(value, workspace);
+      if (!file) return { ...base, ok: false, reason: 'file-needs-workspace' };
+      const st = io.stat(file);
+      if (!st || !st.isFile()) return { ...base, ok: false, reason: 'file-missing', path: file };
+      const wantMtime = Number.isFinite(validity?.mtimeMs) ? Number(validity.mtimeMs) : null;
+      if (wantMtime !== null && Math.abs(st.mtimeMs - wantMtime) > 2) {
+        return { ...base, ok: false, reason: 'file-mtime-changed', path: file, expected: wantMtime, actual: st.mtimeMs };
+      }
+      const wantHash = typeof validity?.sha256 === 'string' && validity.sha256.trim() !== '' ? validity.sha256.trim().toLowerCase() : null;
+      if (wantHash) {
+        const actual = String(io.sha256(file)).toLowerCase();
+        if (actual !== wantHash) {
+          return { ...base, ok: false, reason: 'file-hash-changed', path: file, expected: wantHash, actual };
+        }
+      }
+      return { ...base, ok: true, reason: null, path: file, exists: true };
+    }
+
+    if (type === 'version') {
+      const raw = String(value ?? '').trim();
+      const parsed = parsePackageAtVersion(raw);
+      const expected = parsed ? parsed.version : raw;
+      // 候选文件：显式 validity.file > 包名对应 package.json > workspace 的 package.json
+      const candidates = [];
+      if (typeof validity?.file === 'string' && validity.file.trim() !== '') {
+        candidates.push(resolveInWorkspace(validity.file, workspace));
+      }
+      if (parsed && workspace) {
+        candidates.push(path.resolve(String(workspace), 'node_modules', parsed.name, 'package.json'));
+        candidates.push(path.resolve(String(workspace), 'package.json'));
+      }
+      candidates.push(resolveInWorkspace('package.json', workspace));
+      const files = [...new Set(candidates.filter(Boolean))];
+      if (!files.length) return { ...base, ok: false, reason: 'version-needs-workspace' };
+
+      let readAny = false;
+      let nameMatched = false;
+      for (const file of files) {
+        let pkg;
+        try {
+          pkg = io.readJson(file);
+        } catch {
+          continue; // 这个候选不存在，换下一个
+        }
+        readAny = true;
+        // 带包名时，必须同名才算（否则就是拿错 package.json 糊弄）
+        const sameName = !parsed || typeof pkg?.name !== 'string' || pkg.name === parsed.name;
+        if (parsed && typeof pkg?.name === 'string' && pkg.name !== parsed.name) continue;
+        if (sameName) nameMatched = true;
+        const actual = typeof pkg?.version === 'string' ? pkg.version.trim() : null;
+        if (actual === null) continue;
+        if (actual !== expected) {
+          return { ...base, ok: false, reason: 'version-mismatch', path: file, package: parsed?.name ?? pkg?.name ?? null, expected, actual };
+        }
+        return { ...base, ok: true, reason: null, path: file, package: parsed?.name ?? pkg?.name ?? null, expected, actual };
+      }
+      if (!readAny) return { ...base, ok: false, reason: 'version-file-unreadable', expected, package: parsed?.name ?? null };
+      if (parsed && !nameMatched) return { ...base, ok: false, reason: 'version-package-not-found', expected, package: parsed.name };
+      return { ...base, ok: false, reason: 'version-mismatch', expected, package: parsed?.name ?? null, actual: null };
+    }
+
+    // commit
+    const sha = String(value ?? '').trim();
+    if (!workspace) return { ...base, ok: false, reason: 'commit-needs-workspace' };
+    if (!/^[0-9a-fA-F]{4,40}$/.test(sha)) return { ...base, ok: false, reason: 'commit-bad-sha', expected: sha };
+    const found = io.gitHasCommit(sha, String(workspace));
+    return { ...base, ok: found === true, reason: found === true ? null : 'commit-not-found', expected: sha };
+  } catch (error) {
+    return { ...base, ok: false, reason: `probe-error:${String(error?.message ?? error)}` };
+  }
+}
+
+/**
+ * 批量核验（脚本 / eval / plugin 共用）。
+ * @param {{records?:any, workspace?:string, now?:number, probe?:object}} opts
+ *   records：数组，或 `{claims:[…], joseki:[…]}`
+ * @returns {{results:Object<string,object>, summary:object}}
+ */
+export function runValidityCheck({ records = null, workspace = null, now = null, probe = null } = {}) {
+  const claims = Array.isArray(records?.claims) ? records.claims : (Array.isArray(records) ? records : []);
+  const joseki = Array.isArray(records?.joseki) ? records.joseki : [];
+  const results = {};
+  const summary = { total: 0, checked: 0, ok: 0, failed: 0, skipped: 0, byType: {}, failures: [] };
+
+  for (const record of [...claims, ...joseki]) {
+    const key = validityKeyOf(record);
+    if (!key) continue;
+    const type = typeof record?.validity?.type === 'string' ? record.validity.type : 'none';
+    if (type === 'none') {
+      summary.skipped += 1;
+      continue;
+    }
+    summary.total += 1;
+    summary.byType[type] = (summary.byType[type] ?? 0) + 1;
+    // 每条按**自己**的作用域核（scopeKey = w:<path>），没有 scopeKey 才退回调用方的基准
+    const recordWorkspace = workspaceOf(record, workspace);
+    const result = probeValidity(record, { workspace: recordWorkspace, now, probe });
+    result.workspace = recordWorkspace;
+    results[key] = result;
+    if (result.ok) summary.ok += 1;
+    else {
+      summary.failed += 1;
+      summary.failures.push({ key, type, reason: result.reason, expected: result.expected ?? null, actual: result.actual ?? null, path: result.path ?? null });
+    }
+    summary.checked += 1;
+  }
+
+  return { results, summary };
+}
+
+// ---------------------------------------------------------------------------
 // 记录解析（可选：把 claims/joseki/episodes 记录喂进来才能做 1/2/3/4/5/7）
 // ---------------------------------------------------------------------------
 
@@ -331,7 +562,8 @@ function sectionLines(section) {
  * @param {string} [p.scope]         当前 scopeKey（闸 1）
  * @param {Array}  [p.adjudications] R10 裁决记录（闸 2b）
  * @param {Array}  [p.evidence]      本局否定证据 `[{claimId, episode, seq, quote}]`（闸 7）
- * @param {object} [p.validityChecks]     `{[claimId]: {ok:boolean, reason?:string}}`（闸 3）
+ * @param {object} [p.validityResults]    `{"claims:c-…": {ok:boolean, reason?:string}}`（闸 3 真核验结果，`runValidityCheck` 的产物）
+ * @param {object} [p.validityChecks]     `{[claimId]: {ok:boolean, reason?:string}}`（闸 3 旧参数，保留兼容）
  * @param {object} [p.preconditionChecks] `{[claimId]: {ok:boolean, results?:Array}}`（闸 3）
  * @param {number} [p.limit]         条数上限（默认 5）
  * @param {number} [p.budgetTokens]  token 预算（默认 500）
@@ -348,6 +580,7 @@ export function runGates({
   adjudications = [],
   evidence = [],
   validityChecks = null,
+  validityResults = null,
   preconditionChecks = null,
   limit = ENTRY_LIMIT,
   budgetTokens = BUDGET_TOKENS,
@@ -525,6 +758,20 @@ export function runGates({
 
   // ---------------------------------------------------------------- 闸 3（有效性 + 适用条件）
   let validityUnresolved = 0;
+  /**
+   * 取一条记录的 validity 核验结果，三个都认：
+   *   1) `validityResults["claims:c-…"]`（gates-check / eval / plugin 的标准口径）
+   *   2) `validityResults["c-…"]`（扁平写法，兼容手搓）
+   *   3) `validityChecks["c-…"]`（M4 的旧参数，保留）
+   */
+  const validityResultOf = (record, claimId) => {
+    const key = validityKeyOf(record);
+    const fromResults = validityResults && typeof validityResults === 'object' ? validityResults : null;
+    if (fromResults && key && fromResults[key]) return fromResults[key];
+    if (fromResults && claimId && fromResults[claimId]) return fromResults[claimId];
+    if (validityChecks && typeof validityChecks === 'object' && claimId && validityChecks[claimId]) return validityChecks[claimId];
+    return null;
+  };
   for (let i = 0; i < claims.length; i += 1) {
     const c = claims[i] ?? {};
     const claimId = typeof c.claimId === 'string' ? c.claimId : null;
@@ -537,7 +784,7 @@ export function runGates({
     const isPointer = typeof c.kind === 'string' && c.kind === 'pointer';
 
     if (validityType !== 'none') {
-      const check = validityChecks && typeof validityChecks === 'object' ? validityChecks[claimId] : null;
+      const check = validityResultOf(record, claimId);
       if (!check || typeof check.ok !== 'boolean') {
         validityUnresolved += 1;
       } else {
@@ -570,7 +817,7 @@ export function runGates({
       }
     }
   }
-  unverified('3', 'gate3/validity-unchecked', validityUnresolved, '带 validity/preconditions 的条目没有核验结果（未给 validityChecks/preconditionChecks）');
+  unverified('3', 'gate3/validity-unchecked', validityUnresolved, '带 validity/preconditions 的条目没有核验结果（未给 validityResults/validityChecks；先跑 scripts/gates-check.mjs）');
 
   // ---------------------------------------------------------------- 闸 4（只增不改）
   const renderedRecords = [];
@@ -823,6 +1070,11 @@ export default {
   downgradeState,
   allowedMarkersAfterDowngrade,
   looksLikeSummary,
+  VALIDITY_TYPES,
+  validityKeyOf,
+  probeValidity,
+  runValidityCheck,
+  REAL_PROBE,
   buildResolver,
   auditImperatives,
   auditGovernance,
