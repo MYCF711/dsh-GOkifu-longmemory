@@ -15,7 +15,7 @@ const cache = createWalkCache(store);
 const t1 = performance.now();
 
 const times = [];
-for (const text of signals) {
+for (let round = 0; round < 5; round += 1) for (const text of signals) {
   const s = signalFromText(text, { at: Date.now() });
   s.scopeKey = scope;
   const a = performance.now();
@@ -29,5 +29,5 @@ const p = (q) => times[Math.min(times.length - 1, Math.floor(q * times.length))]
 console.log(JSON.stringify({
   storeRoot,
   coldCacheMs: Number((t1 - t0).toFixed(1)),
-  warm: { n: times.length, p50: Number(p(0.5).toFixed(1)), p95: Number(p(0.95).toFixed(1)), max: Number(times[times.length - 1].toFixed(1)) },
+  warm: { n: times.length, p50: Number(p(0.5).toFixed(1)), p90: Number(p(0.9).toFixed(1)), p95: Number(p(0.95).toFixed(1)), max: Number(times[times.length - 1].toFixed(1)) },
 }, null, 2));
