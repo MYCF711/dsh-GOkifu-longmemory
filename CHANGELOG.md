@@ -2,6 +2,27 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.8.0（2026-11-02）
+
+M5 收口：六轴一条命令可复算 + 安装指南。
+
+### 新增
+- **`scripts/m5-report.mjs`**：一条命令算 A1–A6（`--store --workspace --json --evidence`）；每轴 `{value,unit,n,status}`；缺数据记 `not-consumed`（**不写 0**）；零模型调用。
+- **`docs/安装指南.md`**：前置检查 → 影子模式 → 看数据 → 真注入 → 回滚 → 已知限制（明确"安装由主人执行"）。
+- **`test/m5-report.test.mjs`**：六轴结构、A6 100%、A1 无 validity 时 not-consumed。
+
+### 六轴真实值（2026-11-02 04:57，零模型调用）
+| 轴 | 值 | 状态 |
+|---|---|---|
+| A1 `staleTransferRate` | 0.00%（9 条；**覆盖率 0/8，空转**） | measured（vacuous） |
+| A2 `repeatFailureRate（LOO）` | **13.33%**（14/105；1σ±3.32%；coverage 79.2%） | measured |
+| A3 `injectFailureRate` | 0.00% | **not-live**（未上线） |
+| A4 p50 | **4.11 ms**（n=50） | measured |
+| A5 `crossScopeLeakRate` | 0.00%（n=6 卡） | measured |
+| A6 `provenanceCoverage` | **100%**（n=6 卡） | measured |
+
+> 纪律：A2 是机械代理、不是收益；A1 的 0% 是空转；A3 未上线。三条都写进报告，不许对外省略。
+
 ## 0.7.1（2026-11-02）
 
 定式 0 的根因查清：补了"命令成功"语义，仍不足以长出定式。
