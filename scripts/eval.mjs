@@ -745,6 +745,261 @@ export function renderEvidenceMarkdown(report) {
 }
 
 // ---------------------------------------------------------------------------
+// H1（负迁移）机械代理：staleTransferRate
+//
+// 口径（分子/分母/时点写死）：
+//   注入条目 = 一组信号跑 walk -> buildMemoryCard 后**真正渲染进卡片**的 claim 行（带 claimId 的）
+//   stale     = 这些条目里，validity 核验结果为 ok:false 的条数（核验走 R13 的 probeValidity，
+//               每条按它自己的 scopeKey 解析工作区）
+//   staleTransferRate = stale / 注入条目数        <- 分母为 0 时返回 null（不编造 0）
+// 为什么这是 H1 的机械代理：负迁移最直接的形态就是"把已经不成立的旧记忆当断言注入"。
+// 时点：generatedAt + 每条 checkedAt；语料是 store 的**当前**快照（跨时点不可比）。
+// 零模型调用；只读 store / 工作区；唯一写入口是 --evidence。
+// ---------------------------------------------------------------------------
+
+export const H1_VERSION = 1;
+
+/**
+ * 跑一次 H1 评测。
+ * @param {{storeRoot:string, workspace?:string, signals?:number, limit?:number,
+ *          budgetTokens?:number, now?:number, probe?:object}} opts
+ * @returns {Promise<object>} report
+ */
+export async function runH1(opts = {}) {
+  const started = Date.now();
+  const storeRoot = path.resolve(opts.storeRoot ?? path.join(process.env.DSH_HOME ?? '', 'memory-context'));
+  const workspace = path.resolve(opts.workspace ?? process.cwd());
+  const signalCount = Number.isFinite(opts.signals) ? Math.max(1, Math.floor(opts.signals)) : 20;
+  const limit = Number.isFinite(opts.limit) ? opts.limit : 5;
+  const budgetTokens = Number.isFinite(opts.budgetTokens) ? opts.budgetTokens : 500;
+  const now = Number.isFinite(opts.now) ? opts.now : Date.now();
+
+  if (!fs.existsSync(storeRoot)) throw new Error(`H1: 记忆库不存在：${storeRoot}`);
+
+  const { createStore } = await import('../src/rooms/persist.mjs');
+  const { signalFromText, buildMemoryCard, scopeKeyFromPath, degradedWalk } = await import('../src/rooms/inject.mjs');
+  const { runGates, runValidityCheck, workspaceOf } = await import('../src/rooms/gates.mjs');
+  const walkRoom = await import('../src/rooms/walk.mjs').catch(() => null);
+
+  const store = createStore({ root: storeRoot });
+  const read = (kind) => {
+    try {
+      return store.list(kind).map((x) => x?.record).filter((r) => r && typeof r === 'object');
+    } catch {
+      return [];
+    }
+  };
+  const claims = read('claims');
+  const joseki = read('joseki');
+  const validity = runValidityCheck({ records: { claims, joseki }, workspace, now, probe: opts.probe ?? null });
+  const validityByKey = validity.results;
+
+  // 信号集：主题库按 df 降序取前 N 个（去重、长度 >= 3），机械、可复算
+  const topics = read('topics').sort((a, b) => ((b.df ?? 0) - (a.df ?? 0)) || String(a.key ?? '').localeCompare(String(b.key ?? '')));
+  const signals = [];
+  const seen = new Set();
+  for (const topic of topics) {
+    const key = String(topic.key ?? '');
+    if (key.length < 3 || seen.has(key)) continue;
+    seen.add(key);
+    signals.push(key);
+    if (signals.length >= signalCount) break;
+  }
+
+  const scope = scopeKeyFromPath(workspace);
+  const perSignal = [];
+  // 主口径（任务书定义）：卡片里带 claimId 的渲染行 = 被注入的断言；其中 validity 核不过的就是 stale
+  // 按 **claimId 去重**：同一个断言被多条信号命中只算一次（否则信号集一变大，比率就失真）
+  const injectedIds = new Set();
+  const staleIds = new Set();
+  // 闸门后的口径：只看 gates.ok 的卡片 —— 用来看"闸 3 有没有把这些 stale 兜住"
+  const postGateIds = new Set();
+  const postGateStaleIds = new Set();
+  const renderedIds = new Set(); // 所有被渲染过的 claimId（用来看"带 validity 的条目有没有被覆盖到"）
+  let cardsWithContent = 0;
+  let gateFailures = 0;
+  let zeroInjection = 0;
+  let tokensTotal = 0;
+
+  // 信号集 = 话题集（df 前 N）+ **针对性集**（每条带 validity 的 claim 用自己的文本当信号）。
+  // 后者保证"过期条目"真的被问到过 —— 否则分子恒为 0，指标就没有消费者。
+  const signalSpecs = signals.map((key) => ({ kind: 'topic', text: `${key} 相关的问题`, scopeKey: scope, label: key }));
+  for (const record of [...claims, ...joseki]) {
+    const type = typeof record?.validity?.type === 'string' ? record.validity.type : 'none';
+    if (type === 'none') continue;
+    const text = typeof record.text === 'string' && record.text.trim() !== '' ? record.text.trim() : (typeof record.title === 'string' ? record.title : '');
+    if (!text) continue;
+    const recordWorkspace = workspaceOf(record, workspace);
+    signalSpecs.push({
+      kind: 'validity',
+      text,
+      scopeKey: recordWorkspace ? `w:${String(recordWorkspace).replace(/\\/g, '/')}` : scope,
+      label: record.id ?? '(joseki)',
+    });
+  }
+
+  for (const spec of signalSpecs) {
+    const signal = signalFromText(spec.text, { at: now });
+    signal.scopeKey = spec.scopeKey;
+    let walk = null;
+    if (walkRoom && typeof walkRoom.walkFromSignals === 'function') {
+      walk = walkRoom.walkFromSignals({ signal, store, scope: spec.scopeKey, depth: 2, limit, budgetTokens });
+    }
+    if (!walk) walk = degradedWalk({ signal, store, limit });
+    const card = buildMemoryCard({ signal, walkResult: walk, store, scope: spec.scopeKey, now, limit, budgetTokens });
+    const gates = runGates({ card, walkResult: walk, store, scope: spec.scopeKey, validityResults: validityByKey });
+    const rows = (card.claims ?? []).filter((c) => typeof c.claimId === 'string');
+    const staleRows = rows.filter((c) => {
+      const res = validityByKey[`claims:${c.claimId}`] ?? validityByKey[c.claimId] ?? null;
+      return Boolean(res && res.ok === false);
+    });
+    for (const row of rows) renderedIds.add(row.claimId);
+    for (const row of rows) injectedIds.add(row.claimId);
+    for (const row of staleRows) staleIds.add(row.claimId);
+    if (gates.ok) {
+      for (const row of rows) postGateIds.add(row.claimId);
+      for (const row of staleRows) postGateStaleIds.add(row.claimId);
+    }
+    tokensTotal += card.tokens ?? 0;
+    if (!gates.ok) gateFailures += 1;
+    if (card.section === null) zeroInjection += 1;
+    if (rows.length > 0) cardsWithContent += 1;
+    perSignal.push({
+      kind: spec.kind,
+      signal: spec.label,
+      claims: rows.length,
+      stale: staleRows.length,
+      staleIds: staleRows.map((c) => c.claimId),
+      tokens: card.tokens ?? 0,
+      gatesOk: gates.ok,
+      zeroInjection: card.section === null,
+      errors: [...new Set((gates.errors ?? []).map((e) => e.code))],
+    });
+  }
+
+  const injected = injectedIds.size;
+  const staleInjected = staleIds.size;
+  const postGateInjected = postGateIds.size;
+  const postGateStale = postGateStaleIds.size;
+  const validityIds = [...claims, ...joseki]
+    .filter((r) => typeof r?.validity?.type === 'string' && r.validity.type !== 'none' && typeof r.id === 'string')
+    .map((r) => r.id);
+  const validityRendered = validityIds.filter((id) => renderedIds.has(id)).length;
+  const rate = injected > 0 ? staleInjected / injected : null;
+  const postGateStaleRate = postGateInjected > 0 ? postGateStale / postGateInjected : null;
+  return {
+    version: H1_VERSION,
+    generatedAt: now,
+    elapsedMs: Date.now() - started,
+    storeRoot,
+    workspace,
+    scope,
+    signals: signalSpecs.length,
+    limit,
+    budgetTokens,
+    validityCoverage: { withValidity: validityIds.length, rendered: validityRendered },
+    validity: {
+      total: validity.summary.total,
+      ok: validity.summary.ok,
+      failed: validity.summary.failed,
+      byType: validity.summary.byType,
+    },
+    injected,
+    staleInjected,
+    staleTransferRate: rate,
+    postGateInjected,
+    postGateStale,
+    postGateStaleRate,
+    signalsByKind: {
+      topic: signalSpecs.filter((x) => x.kind === 'topic').length,
+      validity: signalSpecs.filter((x) => x.kind === 'validity').length,
+    },
+    cardsWithContent,
+    zeroInjection,
+    gateFailures,
+    tokensTotal,
+    perSignal,
+  };
+}
+
+export function formatH1Report(report) {
+  const pct = (x) => (x === null || x === undefined ? 'n/a' : `${(x * 100).toFixed(2)}%`);
+  const lines = [];
+  lines.push('棋院 H1 机械代理 · staleTransferRate（零模型调用）');
+  lines.push(`记忆库（只读）：${report.storeRoot}`);
+  lines.push(`工作区（只读）：${report.workspace}（scope=${report.scope}）`);
+  lines.push('');
+  lines.push('口径：注入条目 = 卡片里带 claimId 的渲染行；stale = 这些条目 validity 核不过（ok:false）；rate = stale / 注入条目；分母 0 记 null');
+  lines.push('');
+  lines.push(`信号：${report.signals} 条（主题库 df 降序前 N）· 有内容卡片 ${report.cardsWithContent} · 零注入 ${report.zeroInjection} · 闸不过 ${report.gateFailures}`);
+  lines.push(`validity 面：带 validity ${report.validity.total} 条（通过 ${report.validity.ok} · 不过 ${report.validity.failed}）`);
+  lines.push(`注入条目：${report.injected} · 其中 stale：${report.staleInjected}`);
+  lines.push(`staleTransferRate = ${pct(report.staleTransferRate)}（${report.staleInjected} / ${report.injected}）`);
+  lines.push(`闸门后：注入 ${report.postGateInjected} · stale ${report.postGateStale} · postGateStaleRate = ${pct(report.postGateStaleRate)}`);
+  lines.push(`覆盖率：带 validity 的条目 ${report.validityCoverage.withValidity} 条，其中被渲染过 ${report.validityCoverage.rendered} 条（覆盖率 0 说明这个指标还没被真正锻炼到）`);
+  lines.push('');
+  lines.push(`耗时 ${report.elapsedMs} ms · 写入 0（唯一写入口是 --evidence）`);
+  return lines.join('\n');
+}
+
+export function renderH1Markdown(report) {
+  const pct = (x) => (x === null || x === undefined ? 'n/a' : `${(x * 100).toFixed(2)}%`);
+  const iso = new Date(report.generatedAt).toISOString();
+  const lines = [];
+  lines.push('# M5 · H1 机械代理（staleTransferRate）');
+  lines.push('');
+  lines.push('> 生成：`node scripts/eval.mjs --h1 --store tmp/memory-context --workspace . --evidence evidence/M5-h1.md`');
+  lines.push(`> 时点：${iso}（generatedAt）· 版本：eval H1 v${report.version}`);
+  lines.push('');
+  lines.push('## 1 · 口径（分子/分母/时点）');
+  lines.push('');
+  lines.push('| 项 | 定义 |');
+  lines.push('|---|---|');
+  lines.push('| 注入条目 | 一组信号跑 `walk -> buildMemoryCard` 后，卡片里**带 claimId** 的渲染行（= 本来会被注入的断言） |');
+  lines.push('| stale | 上述条目中 `validity` 核验 `ok:false` 的条数（`probeValidity`，每条按自己的 scopeKey 解析工作区） |');
+  lines.push('| **staleTransferRate** | **stale / 注入条目**；分母为 0 时记 `null`（不把"没有样本"写成 0） |');
+  lines.push('| 时点 | 语料是 store 的当前快照；跨时点不可比 |');
+  lines.push('');
+  lines.push('## 2 · 样本');
+  lines.push('');
+  lines.push('| 项 | 值 |');
+  lines.push('|---|---|');
+  lines.push(`| 记忆库 | \`${report.storeRoot}\`（只读） |`);
+  lines.push(`| 工作区 | \`${report.workspace}\`（scope=\`${report.scope}\`） |`);
+  lines.push(`| 信号 | ${report.signals} 条（主题库 df 降序前 N） |`);
+  lines.push(`| 有内容卡片 | ${report.cardsWithContent} / ${report.signals} |`);
+  lines.push(`| 零注入卡片 | ${report.zeroInjection} / ${report.signals} |`);
+  lines.push(`| 闸不过卡片 | ${report.gateFailures} / ${report.signals} |`);
+  lines.push(`| 带 validity 的记录 | ${report.validity.total}（通过 ${report.validity.ok} · 不过 ${report.validity.failed}） |`);
+  lines.push(`| 注入条目 | ${report.injected} |`);
+  lines.push(`| 其中 stale | ${report.staleInjected} |`);
+  lines.push('');
+  lines.push(`## 3 · 结果：**staleTransferRate = ${pct(report.staleTransferRate)}**（${report.staleInjected} / ${report.injected}）`);
+  lines.push('');
+  lines.push(`闸门后（gates.ok 的卡片）：注入 ${report.postGateInjected} · stale ${report.postGateStale} · **postGateStaleRate = ${pct(report.postGateStaleRate)}**（闸 3 把 stale 兜住时应为 0）`);
+  lines.push('');
+  lines.push(`信号构成：话题 ${report.signalsByKind.topic} 条 + 针对性（带 validity 的条目自己的文本）${report.signalsByKind.validity} 条`);
+  lines.push('');
+  lines.push(`覆盖率：带 validity 的条目 ${report.validityCoverage.withValidity} 条中，被本次信号集渲染过 **${report.validityCoverage.rendered}** 条。覆盖率为 0 ⇒ 分子恒为 0，此时 0% 不代表"没风险"，只代表"没锻炼到"。`);
+  lines.push('');
+  lines.push('## 4 · 逐信号明细');
+  lines.push('');
+  lines.push('| 信号 | 注入 | stale | tokens | 闸 | 零注入 | 报错码 |');
+  lines.push('|---|---|---|---|---|---|---|');
+  for (const row of report.perSignal) {
+    lines.push(`| \`${row.signal}\` | ${row.claims} | ${row.stale} | ${row.tokens} | ${row.gatesOk ? 'OK' : 'FAIL'} | ${row.zeroInjection ? '是' : ''} | ${row.errors.join(', ') || ''} |`);
+  }
+  lines.push('');
+  lines.push('## 5 · 怎么读');
+  lines.push('');
+  lines.push('- 这是**机械代理**，不是端到端负迁移：它只覆盖"注入的断言里有已知过期项"这一种形态。');
+  lines.push('- 分母很小（本机语料里 validity 面只有个位数）时比率会剧烈波动：先看分子/分母，再谈比率。');
+  lines.push('- 与 `evidence/M5-eval.md` 的 `repeatFailureRate` 一起看：一个衡量收益，一个衡量负迁移。');
+  lines.push('');
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -753,6 +1008,7 @@ export const USAGE = `棋院 eval（M5 机械评测，零模型调用）
 用法：
   node scripts/eval.mjs [--root <dataRoot>] [--store <memoryRoot>] [--source both|edge|event]
                         [--json] [--evidence <path>]
+  node scripts/eval.mjs --h1 [--store <memoryRoot>] [--workspace <dir>] [--signals <n>]
 
 选项：
   --root <dir>     数据根（默认 $DSH_HOME）：只读会话日志/棋谱
@@ -760,6 +1016,9 @@ export const USAGE = `棋院 eval（M5 机械评测，零模型调用）
   --source <mode>  失败来源：both（默认，逐局优先 edge，无失败边用 event）| edge | event
   --json           输出 JSON（含逐局明细与三口径对照）
   --evidence <p>   写 markdown 证据文件（唯一写入口）
+  --h1             H1 机械代理：一组信号跑 walk->card，算 staleTransferRate（负迁移）
+  --workspace <d>  H1 的核验基准工作区（默认当前目录；每条按自己的 scopeKey 优先）
+  --signals <n>    H1 信号条数（默认 20，取自主题库 df 降序）
   -h, --help       本帮助
 `;
 
@@ -779,6 +1038,11 @@ export function parseArgs(argv = []) {
     else if (a.startsWith('--source=')) flags.source = a.slice('--source='.length);
     else if (a === '--evidence') flags.evidence = args.shift();
     else if (a.startsWith('--evidence=')) flags.evidence = a.slice('--evidence='.length);
+    else if (a === '--h1') flags.h1 = true;
+    else if (a === '--workspace') flags.workspace = args.shift();
+    else if (a.startsWith('--workspace=')) flags.workspace = a.slice('--workspace='.length);
+    else if (a === '--signals') flags.signals = Number(args.shift());
+    else if (a.startsWith('--signals=')) flags.signals = Number(a.slice('--signals='.length));
     else if (a === '--now') flags.now = Number(args.shift());
     else if (a.startsWith('--')) flags[a.slice(2)] = true;
     else positional.push(a);
@@ -786,9 +1050,42 @@ export function parseArgs(argv = []) {
   return { flags, positional };
 }
 
+/**
+ * H1 的 CLI 分支：不需要数据根（只读 store + 工作区），默认证据路径 evidence/M5-h1.md。
+ * 写盘只有 --evidence 一处（默认 evidence/M5-h1.md；--no-write 可关）。
+ */
+async function runH1Cli(flags = {}) {
+  const home = typeof process.env.DSH_HOME === 'string' ? process.env.DSH_HOME : '';
+  const storeRoot = flags.store ? path.resolve(flags.store) : (home ? path.join(home, 'memory-context') : null);
+  if (!storeRoot) return { code: 2, stdout: '', stderr: 'H1 需要 --store <dir> 或 $DSH_HOME' };
+  try {
+    const report = await runH1({
+      storeRoot,
+      workspace: flags.workspace ? path.resolve(flags.workspace) : process.cwd(),
+      signals: Number.isFinite(flags.signals) ? flags.signals : undefined,
+      now: Number.isFinite(flags.now) ? flags.now : undefined,
+    });
+    let evidence = null;
+    if (!flags['no-write']) {
+      const raw = typeof flags.evidence === 'string' && flags.evidence !== '' ? flags.evidence : 'evidence/M5-h1.md';
+      const abs = path.resolve(raw);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, renderH1Markdown(report));
+      evidence = abs;
+    }
+    if (flags.json) return { code: 0, stdout: JSON.stringify({ ...report, evidence }, null, 2), stderr: '' };
+    const text = `${formatH1Report(report)}${evidence ? `
+证据已写：${evidence}` : ''}`;
+    return { code: 0, stdout: text, stderr: '' };
+  } catch (err) {
+    return { code: 1, stdout: '', stderr: `H1 评测失败：${String(err?.message ?? err)}` };
+  }
+}
+
 export async function runCli(argv = []) {
   const { flags } = parseArgs(argv);
   if (flags.help) return { code: 0, stdout: USAGE, stderr: '' };
+  if (flags.h1) return runH1Cli(flags);
   const dataRoot = path.resolve(flags.root ?? process.env.DSH_HOME ?? '');
   if (!dataRoot) return { code: 2, stdout: '', stderr: `需要 --root <dataRoot> 或 $DSH_HOME\n\n${USAGE}` };
   if (flags.source && !SOURCE_MODES.includes(flags.source)) {
