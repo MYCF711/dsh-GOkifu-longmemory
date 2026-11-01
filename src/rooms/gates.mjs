@@ -203,7 +203,7 @@ export function looksLikeSummary(text) {
 // 记录解析（可选：把 claims/joseki/episodes 记录喂进来才能做 1/2/3/4/5/7）
 // ---------------------------------------------------------------------------
 
-export function buildResolver({ records = null, store = null } = {}) {
+export function buildResolver({ records = null, store = null, cache = null } = {}) {
   const buckets = { claims: new Map(), joseki: new Map(), episodes: new Map() };
   const put = (kind, record, fallbackId = null) => {
     if (!record || typeof record !== 'object' || Array.isArray(record)) return;
@@ -244,6 +244,12 @@ export function buildResolver({ records = null, store = null } = {}) {
     get(kind, id) {
       if (typeof id !== 'string' || !id) return null;
       if (buckets[kind]?.has(id)) return buckets[kind].get(id);
+      if (cache && typeof cache.get === 'function') {
+        try {
+          const hit = cache.get(kind, id);
+          if (hit) return hit;
+        } catch { /* 缓存不可用就退回 store */ }
+      }
       if (storeOk) {
         try {
           return store.get(kind, id) ?? null;
@@ -337,6 +343,7 @@ export function runGates({
   walkResult = null,
   records = null,
   store = null,
+  cache = null,
   scope = null,
   adjudications = [],
   evidence = [],
@@ -381,7 +388,7 @@ export function runGates({
   const claims = Array.isArray(card.claims) ? card.claims : [];
   const section = typeof card.section === 'string' ? card.section : null;
   checks.claims = claims.length;
-  const resolver = buildResolver({ records, store });
+  const resolver = buildResolver({ records, store, cache });
 
   // ---------------------------------------------------------------- 闸 0（时间戳前置）
   const indexLine = typeof card.indexLine === 'string' ? card.indexLine.trim() : '';
