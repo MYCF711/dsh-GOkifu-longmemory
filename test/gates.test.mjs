@@ -12,7 +12,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -28,6 +29,7 @@ import {
   isScopeVisible,
   normalizeScope,
   runGates,
+  runValidityCheck,
 } from '../src/rooms/gates.mjs';
 import {
   BUDGET_TOKENS,
@@ -81,6 +83,18 @@ function makeCard(hits = hitsOf(), overrides = {}) {
     ...overrides,
   });
 }
+
+const wsDirs = [];
+function wsDir() {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifuin-gates-ws-'));
+  wsDirs.push(dir);
+  return dir;
+}
+test.after(() => {
+  for (const dir of wsDirs) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* 清理失败不影响结论 */ }
+  }
+});
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const codes = (res) => res.errors.map((e) => e.code);
@@ -831,4 +845,81 @@ test('R13: 十道闸同时喂满 ⇒ ok:true 且没有 unverified（判得到就
   assert.equal(res.checks.immutabilityChecked, 1);
   assert.equal(res.checks.provenanceChecked, 1);
   assert.equal(res.checks.adjudications, 1);
+});
+
+// ---------------------------------------------------------------- 闸 3 真核验（T12）
+
+test('R13 闸3: validityResults（`claims:<id>` 键）—— 核过 ⇒ 过；核不过 ⇒ 必须 stale 且只给指针', () => {
+  const record = rec({ validity: { type: 'file', value: 'src/rooms/gates.mjs' } });
+  const { card, records } = cardFrom({ record });
+
+  const ok = runWith({ card, records, validityResults: { [`claims:${CLAIM_ID}`]: { ok: true, reason: null, checkedAt: T(20) } } });
+  assert.equal(ok.ok, true, JSON.stringify(ok.errors));
+  assert.equal(ok.checks.validityChecked, 1, '核验结果被真用上了（不是 unverified）');
+  assert.equal(ok.checks.unverified.some((u) => u.code === 'gate3/validity-unchecked'), false);
+
+  const failed = runWith({ card, records, validityResults: { [`claims:${CLAIM_ID}`]: { ok: false, reason: 'file-missing', checkedAt: T(20) } } });
+  assert.equal(failed.ok, false);
+  assert.ok(hasCode(failed, 'gate3/stale-not-marked'));
+  assert.equal(failed.errors.find((e) => e.code === 'gate3/stale-not-marked').detail.reason, 'file-missing');
+
+  // 降级成 stale 指针 ⇒ 合规
+  const pointerCard = clone(card);
+  pointerCard.claims[0].kind = 'pointer';
+  pointerCard.claims[0].state = 'stale';
+  pointerCard.claims[0].marker = 'stale';
+  pointerCard.claims[0].line = pointerCard.claims[0].line.split('[candidate]').join('[stale]');
+  pointerCard.section = pointerCard.section.split('[candidate]').join('[stale]');
+  retoken(pointerCard);
+  const pointerRes = runWith({ card: pointerCard, records, validityResults: { [`claims:${CLAIM_ID}`]: { ok: false } } });
+  assert.equal(pointerRes.ok, true, JSON.stringify(pointerRes.errors));
+
+  // 降级成 stale 但还在渲染正文 ⇒ gate3/stale-rendered
+  const staleBody = clone(card);
+  staleBody.claims[0].state = 'stale';
+  staleBody.claims[0].marker = 'stale';
+  staleBody.claims[0].line = staleBody.claims[0].line.split('[candidate]').join('[stale]');
+  staleBody.section = staleBody.section.split('[candidate]').join('[stale]');
+  retoken(staleBody);
+  const staleBodyRes = runWith({ card: staleBody, records, validityResults: { [`claims:${CLAIM_ID}`]: { ok: false } } });
+  assert.equal(staleBodyRes.ok, false);
+  assert.ok(hasCode(staleBodyRes, 'gate3/stale-rendered'));
+});
+
+test('R13 闸3: validityResults 认扁平键 `{<id>: …}`；只给别人的结果仍算 unverified', () => {
+  const record = rec({ validity: { type: 'file', value: 'a.mjs' } });
+  const { card, records } = cardFrom({ record });
+
+  const flat = runWith({ card, records, validityResults: { [CLAIM_ID]: { ok: false } } });
+  assert.equal(flat.ok, false);
+  assert.ok(hasCode(flat, 'gate3/stale-not-marked'), '扁平键也要认');
+
+  const otherOnly = runWith({ card, records, validityResults: { 'claims:c-other999': { ok: true } } });
+  assert.equal(otherOnly.ok, true);
+  assert.ok(otherOnly.checks.unverified.some((u) => u.code === 'gate3/validity-unchecked'), '没核到就如实记 unverified');
+  assert.equal(otherOnly.checks.validityChecked, 0);
+});
+
+test('R13 闸3: 真探针端到端 —— 文件在 ⇒ 过；文件不在 ⇒ 核不过 ⇒ stale 才合规', () => {
+  const ws = wsDir();
+  const file = path.join(ws, 'there.txt');
+  writeFileSync(file, 'x');
+  // 用绝对路径做 value：记录的 scopeKey 仍是卡片的 SCOPE（闸 1 才过），核验与作用域互不牵连
+  const baseRecord = rec({ validity: { type: 'file', value: file, sha256: createHash('sha256').update('x').digest('hex') } });
+  const okCheck = runValidityCheck({ records: { claims: [baseRecord] }, workspace: ws, now: T(20) });
+  assert.equal(okCheck.results[`claims:${CLAIM_ID}`].ok, true);
+
+  const okCard = cardFrom({ record: baseRecord });
+  const okRes = runWith({ card: okCard.card, records: okCard.records, validityResults: okCheck.results });
+  assert.equal(okRes.ok, true, JSON.stringify(okRes.errors));
+  assert.equal(okRes.checks.validityChecked, 1);
+
+  // 文件内容变了（hash 对不上）⇒ 核不过 ⇒ 必须 stale
+  writeFileSync(file, 'changed');
+  const badCheck = runValidityCheck({ records: { claims: [baseRecord] }, workspace: ws, now: T(20) });
+  assert.equal(badCheck.results[`claims:${CLAIM_ID}`].ok, false);
+  assert.equal(badCheck.results[`claims:${CLAIM_ID}`].reason, 'file-hash-changed');
+  const badRes = runWith({ card: okCard.card, records: okCard.records, validityResults: badCheck.results });
+  assert.equal(badRes.ok, false);
+  assert.ok(hasCode(badRes, 'gate3/stale-not-marked'));
 });

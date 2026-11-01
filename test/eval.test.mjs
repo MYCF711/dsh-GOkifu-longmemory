@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import {
   runEval, evaluateLoo, normalizeErrorSignature, isDegenerateSignature, pickErrorLine,
   eventFailureSignals, parseArgs, runCli, renderEvidenceMarkdown, formatReport,
+  runH1, formatH1Report, renderH1Markdown,
 } from '../scripts/eval.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
 
@@ -427,4 +428,129 @@ test('eval: CLI —— --json 结构 + --evidence 写 markdown + 参数解析', 
   const help = await runCli(['--help']);
   assert.equal(help.code, 0);
   assert.match(help.stdout, /零模型调用/);
+});
+
+// ---------------------------------------------------------------------------
+// T12 · H1 机械代理（staleTransferRate）
+// ---------------------------------------------------------------------------
+
+/** 造一个最小 store：一局 + 一个主题 + 一条 claim（作用域 = 给定 workspace）。 */
+function makeH1Store(workspace, claim) {
+  const storeRoot = mkdtempSync(path.join(tmp, 'h1-store-'));
+  const scope = `w:${path.resolve(workspace).replace(/\\/g, '/')}`;
+  const store = createStore({ root: storeRoot, now: ARCHIVE_TS });
+  store.ensureDirs();
+  store.putMany('episodes', [{
+    id: 'ep-h1aaaaaa',
+    sessionId: 'session-h1aaaaaa-0000-4000-8000-000000000000',
+    scopeKey: scope,
+    startedAt: ARCHIVE_TS - 1000,
+    endedAt: ARCHIVE_TS - 500,
+    firstEventAt: ARCHIVE_TS - 1000,
+    lastEventAt: ARCHIVE_TS - 500,
+    recordedAt: ARCHIVE_TS,
+    delegationDepth: 0,
+    closure: { logPath: null, graphPath: null, seqFrom: 1, seqTo: 9, eventCount: 9, nodeIds: [], edgeIds: [] },
+    l0: 'h1 fixture',
+    signals: { failures: 1, successes: 0, unsettled: 0, constraints: 0, tools: [] },
+    state: 'archived',
+  }]);
+  store.replaceDerived('topics', [{
+    id: 't:term:h1aaaa01',
+    kind: 'term',
+    key: 'yaml',
+    df: 2,
+    idfNorm: 0.7,
+    firstSeenAt: ARCHIVE_TS - 1000,
+    lastSeenAt: ARCHIVE_TS - 500,
+    episodes: ['ep-h1aaaaaa'],
+  }], { at: ARCHIVE_TS });
+  store.putMany('claims', [{
+    id: 'c-h1aaaa01',
+    kind: 'antipattern',
+    text: "Cannot find module 'yaml'",
+    scopeKey: scope,
+    threadIds: [],
+    state: 'observed',
+    support: [{ episode: 'ep-h1aaaaaa', seq: 30, quote: 'Error: boom' }],
+    counter: [],
+    ...claim,
+    occurredAt: ARCHIVE_TS - 900,
+    recordedAt: ARCHIVE_TS,
+    counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null },
+    supersedes: null,
+  }]);
+  return { storeRoot, scope };
+}
+
+test('T12 H1: validity 核不过且仍被注入 ⇒ staleTransferRate = 1（1/1）', async () => {
+  const ws = mkdtempSync(path.join(tmp, 'h1-ws-'));
+  const { storeRoot } = makeH1Store(ws, { validity: { type: 'file', value: 'definitely-missing.mjs' } });
+  const report = await runH1({ storeRoot, workspace: ws, signals: 5, now: ARCHIVE_TS });
+  assert.equal(report.signals, 2, '1 条话题信号 + 1 条针对性信号（带 validity 的条目用自己的文本）');
+  assert.equal(report.injected, 1, 'claim 行被渲染出来了');
+  assert.equal(report.staleInjected, 1);
+  assert.equal(report.staleTransferRate, 1);
+  assert.equal(report.staleInjected, report.injected, '每条注入都是 stale');
+  assert.equal(report.postGateStaleRate, null, '闸 3 把它们全挡下了 ⇒ 闸门后没有样本');
+  assert.equal(report.validity.total, 1);
+  assert.equal(report.validity.failed, 1);
+});
+
+test('T12 H1: validity 核过 ⇒ 同样的注入但 staleTransferRate = 0', async () => {
+  const ws = mkdtempSync(path.join(tmp, 'h1-ws-'));
+  writeFileSync(path.join(ws, 'present.mjs'), 'ok');
+  const { storeRoot } = makeH1Store(ws, { validity: { type: 'file', value: 'present.mjs' } });
+  const report = await runH1({ storeRoot, workspace: ws, signals: 5, now: ARCHIVE_TS });
+  assert.equal(report.injected, 1);
+  assert.equal(report.staleInjected, 0);
+  assert.equal(report.staleTransferRate, 0);
+  assert.equal(report.postGateStaleRate, 0, '核得过的条目闸门后照常注入');
+  assert.equal(report.validity.ok, 1);
+});
+
+test('T12 H1: 没有注入条数 ⇒ rate 记 null（不把"没样本"写成 0）', async () => {
+  const ws = mkdtempSync(path.join(tmp, 'h1-ws-'));
+  const storeRoot = mkdtempSync(path.join(tmp, 'h1-empty-'));
+  createStore({ root: storeRoot, now: ARCHIVE_TS }).ensureDirs();
+  const report = await runH1({ storeRoot, workspace: ws, signals: 5, now: ARCHIVE_TS });
+  assert.equal(report.signals, 0);
+  assert.equal(report.injected, 0);
+  assert.equal(report.staleTransferRate, null);
+  assert.match(formatH1Report(report), /n\/a/);
+});
+
+test('T12 H1: 证据 markdown 含口径/样本/时点/复现命令/结果', async () => {
+  const ws = mkdtempSync(path.join(tmp, 'h1-ws-'));
+  const { storeRoot } = makeH1Store(ws, { validity: { type: 'file', value: 'gone.mjs' } });
+  const report = await runH1({ storeRoot, workspace: ws, signals: 1, now: ARCHIVE_TS });
+  const md = renderH1Markdown(report);
+  assert.match(md, /staleTransferRate/);
+  assert.match(md, /分子\/分母\/时点/);
+  assert.match(md, /node scripts\/eval\.mjs --h1/);
+  assert.match(md, /时点：\d{4}-\d{2}-\d{2}T/);
+  assert.match(md, /staleTransferRate = 100\.00%/);
+  assert.match(md, /yaml/);
+});
+
+test('T12 H1: CLI --h1 --json 结构与默认写 evidence（写到 tmp，不写仓库）', async () => {
+  const ws = mkdtempSync(path.join(tmp, 'h1-ws-'));
+  const { storeRoot } = makeH1Store(ws, { validity: { type: 'file', value: 'gone.mjs' } });
+  const evidence = path.join(tmp, 'M5-h1-test.md');
+  const res = await runCli(['--h1', '--store', storeRoot, '--workspace', ws, '--signals', '1', '--json', '--evidence', evidence]);
+  assert.equal(res.code, 0, res.stderr);
+  const parsed = JSON.parse(res.stdout);
+  assert.equal(parsed.staleTransferRate, 1);
+  assert.equal(parsed.injected, 1);
+  assert.equal(typeof parsed.generatedAt, 'number');
+  assert.equal(res.stdout.includes('"' + 'evidence'), true);
+  assert.equal(readFileSync(evidence, 'utf8').includes('staleTransferRate'), true);
+
+  const quiet = await runCli(['--h1', '--store', storeRoot, '--workspace', ws, '--signals', '1', '--no-write']);
+  assert.equal(quiet.code, 0);
+  assert.match(quiet.stdout, /staleTransferRate = 100\.00%/);
+
+  const missing = await runCli(['--h1', '--store', path.join(tmp, 'no-such-store')]);
+  assert.equal(missing.code, 1);
+  assert.match(missing.stderr, /记忆库不存在/);
 });

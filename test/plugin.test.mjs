@@ -533,3 +533,47 @@ test('R16: 插件名与常量（宿主靠它认人）', () => {
   assert.equal(CARD_SOURCE_FORM, 'memory-card');
   assert.equal(PLUGIN_VERSION, 1);
 });
+
+// ---------------------------------------------------------------------------
+// T12：闸 3 真核验接进注入路径（validity 核不过 ⇒ 不注入）
+// ---------------------------------------------------------------------------
+
+test('R16: 闸 3 真核验 —— validity 核不过 ⇒ 闸不过 ⇒ 不注入（probeValidity:false 才退回 unverified）', async () => {
+  const workspace = mkdtempSync(path.join(tmpdir(), 'kifuin-ws-bad-'));
+  const storeRoot = mkdtempSync(path.join(tmpdir(), 'kifuin-store-bad-'));
+  try {
+    const scope = scopeKeyFromPath(workspace);
+    const store = createStore({ root: storeRoot, now: T(20) });
+    store.ensureDirs();
+    store.putMany('episodes', [{
+      id: 'ep-badaaaa1', sessionId: 'session-badaaaa1', scopeKey: scope,
+      startedAt: T(21), firstEventAt: T(21), lastEventAt: T(21), recordedAt: T(21),
+      closure: { logPath: 'sessions/a/x/session.v4.jsonl.zstd', graphPath: 'graphs/a/graph.json', seqFrom: 11, seqTo: 99 },
+      l0: 'demo', signals: { failures: 1, successes: 0, unsettled: 0, constraints: 0, tools: [] }, state: 'archived',
+    }]);
+    store.replaceDerived('topics', [{ id: 't:term:bad00001', kind: 'term', key: 'yaml', df: 2, idfNorm: 0.7, firstSeenAt: T(21), lastSeenAt: T(21), episodes: ['ep-badaaaa1'] }], { at: T(24) });
+    store.putMany('claims', [{
+      id: 'c-bad00001', kind: 'antipattern', text: "Cannot find module 'yaml'", scopeKey: scope, threadIds: [],
+      state: 'observed', support: [{ episode: 'ep-badaaaa1', seq: 30, quote: 'Error: boom' }], counter: [],
+      validity: { type: 'file', value: 'definitely-missing.yaml' }, preconditions: [],
+      occurredAt: T(21), recordedAt: T(21), counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null }, supersedes: null,
+    }]);
+
+    // 默认 probeValidity=true ⇒ 真核验 ⇒ 核不过 ⇒ 闸 3 打回 ⇒ 不注入
+    const a = makeCtx();
+    apply(a.ctx, baseConfig({ storeRoot }));
+    const original = enterDecision([userMessage('yaml 装不上')]);
+    const out = await runHook({ hooks: a.hooks, payload: { agent: { session: makeSession(workspace).session }, messages: [userMessage('yaml 装不上')] }, decision: original });
+    assert.equal(out, original, 'validity 核不过就不许注入');
+    assert.ok(a.warns.some((w) => w.includes('gate3/')), a.warns.join(' | '));
+
+    // probeValidity:false ⇒ 不核 ⇒ 闸 3 记 unverified ⇒ 照常注入（不假绿，但也不假红）
+    const b = makeCtx();
+    apply(b.ctx, baseConfig({ storeRoot, probeValidity: false }));
+    const out2 = await runHook({ hooks: b.hooks, payload: { agent: { session: makeSession(workspace).session }, messages: [userMessage('yaml 装不上')] }, decision: enterDecision([userMessage('yaml 装不上')]) });
+    assert.equal(out2.messages.length, 2, '不核验时行为与 T9 一致');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+    rmSync(storeRoot, { recursive: true, force: true });
+  }
+});
