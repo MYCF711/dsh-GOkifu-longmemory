@@ -1,7 +1,7 @@
 # M5 六轴报告（一条命令可复算 · 零模型调用）
 
 > 生成：`node scripts/m5-report.mjs --store tmp/memory-context --workspace . --root $DSH_HOME --evidence evidence/M5-six-axis.md`
-> 运行时刻：2026-11-01T20:57:09.614Z（UTC；epoch ms 1793566629614）· 版本 m5-report v1 · 耗时 27286 ms · 零模型调用 · 只读
+> 运行时刻：2026-11-01T21:01:50.428Z（UTC；epoch ms 1793566910428）· 版本 m5-report v1 · 耗时 25615 ms · 零模型调用 · 只读
 
 ## 1 · 六轴总表
 
@@ -10,7 +10,7 @@
 | **A1** | 负迁移受控 | `staleTransferRate` | **0.00%** | rate | 9 | `measured` |
 | **A2** | 收益（主判据） | `repeatFailureRate（LOO）` | **13.33%** | rate | 105 | `measured` |
 | **A3** | 可靠性 | `injectFailureRate` | **0.00%** | rate | 21 | `not-live` |
-| **A4** | 延迟/成本 | `walk→card→gates p50` | **4.11** | ms | 50 | `measured` |
+| **A4** | 延迟/成本 | `walk→card→gates p50` | **1.14** | ms | 50 | `measured` |
 | **A5** | 作用域隔离 | `crossScopeLeakRate` | **0.00%** | rate | 6 | `measured` |
 | **A6** | 可回溯 | `provenanceCoverage` | **100.00%** | rate | 6 | `measured` |
 
@@ -108,21 +108,21 @@
 }
 ```
 
-### A4 · 延迟与成本 —— `walk→card→gates p50` = 4.11
+### A4 · 延迟与成本 —— `walk→card→gates p50` = 1.14
 
 - 状态：`measured`（样本 n=50）
-- 口径与限制：墙钟＝walk→card→gates（不含宿主导入）；p90=11.9ms · p95=45.71ms · max=106.14ms；tokens p50=46（预算 500）；冷缓存 532.49ms（一次性）；p95 受 GC 影响
+- 口径与限制：墙钟＝walk→card→gates（不含宿主导入）；p90=3.48ms · p95=5.55ms · max=103.1ms；tokens p50=46（预算 500）；冷缓存 410.37ms（一次性）；p95 受 GC 影响
 - 明细：
 
 ```json
 {
-  "p50": 4.11,
-  "p90": 11.9,
-  "p95": 45.71,
-  "max": 106.14,
+  "p50": 1.14,
+  "p90": 3.48,
+  "p95": 5.55,
+  "max": 103.1,
   "tokensP50": 46,
   "tokensP90": 296,
-  "coldCacheMs": 532.49,
+  "coldCacheMs": 410.37,
   "budgetTokens": 500,
   "gatesFailed": 0,
   "zeroInjection": 42,
@@ -170,7 +170,7 @@
 - 工作区：`D:\DeepSeek Harness\default-workspace\长期记忆系统`（scope=`w:d:/DeepSeek Harness/default-workspace/长期记忆系统`）
 - 棋谱 92 · 主题 780 · claim 125
 - 热路径 50 次（A4）· 抽样卡片 20 张（A5/A6）· 信号文本 50 条
-- 冷缓存 532.49 ms（一次性）· 闸不过 0 · 零注入 42 · walk 拒跨域 655
+- 冷缓存 410.37 ms（一次性）· 闸不过 0 · 零注入 42 · walk 拒跨域 655
 
 ## 4 · 复现命令
 
