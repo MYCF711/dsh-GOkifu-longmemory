@@ -923,6 +923,22 @@ export function walkFromSignals(opts = {}) {
       }
     }
     if (!textMatch) {
+      // 第二条机械通路：claim 文本直接含信号里的判别性词（S10，2026-11-02）。
+      // 没有这条，带 validity 的 claim 只能经 support 的棋谱到达；跨站时永远走不到 ⇒ H1 无消费者。
+      for (const term of sig.terms) {
+        if (overlaps(term, text)) {
+          textMatch = { topic: { id: `signal:${term}`, key: term, kind: 'term', df: null }, score: 0.5 };
+          break;
+        }
+      }
+      for (const entity of sig.entities) {
+        if (overlaps(entity.key, text)) {
+          textMatch = { topic: { id: `signal:${entity.key}`, key: entity.key, kind: entity.kind ?? 'term', df: null }, score: 0.5 };
+          break;
+        }
+      }
+    }
+    if (!textMatch) {
       dropped.unconnected += 1;
       continue;
     }

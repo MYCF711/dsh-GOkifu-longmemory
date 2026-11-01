@@ -207,7 +207,7 @@ test('无源不入：没有 evidence.seq 的边不进任何桶，只记 noSource
 });
 
 test('每条信号都带 seq + quote + 出处；空图/空事件不抛', () => {
-  assert.deepEqual(extractSignals({}).counts, { failures: 0, successes: 0, unsettled: 0, constraints: 0, tools: 0, byResult: {} });
+  assert.deepEqual(extractSignals({}).counts, { failures: 0, successes: 0, commandSuccesses: 0, unsettled: 0, constraints: 0, tools: 0, byResult: {} });
   assert.equal(extractSignals({ graph: null, events: [] }).constraints.length, 0);
   const r = extractSignals({
     graph: graphOf({ e1: edgeOf('e1', 40, { result: 'failure', errorSnippet: 'boom', from: 'n1', to: 'n2' }) }),
@@ -311,4 +311,18 @@ test('真实棋谱自检：三条桶之和 == 边总数（口径闭合）', { sk
     const byResultSum = Object.values(sig.counts.byResult).reduce((a, b) => a + b, 0);
     assert.equal(byResultSum, sig.counts.failures + sig.counts.successes + sig.counts.unsettled);
   }
+});
+
+test('S11：tool/result 以 [exit code: 0] 结尾 ⇒ commandSuccesses 可验证成功（带命令原文）', () => {
+  const events = [
+    { type: 'tool/call', seq: 5, time: 1000, data: { callId: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'node --test' }) } },
+    { type: 'tool/result', seq: 6, time: 1001, data: { toolCallId: 'c1', message: { content: [{ type: 'text', text: 'ok\n[exit code: 0]' }] } } },
+    { type: 'tool/call', seq: 7, time: 1002, data: { callId: 'c2', name: 'bash', arguments: JSON.stringify({ command: 'false' }) } },
+    { type: 'tool/result', seq: 8, time: 1003, data: { toolCallId: 'c2', message: { content: [{ type: 'text', text: 'boom\n[exit code: 1]' }] } } },
+  ];
+  const r = extractSignals({ events });
+  assert.equal(r.counts.commandSuccesses, 1);
+  assert.equal(r.commandSuccesses[0].quote, 'node --test');
+  assert.equal(r.commandSuccesses[0].verifyKind, 'exit-code');
+  assert.equal(r.commandSuccesses[0].source, 'exit-code');
 });

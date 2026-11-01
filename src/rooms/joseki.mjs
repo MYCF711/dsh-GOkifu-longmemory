@@ -222,7 +222,11 @@ export function hasIndependentPair(list) {
 function stepsOf(signals, scopeKey, opts) {
   const steps = [];
   const skipped = { noSource: 0, noQuote: 0 };
-  for (const entry of Array.isArray(signals?.successes) ? signals.successes : []) {
+  const allSuccesses = [
+    ...(Array.isArray(signals?.successes) ? signals.successes : []),
+    ...(Array.isArray(signals?.commandSuccesses) ? signals.commandSuccesses : []),
+  ];
+  for (const entry of allSuccesses) {
     if (!entry) continue;
     if (!Number.isFinite(entry.seq)) {
       skipped.noSource += 1;
