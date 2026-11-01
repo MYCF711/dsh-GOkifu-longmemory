@@ -1,5 +1,6 @@
 node_modules/
 tmp/
 evidence/tmp/
+evidence/shadow/
 *.log
 .DS_Store

@@ -1,0 +1,940 @@
+// R12 inject —— 记忆卡（M3 影子模式：只记录「本来会注入什么」，不注入）
+//
+// 契约：docs/数据契约.md §7.3、方案.md §7.2/§7.3、docs/记忆的职责边界.md §1/§2/§4/§5。
+// 三条铁律（本文件里逐条对应，审查在 R13 gates）：
+//   1) 只陈述事实：渲染行没有祈使句 / 下一步 / 许可 / 建议。R12 只给模板；拦截在 R13 边界闸。
+//   2) 每条带 provenance（episode + seq）与 occurredAt，日期渲染成绝对日期（UTC，跨机可复算）。
+//      缺 occurredAt / 缺 seq ⇒ **不入卡**（无源不入、无时不入），只计入省略。
+//   3) shadow：只把 {card, signal, at} 追加进 `evidence/shadow/shadow.jsonl`（或 --shadow-dir），
+//      **不写 <DSH_HOME>**（本文件对此有硬守卫）、不碰系统提示词 / AGENTS / 工具 / 会话日志。
+//
+// 本房间是纯函数 + 一个追加写：不调用模型、不做语义判断、不新增依赖（只用 node: 内置）。
+// 卡片形态（Q7 = D：首轮一行 INDEX 指针 + 命中才展开）：
+//   indexLine 恒一行：`MEMORY: <index 路径>（scope=…, N 局, 未列出≠不存在）`
+//   section   仅当命中：<memory-ledger> 内每行 `- [state] 文本 (ep-…, YYYY-MM-DD, seq N)`，≤5 条、≤500 tokens
+//   排序      失败教训 → 约束/偏好 → 事实 → 定式候选（同档按 occurredAt 新→旧）
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export const CARD_VERSION = 1;
+/** 命中展开的条数上限（方案 §7.3：≤5 条）。 */
+export const ENTRY_LIMIT = 5;
+/** 命中展开的 token 预算（方案 §7.2 六条纪律 3：≤500 tokens）。口径 = indexLine + section 合计（保守）。 */
+export const BUDGET_TOKENS = 500;
+/** 首轮一行 INDEX 指针的预算（方案 §7.3：~40 tokens；这里放宽到 60 作为闸值）。 */
+export const INDEX_LINE_BUDGET = 60;
+/** 单条文本渲染上限（超预算时「先降表示，不丢来源与日期」：160 → 60 两级）。 */
+export const TEXT_CLIP = 160;
+/** 降表示第二级的单条文本上限。 */
+export const TIGHT_CLIP = 60;
+export const SHADOW_DIR_REL = path.join('evidence', 'shadow');
+export const SHADOW_FILE = 'shadow.jsonl';
+
+/** 记忆卡里出现即违规的指令式片段（R13 边界闸的正则来源；单源，避免注入文本与闸门漂移）。 */
+export const IMPERATIVE_PATTERNS = Object.freeze([
+  '你应该',
+  '请',
+  '下一步',
+  '建议',
+  '务必',
+  '记得',
+  '不要忘记',
+  '可以试试',
+]);
+
+/** 工具治理痕迹（docs/记忆的职责边界.md §5 表的一行；机械可判，零假阳性代价低）。 */
+export const GOVERNANCE_PATTERNS = Object.freeze([
+  /permission:\s*(allow|ask|deny)/i,
+  /\bapproval\s*:/i,
+  /\bsandbox_permissions\b/i,
+]);
+
+/**
+ * 一条记忆行（模型可见字符串）的权威形态：
+ *   `- [antipattern] 文本  (ep-9c11, 2026-11-01, seq 88)`
+ * 闸 0 用它逐行核 provenance 与日期；R12 用它产出，二者不能各写一份。
+ */
+export const PROVENANCE_LINE_RE = /^- \[([^\]\n]+)\] (.+?) \((ep-[A-Za-z0-9._-]+), (\d{4}-\d{2}-\d{2}), seq (\d+)\)$/;
+
+/** `indexLine` 的形态：事实陈述，不是指令。 */
+export const INDEX_LINE_RE = /^MEMORY: .+（scope=.+, (\d+) 局, 未列出≠不存在）$/;
+
+/**
+ * 标记语义（声明式，只说「标记是什么意思」）——随 section 一起出现，让单看一行也能读。
+ * 这一段是**事实陈述**：没有祈使句、没有「何时该查」。
+ */
+export const MARKERS_LINE = '# markers: [semantic]=≥3 局且无反例 · [candidate]=2 局 · [observed]=1 局 · [disputed]=存在反例 · [stale]=条件已变只给指针 · [antipattern]=失败教训 · 日期=occurredAt(UTC)';
+
+export class InjectError extends Error {
+  constructor(message, code = 'inject/error', detail = null) {
+    super(message);
+    this.name = 'InjectError';
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 度量与日期（跨房间同口径：CJK 1.5 字/token、ASCII 4 字/token，与 R11 walk 一致）
+// ---------------------------------------------------------------------------
+
+/** 粗估 token：CJK/全角按 1.5 字/token，其余按 4 字/token，向上取整。 */
+export function estimateTokens(text) {
+  const s = String(text ?? '');
+  let cjk = 0;
+  let other = 0;
+  for (const ch of s) {
+    const cp = ch.codePointAt(0);
+    if (cp > 0x2e7f) cjk += 1;
+    else other += 1;
+  }
+  return Math.ceil(cjk / 1.5 + other / 4);
+}
+
+/** epoch ms → `YYYY-MM-DD`（UTC；与 R07 `formatDay(ms,'UTC')` 同口径，跨机可复算）。 */
+export function formatCardDate(ms) {
+  if (!Number.isFinite(ms)) return '????-??-??';
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return '????-??-??';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+/** 单行化：记忆行必须一行一条（多行会破坏 provenance 行格式）。 */
+export function singleLine(text) {
+  return String(text ?? '')
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** 单行化 + 截断（降表示的第一级：先截文本，不丢日期与出处）。 */
+export function clipLine(text, max = TEXT_CLIP) {
+  const s = singleLine(text);
+  if (s.length <= max) return s;
+  return `${s.slice(0, Math.max(0, max - 1))}…`;
+}
+
+// ---------------------------------------------------------------------------
+// 信号：当前会话 → 检索输入（契约 §7.1）
+// ---------------------------------------------------------------------------
+
+/** CJK 2-gram 的停用表（只丢无判别力的虚词/套话；不做语义判断）。 */
+const STOP_TERMS = new Set([
+  '这个', '那个', '时候', '问题', '需要', '可以', '如果', '因为', '所以', '然后', '现在',
+  '我们', '你们', '他们', '已经', '还是', '就是', '什么', '怎么', '一个', '没有', '不是',
+  '这些', '那些', '以及', '并且', '但是', '不过', '一下', '这里', '那里', '这样', '那样',
+]);
+
+/**
+ * 根消息文本 → signal（纯机械：ASCII 词 + CJK 2-gram + 路径/域名/错误码实体）。
+ * 不判断「像不像主题」，也不调模型：词表由 R04 主题索引去对齐。
+ */
+export function signalFromText(text, { at = null, kind = 'root-message' } = {}) {
+  const raw = String(text ?? '');
+  const terms = new Set();
+  for (const m of raw.matchAll(/[A-Za-z][A-Za-z0-9_./@-]{2,}/g)) terms.add(m[0].toLowerCase());
+  for (const run of raw.match(/[\u3400-\u9fff]+/g) ?? []) {
+    for (let i = 0; i + 2 <= run.length; i += 1) {
+      const g = run.slice(i, i + 2);
+      if (!STOP_TERMS.has(g)) terms.add(g);
+    }
+  }
+
+  const entities = [];
+  const seen = new Set();
+  const addEntity = (kindName, key) => {
+    const k = String(key ?? '').replace(/[，。；、）】\],.;:!?]+$/, '');
+    if (k.length < 2) return;
+    const sig = `${kindName}\u0000${k}`;
+    if (seen.has(sig)) return;
+    seen.add(sig);
+    entities.push({ kind: kindName, key: k });
+  };
+  for (const m of raw.matchAll(/[A-Za-z]:[\\/][^\s"'`，。；）]+/g)) addEntity('file', m[0]);
+  for (const m of raw.matchAll(/https?:\/\/([^\s/"'`）]+)/gi)) addEntity('domain', m[1]);
+  for (const m of raw.matchAll(/\b(?:[a-z0-9][a-z0-9-]*\.)+(?:com|cn|org|net|io|dev|app|ai)\b/gi)) addEntity('domain', m[0]);
+  for (const m of raw.matchAll(/\bE[A-Z]{3,}\b|\b[A-Z][A-Z0-9]+_[A-Z0-9_]+\b/g)) addEntity('error', m[0]);
+
+  return {
+    kind: typeof kind === 'string' && kind ? kind : 'root-message',
+    terms: [...terms].sort(),
+    entities,
+    at: Number.isFinite(at) ? at : null,
+  };
+}
+
+/** `D:\work\demo` / `d:/work/demo` → `w:d:/work/demo`（与 R00 episode.scopeKey 同口径）。 */
+export function scopeKeyFromPath(p) {
+  const s = String(p ?? '').trim();
+  if (!s) return 'w:<unknown>';
+  const posix = s.replace(/\\/g, '/').replace(/\/+$/, '');
+  return `w:${posix.replace(/([A-Za-z]):/, (_, d) => `${d.toLowerCase()}:`)}`;
+}
+
+// ---------------------------------------------------------------------------
+// store 读视图（只读；只用 list/get/counts 三个方法，缺 store 时全部降级为空）
+// ---------------------------------------------------------------------------
+
+function storeView(store) {
+  const view = {
+    indexPath: null,
+    episodeCount: 0,
+    claims: [],
+    claimsById: new Map(),
+    claimsByEpisode: new Map(),
+    episodesById: new Map(),
+    missing: true,
+  };
+  if (!store || typeof store.list !== 'function') return view;
+  view.missing = false;
+  view.indexPath = typeof store.indexPath === 'string' ? store.indexPath : null;
+
+  try {
+    const counts = typeof store.counts === 'function' ? store.counts() : null;
+    if (counts && Number.isFinite(counts.episodes)) view.episodeCount = counts.episodes;
+  } catch { /* 计数失败不阻塞注入：0 局如实写 0 */ }
+
+  try {
+    for (const item of store.list('claims')) {
+      const rec = item?.record;
+      if (!rec || typeof rec.text !== 'string') continue;
+      const claim = {
+        id: typeof rec.id === 'string' ? rec.id : (item.id ?? null),
+        kind: typeof rec.kind === 'string' ? rec.kind : 'fact',
+        state: typeof rec.state === 'string' ? rec.state : 'observed',
+        text: rec.text,
+        occurredAt: Number.isFinite(rec.occurredAt) ? rec.occurredAt : null,
+        support: Array.isArray(rec.support) ? rec.support.filter((s) => s && typeof s === 'object') : [],
+      };
+      view.claims.push(claim);
+      if (claim.id) view.claimsById.set(claim.id, claim);
+      const episodes = new Set(claim.support.map((s) => String(s.episode ?? '')).filter(Boolean));
+      for (const ep of episodes) {
+        if (!view.claimsByEpisode.has(ep)) view.claimsByEpisode.set(ep, []);
+        view.claimsByEpisode.get(ep).push(claim);
+      }
+    }
+  } catch { /* 坏条目跳过：注入宁可少一条，也不抛 */ }
+
+  try {
+    for (const item of store.list('episodes')) {
+      const rec = item?.record;
+      if (rec && typeof rec.id === 'string') view.episodesById.set(rec.id, rec);
+    }
+  } catch { /* 同上 */ }
+
+  return view;
+}
+
+// ---------------------------------------------------------------------------
+// hit → 一条记忆行（优先 claim 原文；退化时只给指针）
+// ---------------------------------------------------------------------------
+
+const RANK = Object.freeze({
+  antipattern: 0,
+  failure: 0.5,
+  preference: 1,
+  rule: 1,
+  constraint: 1.5,
+  fact: 2,
+  pointer: 2,
+  pattern: 3,
+  joseki: 3,
+});
+
+function rankOf(kind) {
+  return Number.isFinite(RANK[kind]) ? RANK[kind] : 2;
+}
+
+function compareClaims(a, b) {
+  return (rankOf(a.kind) - rankOf(b.kind))
+    || ((a.occurredAt ?? 0) - (b.occurredAt ?? 0))
+    || String(a.id ?? '').localeCompare(String(b.id ?? ''));
+}
+
+/**
+ * 一个 hit 该用哪条 claim 来陈述（按可靠性降序）：
+ *   1. hit 自带 claim 对象（含 text）——调用方已经把原文给了；
+ *   2. hit.claim = claims/<id>.json 的 id（R11 walk 的形态）→ 回到 store 取原文与 support（能拿到精确 seq/edgeId）；
+ *   3. hit.claimId（兼容别名）；
+ *   4. hit.claimKind + hit.text（walk 已经带了 claim 摘要字段，但 store 里查不到时用它，不丢内容）；
+ *   5. 该局里**锚定同一个 seq** 的 claim（同一事件）。
+ * 第 5 条故意收紧：没有 claim 指向命中事件时**不随手抓一条该局别的 claim**（那正是 F8「顺藤摸错枝」），
+ * 而是退回指针行。全部按 (episode, seq, occurredAt) 校验，缺源的一律不入卡。
+ */
+function pickClaim(hit, view) {
+  if (hit?.claim && typeof hit.claim === 'object' && typeof hit.claim.text === 'string') {
+    const c = hit.claim;
+    return {
+      id: typeof c.id === 'string' ? c.id : null,
+      kind: typeof c.kind === 'string' ? c.kind : 'fact',
+      state: typeof c.state === 'string' ? c.state : 'observed',
+      text: c.text,
+      occurredAt: Number.isFinite(c.occurredAt) ? c.occurredAt : null,
+      support: Array.isArray(c.support) ? c.support.filter((s) => s && typeof s === 'object') : [],
+    };
+  }
+  const claimId = typeof hit?.claim === 'string' ? hit.claim : (typeof hit?.claimId === 'string' ? hit.claimId : null);
+  if (claimId && view.claimsById.has(claimId)) return view.claimsById.get(claimId);
+  if (claimId && typeof hit?.text === 'string' && hit.text.trim() !== '') {
+    // store 里没有这条 claim（可能已被裁掉）：用 walk 带回来的摘要字段，出处仍取 hit 的 (episode, seq)。
+    return {
+      id: claimId,
+      kind: typeof hit?.claimKind === 'string' && hit.claimKind ? hit.claimKind : 'fact',
+      state: typeof hit?.claimState === 'string' && hit.claimState ? hit.claimState : 'observed',
+      text: hit.text,
+      occurredAt: Number.isFinite(hit?.occurredAt) ? hit.occurredAt : null,
+      support: [],
+    };
+  }
+  const list = view.claimsByEpisode.get(String(hit?.episode ?? '')) ?? [];
+  if (!list.length || !Number.isFinite(hit?.seq)) return null;
+  const anchored = list.filter((c) => c.support.some((s) => Number(s.seq) === Number(hit.seq)));
+  if (!anchored.length) return null;
+  return [...anchored].sort(compareClaims)[0];
+}
+
+function stateTokenOf(claim) {
+  if (claim.kind === 'antipattern') return 'antipattern';
+  const state = typeof claim.state === 'string' && claim.state ? claim.state : 'observed';
+  return state;
+}
+
+function buildEntry({ episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null }) {
+  if (!episode || !Number.isFinite(seq) || !Number.isFinite(occurredAt)) return null;
+  const rawText = singleLine(text);
+  if (!rawText) return null;
+  const date = formatCardDate(occurredAt);
+  return {
+    rawText,
+    kind,
+    marker,
+    state: state ?? marker,
+    occurredAt,
+    date,
+    claimId,
+    source: { episode, seq, ...(edgeId ? { edgeId } : {}) },
+    rank: rankOf(kind),
+  };
+}
+
+function entryFromClaim(hit, claim) {
+  const support = claim.support;
+  let src = null;
+  if (Number.isFinite(hit?.seq)) src = support.find((s) => Number(s.seq) === Number(hit.seq)) ?? null;
+  if (!src) src = support.find((s) => String(s.episode) === String(hit?.episode ?? '')) ?? support[0] ?? null;
+
+  const episode = typeof src?.episode === 'string' && src.episode
+    ? src.episode
+    : (typeof hit?.episode === 'string' ? hit.episode : '');
+  const seq = Number.isFinite(src?.seq) ? Number(src.seq) : (Number.isFinite(hit?.seq) ? Number(hit.seq) : null);
+  const occurredAt = Number.isFinite(claim.occurredAt)
+    ? claim.occurredAt
+    : (Number.isFinite(src?.occurredAt) ? src.occurredAt : (Number.isFinite(hit?.occurredAt) ? hit.occurredAt : null));
+
+  return buildEntry({
+    episode,
+    seq,
+    occurredAt,
+    marker: stateTokenOf(claim),
+    state: typeof claim.state === 'string' && claim.state ? claim.state : 'observed',
+    text: claim.text,
+    kind: claim.kind,
+    claimId: claim.id,
+    edgeId: typeof src?.edgeId === 'string' ? src.edgeId : null,
+  });
+}
+
+/** 没有 claim 可陈述时只给指针（事实：这一局命中过这个主题、失败计数是多少）。 */
+function entryFromEpisode(hit, view) {
+  const rec = view.episodesById.get(String(hit?.episode ?? '')) ?? null;
+  const seq = Number.isFinite(rec?.closure?.seqFrom)
+    ? Number(rec.closure.seqFrom)
+    : (Number.isFinite(hit?.seq) ? Number(hit.seq) : null);
+  const occurredAt = Number.isFinite(rec?.startedAt)
+    ? Number(rec.startedAt)
+    : (Number.isFinite(hit?.occurredAt) ? hit.occurredAt : null);
+  const failures = rec?.signals?.failures;
+  const why = Array.isArray(hit?.why) ? hit.why.filter((x) => typeof x === 'string' && x) : [];
+  const hitText = typeof hit?.text === 'string' ? hit.text.trim() : '';
+  const l0 = typeof rec?.l0 === 'string' ? rec.l0.trim() : '';
+  const text = hitText || l0 || `fail=${Number.isFinite(failures) ? failures : '?'} · topics=${why.slice(0, 3).join(', ') || '—'}`;
+  return buildEntry({
+    episode: String(hit?.episode ?? ''),
+    seq,
+    occurredAt,
+    marker: 'observed',
+    state: 'observed',
+    text,
+    kind: hit?.kind === 'failure' ? 'failure' : (hit?.kind === 'constraint' ? 'constraint' : 'pointer'),
+  });
+}
+
+/**
+ * hits → 候选条目。缺 (episode, seq, occurredAt) 的条目**直接丢**（无源不入、无时不入），
+ * 只计数进省略；这样记忆卡本身不会出现「有行没出处」的形态。
+ */
+function collectEntries({ hits, view }) {
+  const entries = [];
+  let droppedNoProvenance = 0;
+  let droppedNoText = 0;
+  const seen = new Set();
+  const cap = Math.max(ENTRY_LIMIT * 8, 40);
+
+  for (const hit of Array.isArray(hits) ? hits : []) {
+    if (!hit || typeof hit !== 'object') continue;
+    const claim = pickClaim(hit, view);
+    const entry = claim ? entryFromClaim(hit, claim) : entryFromEpisode(hit, view);
+    if (!entry) {
+      if (claim && !clipLine(claim.text)) droppedNoText += 1;
+      else droppedNoProvenance += 1;
+      continue;
+    }
+    const key = `${entry.source.episode}\u0000${entry.source.seq}\u0000${entry.rawText}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push(entry);
+    if (entries.length >= cap) break;
+  }
+
+  return { entries, dropped: { noProvenance: droppedNoProvenance, noText: droppedNoText } };
+}
+
+function compareEntries(a, b) {
+  return (a.rank - b.rank)
+    || ((b.occurredAt ?? 0) - (a.occurredAt ?? 0))
+    || (String(a.source.episode) < String(b.source.episode) ? -1 : String(a.source.episode) > String(b.source.episode) ? 1 : 0)
+    || (a.source.seq - b.source.seq);
+}
+
+// ---------------------------------------------------------------------------
+// 记忆卡
+// ---------------------------------------------------------------------------
+
+export function renderIndexLine({ indexPath, scope, episodes }) {
+  const n = Number.isFinite(episodes) ? episodes : 0;
+  return `MEMORY: ${displayPath(indexPath)}（scope=${scope}, ${n} 局, 未列出≠不存在）`;
+}
+
+/** 路径渲染用正斜杠（跨机可读、和 scopeKey 的写法一致；不改真实路径）。 */
+export function displayPath(p) {
+  return String(p ?? '').replace(/\\/g, '/');
+}
+
+function renderEntryLine(entry, clip) {
+  const body = clipLine(entry.rawText, clip);
+  return `- [${entry.marker}] ${body} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})`;
+}
+
+function renderSection({ entries, beyond, droppedProvenance, limit, budgetTokens, clip, withMarkers = true }) {
+  const body = entries.map((e) => renderEntryLine(e, clip));
+  const total = beyond + droppedProvenance;
+  if (total > 0) {
+    const parts = [];
+    if (beyond > 0) parts.push(`超出 ${limit} 条上限/预算 ${budgetTokens} tokens 的 ${beyond} 条`);
+    if (droppedProvenance > 0) parts.push(`无源不入 ${droppedProvenance} 条（缺 occurredAt 或 seq）`);
+    body.push(`omitted: ${total} items（${parts.join(' · ')}）— see index.md（未列出 ≠ 不存在）`);
+  }
+  const head = withMarkers ? ['<memory-ledger>', MARKERS_LINE] : ['<memory-ledger>'];
+  return [...head, ...body, '</memory-ledger>'].join('\n');
+}
+
+/** 降表示的阶梯（超预算按这个顺序降，绝不先丢日期与出处）。 */
+const CLIP_STEPS = Object.freeze([TEXT_CLIP, TIGHT_CLIP]);
+
+/**
+ * 组装记忆卡。
+ *
+ * @param {object}   p
+ * @param {object}   [p.signal]      §7.1 信号（只用于 shadow 记录，不参与渲染）
+ * @param {object}   [p.walkResult]  R11 walk 结果：`{hits, path, omitted, tokens, depth?}`
+ * @param {object}   [p.store]       R15 createStore() 返回对象（只读：list/counts/indexPath）
+ * @param {string}   [p.scope]       scopeKey；缺省由 store/`w:<unknown>` 兜底
+ * @param {number}   [p.now]         入卡时刻（只进 shadow 记录；卡片文本不含时钟，保证同输入同输出）
+ * @param {number}   [p.limit]       条数上限（默认 5）
+ * @param {number}   [p.budgetTokens] token 预算（默认 500；口径 = indexLine + section）
+ * @param {string}   [p.indexPath]   覆盖 index 路径
+ * @param {number}   [p.episodeCount] 覆盖「N 局」
+ * @returns {{indexLine:string, section:string|null, claims:Array, omissions:string|null,
+ *            tokens:number, shadow:true, omittedCount:number, hitCount:number,
+ *            indexTokens:number, limit:number, budgetTokens:number, cardVersion:number}}
+ */
+export function buildMemoryCard({
+  signal = null,
+  walkResult = null,
+  store = null,
+  scope = null,
+  now = null,
+  limit = ENTRY_LIMIT,
+  budgetTokens = BUDGET_TOKENS,
+  indexPath = null,
+  episodeCount = null,
+} = {}) {
+  const view = storeView(store);
+  const hits = Array.isArray(walkResult?.hits) ? walkResult.hits : [];
+  const idxPath = indexPath ?? view.indexPath ?? 'memory-context/index.md';
+  const episodes = Number.isFinite(episodeCount) ? episodeCount : view.episodeCount;
+  const scopeKey = typeof scope === 'string' && scope
+    ? scope
+    : (typeof signal?.scopeKey === 'string' && signal.scopeKey ? signal.scopeKey : 'w:<unknown>');
+
+  const indexLine = renderIndexLine({ indexPath: idxPath, scope: scopeKey, episodes });
+  const indexTokens = estimateTokens(indexLine);
+
+  if (!hits.length) {
+    // 不命中 ⇒ 零注入（只有首轮那一行事实）。
+    return {
+      indexLine,
+      section: null,
+      claims: [],
+      omissions: null,
+      tokens: indexTokens,
+      shadow: true,
+      omittedCount: 0,
+      hitCount: 0,
+      indexTokens,
+      limit,
+      budgetTokens,
+      cardVersion: CARD_VERSION,
+      signalAt: Number.isFinite(now) ? now : null,
+    };
+  }
+
+  const { entries, dropped } = collectEntries({ hits, view });
+  const sorted = entries.slice().sort(compareEntries);
+  const droppedProvenance = dropped.noProvenance + dropped.noText;
+
+  // 取前缀并按「先降表示、后降条数」的阶梯收敛到预算内（方案 §7.2 纪律 3）：
+  //   阶梯 1：文本 160 字 —— 完整表示
+  //   阶梯 2：文本 60 字 —— 缩表示（日期 + ep + seq 一字不丢）
+  //   阶梯 3：去掉 markers 说明行
+  //   阶梯 4：从尾部丢条目（失败教训在前 ⇒ 丢的永远是最不重要的），并用 omitted 行显式声明。
+  const maxTake = Math.min(limit, sorted.length);
+  let chosen = [];
+  let section = null;
+  let beyond = 0;
+  let clipUsed = TEXT_CLIP;
+
+  outer: for (let take = maxTake; take >= 0; take -= 1) {
+    const sel = sorted.slice(0, take);
+    const rest = sorted.length - take;
+    for (const clip of CLIP_STEPS) {
+      for (const withMarkers of [true, false]) {
+        const candidate = renderSection({
+          entries: sel,
+          beyond: rest,
+          droppedProvenance,
+          limit,
+          budgetTokens,
+          clip,
+          withMarkers,
+        });
+        if (indexTokens + estimateTokens(candidate) <= budgetTokens) {
+          chosen = sel;
+          section = candidate;
+          beyond = rest;
+          clipUsed = clip;
+          break outer;
+        }
+      }
+    }
+  }
+
+  // 连空壳都放不进预算（预算小到不合理）⇒ 零展开，但**省略必须如实记数**（不许静默丢）。
+  if (section === null) beyond = sorted.length;
+
+  const omittedTotal = beyond + droppedProvenance;
+  const omittedParts = [];
+  if (beyond > 0) omittedParts.push(`超出 ${limit} 条上限/预算 ${budgetTokens} tokens 的 ${beyond} 条`);
+  if (droppedProvenance > 0) omittedParts.push(`无源不入 ${droppedProvenance} 条（缺 occurredAt 或 seq）`);
+  const omissions = omittedTotal > 0
+    ? `omitted: ${omittedTotal} items（${omittedParts.join(' · ')}）— see index.md（未列出 ≠ 不存在）`
+    : null;
+
+  // 一条也渲染不出来（命中全是无源条目，或预算连空壳都放不下）⇒ 仍然零展开：
+  // 不拿「omitted」空壳烧 token，但省略如实记在卡片的结构化字段里（shadow 记录与 CLI 都看得见）。
+  if (!chosen.length) {
+    return {
+      indexLine,
+      section: null,
+      claims: [],
+      omissions,
+      tokens: indexTokens,
+      shadow: true,
+      omittedCount: omittedTotal,
+      hitCount: hits.length,
+      indexTokens,
+      limit,
+      budgetTokens,
+      cardVersion: CARD_VERSION,
+      signalAt: Number.isFinite(now) ? now : null,
+      clip: clipUsed,
+    };
+  }
+
+  const claims = chosen.map((e) => ({
+    text: clipLine(e.rawText, clipUsed),
+    kind: e.kind,
+    marker: e.marker,
+    state: e.state,
+    occurredAt: e.occurredAt,
+    date: e.date,
+    source: e.source,
+    line: renderEntryLine(e, clipUsed),
+    ...(e.claimId ? { claimId: e.claimId } : {}),
+  }));
+
+  return {
+    indexLine,
+    section,
+    claims,
+    omissions,
+    tokens: indexTokens + estimateTokens(section ?? ''),
+    shadow: true,
+    omittedCount: omittedTotal,
+    hitCount: hits.length,
+    indexTokens,
+    limit,
+    budgetTokens,
+    cardVersion: CARD_VERSION,
+    signalAt: Number.isFinite(now) ? now : null,
+    clip: clipUsed,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 降级 walk（R11 未落地时的等价物：词面命中 → 主题 → 棋局，深度 1）
+// 只读 store；不写盘；命中 why 必填 —— 与 R11 同一份 hit 形态，R12 无需区分来源。
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {{signal:object, store:object, limit?:number}} p
+ * @returns {{hits:Array, path:Array, omitted:{count:number,reason:string}, tokens:number,
+ *            depth:number, degraded:true}}
+ */
+export function degradedWalk({ signal = null, store = null, limit = ENTRY_LIMIT } = {}) {
+  const view = storeView(store);
+  const needles = [];
+  for (const t of Array.isArray(signal?.terms) ? signal.terms : []) {
+    const s = String(t ?? '').trim().toLowerCase();
+    if (s.length >= 2) needles.push(s);
+  }
+  for (const e of Array.isArray(signal?.entities) ? signal.entities : []) {
+    const s = String(e?.key ?? '').trim().toLowerCase();
+    if (s.length >= 2) needles.push(s);
+  }
+
+  const hits = [];
+  const pathRows = [];
+  const omitted = { count: 0, reason: '' };
+  if (!needles.length || view.missing) {
+    omitted.reason = needles.length ? 'store 不可读' : 'signal 无可用词条';
+    return { hits, path: pathRows, omitted, tokens: 0, depth: 1, degraded: true };
+  }
+
+  let topicRecords = [];
+  try {
+    topicRecords = typeof store.list === 'function'
+      ? store.list('topics').map((x) => x?.record).filter((r) => r && typeof r.key === 'string')
+      : [];
+  } catch {
+    topicRecords = [];
+  }
+
+  const matched = topicRecords
+    .map((t) => {
+      const key = t.key.toLowerCase();
+      const hitNeedle = needles.find((n) => key === n || key.includes(n) || n.includes(key));
+      return hitNeedle ? { topic: t, needle: hitNeedle } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => ((a.topic.df ?? 0) - (b.topic.df ?? 0)) || String(a.topic.key).localeCompare(String(b.topic.key)));
+
+  if (!matched.length) {
+    omitted.reason = '主题索引无命中';
+    return { hits, path: pathRows, omitted, tokens: 0, depth: 1, degraded: true };
+  }
+
+  const seen = new Set();
+  for (const { topic, needle } of matched.slice(0, 3)) {
+    for (const epId of Array.isArray(topic.episodes) ? topic.episodes : []) {
+      const rec = view.episodesById.get(epId) ?? null;
+      const occurredAt = Number.isFinite(rec?.startedAt) ? rec.startedAt : (rec?.firstEventAt ?? null);
+      const key = `${epId}\u0000${topic.key}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const failures = Number(rec?.signals?.failures ?? 0);
+      hits.push({
+        episode: epId,
+        link: null,
+        why: [topic.key],
+        weight: 1 / Math.max(1, Number(topic.df) || 1),
+        occurredAt: Number.isFinite(occurredAt) ? occurredAt : null,
+        seq: Number.isFinite(rec?.closure?.seqFrom) ? rec.closure.seqFrom : null,
+        kind: failures > 0 ? 'failure' : 'episode',
+        depth: 1,
+        needle,
+      });
+      pathRows.push({ from: signal?.kind ?? 'signal', to: topic.key, why: [topic.key] });
+    }
+  }
+
+  hits.sort((a, b) => (rankOf(a.kind) - rankOf(b.kind))
+    || ((b.occurredAt ?? 0) - (a.occurredAt ?? 0))
+    || String(a.episode).localeCompare(String(b.episode)));
+
+  if (hits.length > limit) {
+    omitted.count = hits.length - limit;
+    omitted.reason = `超出 ${limit} 条`;
+    hits.length = limit;
+  }
+
+  return {
+    hits,
+    path: pathRows.slice(0, 3),
+    omitted,
+    tokens: hits.reduce((s, h) => s + estimateTokens(`${h.episode} ${(h.why ?? []).join(' ')}`), 0),
+    depth: 1,
+    degraded: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// shadow：只记录，不注入
+// ---------------------------------------------------------------------------
+
+/** shadow 目录的默认值（仓库内 evidence/shadow/，不是 <DSH_HOME>）。 */
+export function defaultShadowDir() {
+  return fileURLToPath(new URL(`../../${SHADOW_DIR_REL}/`, import.meta.url));
+}
+
+/**
+ * 硬守卫：shadow 不得写进 `$DSH_HOME`（铁律：不写 <DSH_HOME>）。
+ * 也不许写进 <DSH_HOME> 的 sessions / chess-context / memory-context（原件只读）。
+ */
+export function assertSafeShadowDir(dir, { dshHome = null } = {}) {
+  const target = path.resolve(String(dir ?? ''));
+  if (!dir || String(dir).trim() === '') {
+    throw new InjectError('inject: writeShadow 需要 dir', 'inject/missing-dir');
+  }
+  const home = dshHome ?? process.env.DSH_HOME ?? null;
+  if (!home) return target;
+  const rel = path.relative(path.resolve(String(home)), target);
+  const inside = rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  if (inside) {
+    throw new InjectError(
+      `inject: shadow 目录不得位于 $DSH_HOME 内（${target}）—— 影子模式只写仓库 evidence/shadow/`,
+      'inject/shadow-in-dsh-home',
+      { dir: target, dshHome: String(home) },
+    );
+  }
+  return target;
+}
+
+/**
+ * 追加一条 shadow 记录（JSONL）。**不注入**任何模型上下文，也不写 <DSH_HOME>。
+ * @param {{dir?:string, card:object, signal?:object|null, at?:number|null, version?:number, dshHome?:string|null}} p
+ */
+export function writeShadow({ dir = null, card = null, signal = null, at = null, version = CARD_VERSION, dshHome = null } = {}) {
+  if (!card || typeof card !== 'object') {
+    throw new InjectError('inject: writeShadow 需要 card', 'inject/missing-card');
+  }
+  if (card.shadow !== true) {
+    throw new InjectError('inject: writeShadow 只收 shadow 卡（card.shadow !== true 拒绝落记录）', 'inject/not-shadow');
+  }
+  const target = assertSafeShadowDir(dir ?? defaultShadowDir(), { dshHome });
+  const when = Number.isFinite(at) ? at : Date.now();
+  const record = {
+    version: Number.isFinite(version) ? version : CARD_VERSION,
+    mode: 'shadow',
+    injected: false,
+    at: when,
+    atIso: new Date(when).toISOString(),
+    signal: signal ?? null,
+    card,
+  };
+  const file = path.join(target, SHADOW_FILE);
+  fs.mkdirSync(target, { recursive: true });
+  const line = `${JSON.stringify(record)}\n`;
+  fs.appendFileSync(file, line, 'utf8');
+  return { ok: true, path: file, dir: target, appended: 1, bytes: Buffer.byteLength(line, 'utf8') };
+}
+
+/** 读回 shadow 记录（坏尾不抛：崩溃截断的最后一行丢弃并计数）。 */
+export function readShadow({ dir = null, limit = null } = {}) {
+  const target = path.resolve(dir ?? defaultShadowDir());
+  const file = path.join(target, SHADOW_FILE);
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf8');
+  } catch {
+    return { records: [], parsed: 0, missing: true, path: file };
+  }
+  const records = [];
+  let badLines = 0;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      records.push(JSON.parse(line));
+    } catch {
+      badLines += 1;
+    }
+  }
+  const sliced = Number.isFinite(limit) && limit >= 0 ? records.slice(-limit) : records;
+  return { records: sliced, parsed: records.length, badLines, missing: false, path: file };
+}
+
+// ---------------------------------------------------------------------------
+// CLI：inject --shadow --signal "<文本>" [--store <dir>] [--json]
+// ---------------------------------------------------------------------------
+
+/** R11 walk 存在就用它（兼容 walkFromSignals / walk 两个导出名），缺失走降级。 */
+async function loadWalkRoom() {
+  try {
+    const mod = await import('./walk.mjs');
+    if (typeof mod?.walkFromSignals === 'function') return mod.walkFromSignals;
+    if (typeof mod?.walk === 'function') return mod.walk;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function formatInjectText({ card, gates, signal, walk, shadow }) {
+  const lines = [];
+  const gateOk = gates?.ok ? 'OK' : 'FAIL';
+  lines.push(`inject · shadow=true（只记录，未注入模型上下文）· 命中 ${card.hitCount} · 渲染 ${card.claims.length} · tokens ${card.tokens}/${card.budgetTokens} · gates ${gateOk}`);
+  lines.push(`signal: kind=${signal.kind} · terms=${signal.terms.length} · entities=${signal.entities.length}${signal.terms.length ? ` · ${signal.terms.slice(0, 8).join(', ')}` : ''}`);
+  lines.push(`walk: ${walk.degraded ? '降级（R11 walk 未落地：词面命中 → 主题 → 棋局，深度 1）' : `R11 walk（深度 ${walk.depth ?? walk.maxDepth ?? '?'}）`} · hits=${walk.hits?.length ?? 0}`);
+  lines.push('');
+  lines.push(card.indexLine);
+  if (card.section) {
+    lines.push(card.section);
+  } else {
+    lines.push('（未命中：零展开；未列出 ≠ 不存在）');
+  }
+  lines.push('');
+  if (shadow) lines.push(`shadow: ${shadow.path}（追加 ${shadow.appended} 行）`);
+  else lines.push('shadow: 未写（加 --shadow 才落 evidence/shadow/）');
+  if (gates?.ok) {
+    lines.push(`gates: OK（闸 0 / 6 / 6b / 边界：0 错）`);
+  } else {
+    lines.push(`gates: FAIL（${gates?.errors?.length ?? 0} 错）`);
+    for (const e of (gates?.errors ?? []).slice(0, 10)) lines.push(`  - [闸${e.gate}] ${e.code}: ${JSON.stringify(e.detail ?? null)}`);
+  }
+  return lines.join('\n');
+}
+
+/**
+ * CLI 入口（由 src/rooms/cli.mjs 的 inject 分支调用；也可单测）。
+ * @returns {Promise<{code:number, stdout:string, stderr:string, card?:object, gates?:object}>}
+ */
+export async function runInject({ flags = {}, positional = [], root = '' } = {}) {
+  const storeRoot = path.resolve(String(flags.store ?? path.join(root || '.', 'memory-context')));
+  if (!fs.existsSync(storeRoot)) {
+    return { code: 2, stdout: '', stderr: `记忆库不存在：${storeRoot}（先跑 node scripts/archive.mjs --store <dir>）` };
+  }
+
+  const rawSignal = typeof flags.signal === 'string' && flags.signal !== '' ? flags.signal : (positional[0] ?? '');
+  if (!String(rawSignal).trim()) {
+    return { code: 2, stdout: '', stderr: '用法：inject --shadow --signal "<文本>" [--store <dir>] [--json]' };
+  }
+
+  const { createStore } = await import('./persist.mjs');
+  const store = createStore({ root: storeRoot });
+
+  const at = Date.now();
+  const signal = signalFromText(rawSignal, { at, kind: typeof flags.kind === 'string' ? flags.kind : 'root-message' });
+  signal.scopeKey = scopeKeyFromPath(process.cwd());
+
+  let walk = null;
+  let walkError = null;
+  const walkFn = await loadWalkRoom();
+  if (walkFn) {
+    try {
+      walk = walkFn({ signal, store, depth: 2, limit: ENTRY_LIMIT, budgetTokens: BUDGET_TOKENS }) ?? null;
+    } catch (err) {
+      walkError = String(err?.message ?? err);
+      walk = null;
+    }
+  }
+  if (!walk) walk = degradedWalk({ signal, store, limit: ENTRY_LIMIT });
+
+  const card = buildMemoryCard({ signal, walkResult: walk, store, scope: signal.scopeKey, now: at });
+  const { runGates } = await import('./gates.mjs');
+  const gates = runGates({ card, walkResult: walk });
+
+  let shadow = null;
+  let shadowError = null;
+  if (flags.shadow) {
+    try {
+      const dir = typeof flags['shadow-dir'] === 'string' && flags['shadow-dir']
+        ? flags['shadow-dir']
+        : defaultShadowDir();
+      shadow = writeShadow({ dir, card, signal, at });
+    } catch (err) {
+      shadowError = String(err?.message ?? err);
+    }
+  }
+
+  if (flags.json) {
+    return {
+      code: gates.ok && !shadowError ? 0 : 1,
+      stdout: JSON.stringify({
+        ok: gates.ok && !shadowError,
+        scope: signal.scopeKey,
+        signal,
+        walk: { hits: walk.hits?.length ?? 0, depth: walk.depth ?? walk.maxDepth ?? null, degraded: Boolean(walk.degraded), error: walkError },
+        card,
+        gates,
+        shadow,
+        shadowError,
+      }, null, 2),
+      stderr: shadowError ? `shadow 写入失败：${shadowError}` : '',
+      card,
+      gates,
+    };
+  }
+
+  return {
+    code: gates.ok && !shadowError ? 0 : 1,
+    stdout: formatInjectText({ card, gates, signal, walk, shadow }),
+    stderr: shadowError ? `shadow 写入失败：${shadowError}` : '',
+    card,
+    gates,
+  };
+}
+
+export default {
+  CARD_VERSION,
+  ENTRY_LIMIT,
+  BUDGET_TOKENS,
+  INDEX_LINE_BUDGET,
+  TEXT_CLIP,
+  TIGHT_CLIP,
+  IMPERATIVE_PATTERNS,
+  GOVERNANCE_PATTERNS,
+  PROVENANCE_LINE_RE,
+  INDEX_LINE_RE,
+  MARKERS_LINE,
+  InjectError,
+  estimateTokens,
+  formatCardDate,
+  clipLine,
+  singleLine,
+  signalFromText,
+  scopeKeyFromPath,
+  renderIndexLine,
+  displayPath,
+  buildMemoryCard,
+  degradedWalk,
+  defaultShadowDir,
+  assertSafeShadowDir,
+  writeShadow,
+  readShadow,
+  runInject,
+};
