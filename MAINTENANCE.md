@@ -11,41 +11,48 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-kifuin`（私有） |
 | 包名 | `dsh-kifuin`（**不发 npm**） |
-| 当前版本 | `0.5.0` |
+| 当前版本 | `0.6.0` |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
-## 二、当前状态（2026-11-02 03:55）
+## 二、当前状态（2026-11-02 04:25）
 
 ```
-分支         main = 0.4.0（M3 已合并，#7）；T8b（R10 + 十道闸）在**工作树**里，等 Lead 走 分支 → PR → 合并
-里程碑       M3 完成（0.4.0，影子模式）；M4 闸门全开（R10 adjudicate + R13 十道闸）功能已落地、未发版
-代码         R00–R15 全部在位（含 R10 adjudicate、R13 十道闸）；257 条测试全绿
+分支         main = 0.5.0（M4 已合并，#8）；T9（宿主插件入口 src/plugin.mjs）在**工作树**里，等 Lead 走 分支 → PR → 合并
+里程碑       M4 完成（0.5.0，影子模式）；真注入入口已写好（默认关），**未安装、未重启**
+代码         R00–R15 + R16 plugin 全部在位；288 条测试全绿
 ```
 
 | 资产 | 数量 |
 |---|---|
 | 方案 | `方案.md` v0.9 |
 | 必读文档 | AGENTS / 边界 / 拷问记录 / 对标 |
-| 房间 | R00–R15 全部在位（R10 = `src/rooms/adjudicate.mjs`，R13 = 十道闸 + 边界） |
-| 测试 | 257 条（`node --test` 全绿；216 基线 + T8b 41） |
+| 房间 | R00–R15 全部在位 + R16 `src/plugin.mjs`（宿主入口，默认关） |
+| 测试 | 288 条（`node --test` 全绿；268 基线 + T9 20） |
 | 语料 | 92 日志 / 24 局 / 19 棋谱 / 780 主题 / 199 边 / 83 卷 / 125 claim `[本] 2026-11-02 03:40` |
+| 真注入预演 | 假 session + 真语料跑 20 条信号：注入 **1/20**（297 tokens）、沉默 19、warn 0 `[本] 2026-11-02 04:20` → `reports/T9-REPORT.md` §5 |
 | 闸门实测 | 存量 125 claim：闸 2 违规 **0**、闸 5 违规 **0**；20 张真实卡接上 records+scope 后 **2 过 / 18 红（全为 gate1/scope-mismatch）** `[本] 2026-11-02 03:50` → `evidence/T8b-gates-real.md` |
 | 影子实测 | 20 条信号：闸门 20/20 通过、零注入 1/20、token 中位 253 / 最坏 292（预算 500）`[本] 2026-11-02 03:26` → `evidence/T7b-shadow.md` |
 | 建边阈值 | `df≥2 && df<N && df≤max(2,⌈10%N⌉)`（S8；回退改 `linkEligible()` 一行） |
 
 ## 三、下一步
 
+**真注入（T9 已就绪，等安装决策）**：
+
+1. **合并与发版**：T9（`src/plugin.mjs`，宿主入口）走 分支 → PR → 合并 → `0.6.0` + `CHANGELOG.md` 一段。
+2. **安装 = 主人动作**：plugin 声明进 profile/preset，**先只开影子**（`enabled:false, shadow:true`），跑 1–2 天攒 `evidence/shadow/*.jsonl`；改配置走设置 UI 或 staging 脚本，**运行中不动 `profiles/*/cordis.patch.yml`**；重启只在主人明确要求时做。
+3. **两边同点共存验证**：与压缩插件的 `agent/pre-step` 同时开启时，核对一次真实会话的 `decision.messages` 顺序（两条记忆行相邻、互不覆盖）。
+4. **注入台账**：真注入后把"注入了哪条卡"也记进 `evidence/shadow/*.jsonl`（现在影子模式已经记；真注入路径建议同记一份，便于事后复盘）。
+
 **M4 收尾（按顺序）**：
 
-1. **合并与发版**：T8b（R10 adjudicate + R13 十道闸 + R12 作用域过滤 + CLI 接线）走 分支 → PR → 合并 → `0.5.0` + `CHANGELOG.md` 一段。
-2. ~~R11 walk 按作用域过滤~~ **已完成**（path-walker 在 R11 落 `resolveScope`/`allowRecord`；R12 也传 `scope` 并留兜底 `filterHitsByScope`）。真数据 20 张卡从 2/20 过闸 → **20/20**，卡内越界行 0。
-3. ~~CLI 把 `store/scope` 传给 runGates~~ **已完成**：`runGates({card, walkResult, store, scope})`；闸 1/2/4/5 在 CLI 路径上真核（`checks.*Checked` 有数）。
-4. **闸 3 的核验供给方**：validity（file/commit/version）与 preconditions 需要 fs/git 探针，喂 `validityChecks`/`preconditionChecks`；建议新增只读 `scripts/gates-check.mjs`。在那之前 `gate3/*-unchecked` 一律记 unverified（不假绿，但也还没真核）。
-5. **L4 人纠错落账**：`adjudicate({level:'L4-human-correction', votes:[{member:'human:owner', human:true, …}]})` 已能出 `decision:'correct'`；落账（写 correction + counter、不改原文）交聚合器。
-6. **精度评审（开闸前必做）**：拿 `evidence/shadow/*.jsonl` 抽样，让人/独立成员判"这条该不该注入"，先算 precision 与 F8（关联过泛）比例；不达标就不开真注入。
-7. **真注入那一刀（单独 PR）**：`agent/pre-step` 注入点 + 与压缩热清单并列互不代管 + 开关默认关；沿用 R13 全闸门 + 成本对照（首轮 ~35 tokens、命中 ≤300 实测）。
-8. 验收口径不变：不命中零注入；预算 ≤500；provenance/时间戳 100%；影子模式写盘只在 `evidence/shadow/`。
+5. ~~T8b 合并与发版~~ **已完成**（0.5.0）。
+6. ~~R11 walk 按作用域过滤~~ **已完成**（path-walker 在 R11 落 `resolveScope`/`allowRecord`；R12 也传 `scope` 并留兜底 `filterHitsByScope`）。真数据 20 张卡从 2/20 过闸 → **20/20**，卡内越界行 0。
+7. ~~CLI 把 `store/scope` 传给 runGates~~ **已完成**：`runGates({card, walkResult, store, scope})`；闸 1/2/4/5 在 CLI 路径上真核（`checks.*Checked` 有数）。
+8. **闸 3 的核验供给方**：validity（file/commit/version）与 preconditions 需要 fs/git 探针，喂 `validityChecks`/`preconditionChecks`；建议新增只读 `scripts/gates-check.mjs`。在那之前 `gate3/*-unchecked` 一律记 unverified（不假绿，但也还没真核）。
+9. **L4 人纠错落账**：`adjudicate({level:'L4-human-correction', votes:[{member:'human:owner', human:true, …}]})` 已能出 `decision:'correct'`；落账（写 correction + counter、不改原文）交聚合器。
+10. **精度评审（开闸前必做）**：拿 `evidence/shadow/*.jsonl` 抽样，让人/独立成员判"这条该不该注入"，先算 precision 与 F8（关联过泛）比例；不达标就不开真注入。
+11. 验收口径不变：不命中零注入；预算 ≤500；provenance/时间戳 100%；影子模式写盘只在 `evidence/shadow/`。
 
 ## 四、硬约束
 
