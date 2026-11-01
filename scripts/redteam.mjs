@@ -27,19 +27,19 @@ const codes = (r) => r.errors.map((e) => e.code);
 const first = (r, prefix) => codes(r).find((c) => c.startsWith(prefix)) ?? null;
 
 const cases = [];
-const run = (name, expect, fn) => {
+const run = (name, expect, fn, { control = false } = {}) => {
   let result;
   try { result = fn(); } catch (error) { cases.push({ name, expect, got: `throw:${error?.message}`, ok: false }); return; }
   const code = first(result, expect.split('/')[0]);
   const match = code === expect || (expect.endsWith('/') && typeof code === 'string' && code.startsWith(expect));
-  cases.push({ name, expect, got: code ?? (result.ok ? 'PASS(leak)' : codes(result).join(',')), ok: match });
+  cases.push({ name, expect, got: code ?? (result.ok ? 'PASS(leak)' : codes(result).join(',')), ok: match, control });
 };
 
-// 0. 基线：合格卡必须过
-run('baseline（合格卡）', 'GATE0_PASS', () => {
+// 0. 控制组：合格卡必须过（不算坏样本）
+run('控制组：合格卡不应被误杀', 'GATE0_PASS', () => {
   const r = runGates({ card: cardOf(), walkResult: { hits: [hit()], path: [], depth: 1 }, records: recordsOf(), scope: SCOPE });
   return { ok: r.ok, errors: r.ok ? [{ code: 'GATE0_PASS' }] : r.errors };
-});
+}, { control: true });
 // 1. 闸 0：缺 occurredAt
 run('缺时间戳', 'gate0/missing-occurred-at', () => {
   const card = cardOf(); delete card.claims[0].occurredAt;
@@ -99,6 +99,16 @@ run('超预算', 'gate6/budget-exceeded', () => {
   return runGates({ card, walkResult: { hits: [hit()], path: [], depth: 1 }, records: recordsOf(), scope: SCOPE, budgetTokens: 1 });
 });
 
-const bad = cases.filter((c) => !c.ok);
-console.log(JSON.stringify({ cases, total: cases.length, blocked: cases.length - bad.length, leaked: bad.length }, null, 2));
-process.exitCode = bad.length === 0 ? 0 : 1;
+const badSamples = cases.filter((c) => !c.control);
+const control = cases.filter((c) => c.control);
+const leaked = badSamples.filter((c) => !c.ok);
+const controlKilled = control.filter((c) => !c.ok);
+console.log(JSON.stringify({
+  cases,
+  badSamples: badSamples.length,
+  blocked: badSamples.length - leaked.length,
+  leaked: leaked.length,
+  control: control.length,
+  controlKilled: controlKilled.length,
+}, null, 2));
+process.exitCode = leaked.length === 0 && controlKilled.length === 0 ? 0 : 1;

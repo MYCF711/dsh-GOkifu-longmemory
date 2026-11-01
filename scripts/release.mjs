@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const dry = process.argv.includes('--dry-run');
+const requireCi = process.argv.includes('--require-ci');
 const run = (cmd) => execSync(cmd, { stdio: 'inherit' });
 const out = (cmd) => execSync(cmd, { encoding: 'utf8' }).trim();
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -20,6 +21,26 @@ if (out('git rev-parse HEAD') !== out('git rev-parse origin/main')) {
   console.error('release: HEAD 与 origin/main 不一致'); process.exit(1);
 }
 run('node scripts/check.mjs');
+
+// 必需检查：CI 结论必须成功（--require-ci 时阻断；否则只告警）
+try {
+  const headSha = out('git rev-parse HEAD');
+  const raw = execSync(`gh run list --commit ${headSha} --limit 1 --json conclusion,status,workflowName`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const runs = JSON.parse(raw);
+  const latest = Array.isArray(runs) ? runs[0] : null;
+  if (!latest) {
+    console.warn('release: 该提交没有 CI 运行记录');
+    if (requireCi) process.exit(1);
+  } else if (latest.conclusion !== 'success') {
+    console.warn(`release: CI 结论是 ${latest.conclusion ?? latest.status}（${latest.workflowName}）`);
+    if (requireCi) { console.error('release: --require-ci 要求 CI 成功，已中止'); process.exit(1); }
+  } else {
+    console.log(`release: CI 通过（${latest.workflowName}）`);
+  }
+} catch (error) {
+  console.warn(`release: 无法查询 CI（${String(error?.message ?? error).slice(0, 120)}）`);
+  if (requireCi) process.exit(1);
+}
 if (out('git tag -l ' + tag)) { console.error(`release: tag ${tag} 已存在`); process.exit(1); }
 
 // 从 CHANGELOG 抽出当前版本段落作为 release notes
