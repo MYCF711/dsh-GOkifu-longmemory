@@ -5,8 +5,9 @@
 //       store 里的**指针 + 证据路径**：命中主题 → 该主题上的棋谱与 claim →
 //       必要时沿 store 的相关边走一跳 → 排序、截断、估 token。
 //       **不做向量检索、不做模型判断「像不像」、不灌全文**（只给指针与 why）。
-// 入口：walkFromSignals({ signal, store, depth=2, limit=5, budgetTokens=500 }) -> result
-//       另导出 estimateTokens / normalizeSignal / matchTopics / WalkError 与常量。
+// 入口：walkFromSignals({ signal, store, scope=null, depth=2, limit=5, budgetTokens=500 }) -> result
+//       另导出 estimateTokens / normalizeSignal / matchTopics / WalkError /
+//       normalizeScopeKey / isScopeVisible / resolveScope 与常量。
 // 输入：
 //   signal = { kind:"root-message"|"activity"|"user-explicit", terms:[string],
 //              entities:[{kind?,key}], at?:epochms }                        （契约 §7.1）
@@ -42,6 +43,16 @@
 //   截断是**前缀式**的：按排序结果依次收，碰到 limit 或 budget 就停，后面的全部计入 omitted。
 //   ⇒ 同输入 + 同预算永远得到同一个前缀（可复现、可单测）。
 // 无命中：hits=[]、path=[]、tokens=0、omitted.count=0（沉默是默认，不"猜相关"）。
+// 作用域（T8b 修复：闸 1 抓到的 F2 越界）：
+//   每个条目（episode / claim）都带 scopeKey，**候选入 hits 之前**先过作用域闸：
+//     - 完全相同 ⇒ 可见；
+//     - `u:` 用户层 ⇒ 任何 `w:` 作用域都可见（跨项目的"你"；不同 `u:` 之间不可见）；
+//     - `w:` **只认完全相同**：不跨工作区（R13 闸 1 比这里宽，它还允许「子看父」的路径前缀，
+//       所以 walk 只会少给，不会让闸 1 变红）；缺 scopeKey / 未知哨兵（`w:unknown`）⇒ 不可见。
+//   当前作用域取 opts.scope > signal.scope > signal.scopeKey > store.scope|scopeKey|currentScope；
+//   全都拿不到 ⇒ **降级**为「只放用户层」（result.scope.mode = "user-layer-only"），默认拒绝跨域。
+//   被作用域拒掉的条目不进 hits，计入 `omitted.crossScope`（可审计），
+//   明细另见 `dropped.crossScope`（跨工作区）与 `dropped.scopeMissing`（无法证明同域）。
 // 错误语义：signal 不是对象 / kind 不在枚举内 ⇒ WalkError('walk/invalid-signal')；
 //   store 没有 list() ⇒ WalkError('walk/invalid-store')。其余情况**不抛**：
 //   缺时间戳的棋谱（"无时不入"）、folded-into 的子代理局、invalidated claim 只计数
@@ -113,6 +124,79 @@ function clampInt(value, fallback, lo, hi) {
 export function clampDepth(depth) {
   const n = finiteNumber(depth) ? Math.floor(depth) : MAX_DEPTH;
   return clampNumber(n, 1, MAX_DEPTH);
+}
+
+// ---------------------------------------------------------------------------
+// 作用域（方案 §4.10；与 R00 episode.scopeKey / R12 scopeKeyFromPath / R13 闸 1 同口径）
+// ---------------------------------------------------------------------------
+
+/** 路径体归一（= R00 normalizeWorkspace：反斜杠→正斜杠、盘符小写、去尾斜杠，不补根斜杠）。 */
+function normalizeScopePath(value) {
+  let s = String(value ?? '').trim().replace(/\\/g, '/');
+  if (s === '') return '';
+  const drive = /^([A-Za-z]):(\/.*)?$/.exec(s);
+  if (drive) s = `${drive[1].toLowerCase()}:${drive[2] ?? ''}`;
+  if (s.length > 1 && s.endsWith('/')) s = s.replace(/\/+$/, '');
+  return s;
+}
+
+/**
+ * scopeKey 归一（与 R00 `normalizeWorkspace`、R13 `normalizeScope` 同口径）：
+ *   `D:\Work\Demo` / `w:D:/Work/Demo/` → `w:d:/work/demo`；`u:Owner` → `u:owner`。
+ * 空 ⇒ 返回 ''（= 未知，见 resolveScope）。
+ */
+export function normalizeScopeKey(scope) {
+  const raw = String(scope ?? '').trim();
+  if (raw === '') return '';
+  if (raw.startsWith('u:')) return `u:${raw.slice(2)}`.toLowerCase();
+  const body = raw.startsWith('w:') ? raw.slice(2) : raw;
+  return `w:${normalizeScopePath(body)}`;
+}
+
+/** 未知哨兵：R00 的 `w:unknown`、R12 的 `w:<unknown>`、空体，都算"拿不到当前工作区"。 */
+export function isUnknownScope(scope) {
+  const normalized = normalizeScopeKey(scope);
+  return normalized === '' || normalized === 'w:unknown' || normalized === 'w:<unknown>' || normalized === 'w:';
+}
+
+/**
+ * 条目作用域在当前作用域下是否可见（方案 §4.10「显式祖先可见，默认不可见」）：
+ *   - 完全相同 ⇒ 可见；
+ *   - `u:` 用户层 ⇒ 任何 `w:` 作用域都可见；不同的 `u:` 之间不可见；
+ *   - `w:` **只认完全相同**（不跨工作区）。注意 R13 闸 1 比本函数宽：它还允许「子看父」的
+ *     路径前缀（`w:d:/work/repo/plugin` 看 `w:d:/work/repo`）。walk 更严格 ⇒ 只可能少给，
+ *     不可能产出闸 1 判红的东西（测试里用一致性断言锁住这个方向）。
+ *   - 缺 scopeKey / 未知哨兵 ⇒ 不可见（默认拒绝）。
+ * @returns {boolean}
+ */
+export function isScopeVisible(entryScope, currentScope) {
+  const entry = normalizeScopeKey(entryScope);
+  const current = normalizeScopeKey(currentScope);
+  if (entry === '' || current === '') return false;
+  if (isUnknownScope(entry) || isUnknownScope(current)) return false;
+  if (entry === current) return true;
+  if (entry.startsWith('u:')) return current.startsWith('w:'); // 用户层对任意工作区可见
+  return false;
+}
+
+/**
+ * 解析当前作用域，优先级：`scope`(opts) > `signal.scope` > `signal.scopeKey` >
+ * `store.scope` / `store.scopeKey` / `store.currentScope`。
+ * 全都没有（或只有未知哨兵）⇒ 返回 null：walk 进降级模式（只放用户层，默认拒绝跨域）。
+ * @returns {string|null} 归一后的 scopeKey
+ */
+export function resolveScope({ scope = null, signal = null, store = null } = {}) {
+  const fromStore = store
+    ? ['scope', 'scopeKey', 'currentScope']
+      .map((key) => (typeof store[key] === 'string' ? store[key] : null))
+      .find((value) => typeof value === 'string' && value.trim() !== '')
+    : null;
+  const candidates = [scope, signal?.scope, signal?.scopeKey, fromStore];
+  for (const candidate of candidates) {
+    const normalized = normalizeScopeKey(candidate);
+    if (normalized !== '' && !isUnknownScope(normalized)) return normalized;
+  }
+  return null;
 }
 
 function isNonAscii(char) {
@@ -365,6 +449,15 @@ function compareHops(a, b) {
   return String(a.link ?? '') < String(b.link ?? '') ? -1 : 1;
 }
 
+/**
+ * hit 上回显的 scopeKey：**归一后**的写法（与 R00/R13 同口径；store 里可能是 `w:D:\work\demo`
+ * 这种别名写法，回显原文会让消费方误判成"另一个作用域"）。
+ */
+function recordScopeKey(record) {
+  const normalized = normalizeScopeKey(typeof record?.scopeKey === 'string' ? record.scopeKey : '');
+  return normalized === '' ? null : normalized;
+}
+
 /** 对外暴露的 hit（内部用的 via / followedLinks / direct 不外泄）。 */
 function publicHit(hit) {
   const out = {
@@ -406,12 +499,14 @@ function readRecords(store, kind) {
  * @param {object} opts
  * @param {object} opts.signal   信号（契约 §7.1）
  * @param {object} opts.store    R15 store（只用 list()）
+ * @param {string} [opts.scope]  当前作用域（scopeKey）；缺省依次取 signal.scope / signal.scopeKey /
+ *                               store.scope|scopeKey|currentScope；全缺 ⇒ 只放 `u:` 用户层（默认拒绝跨域）
  * @param {number} [opts.depth=2]        最大跳数（clamp 到 1..2）
  * @param {number} [opts.limit=5]        最多几条命中
  * @param {number} [opts.budgetTokens=500] 命中总 token 上限
  * @param {number} [opts.maxTopics=8]    一次信号最多匹配几个主题
  * @param {number} [opts.maxHops=40]     path 最多几跳
- * @returns {object} {hits, path, omitted, tokens, maxDepth, matched, dropped, signal}
+ * @returns {object} {hits, path, omitted, tokens, maxDepth, depth, scope, matched, dropped, signal}
  */
 export function walkFromSignals(opts = {}) {
   const { signal, store } = opts ?? {};
@@ -419,6 +514,8 @@ export function walkFromSignals(opts = {}) {
     throw new WalkError('walk: 需要只读 store（R15 createStore 的 list/get）', 'walk/invalid-store');
   }
   const sig = normalizeSignal(signal);
+  const currentScope = resolveScope({ scope: opts.scope ?? null, signal, store });
+  const scopeMode = currentScope ? 'same-scope+user-layer' : 'user-layer-only';
   const maxDepth = clampDepth(opts.depth);
   const hitLimit = clampInt(opts.limit, WALK_DEFAULTS.limit, 0, 1000);
   const budgetTokens = clampInt(opts.budgetTokens, WALK_DEFAULTS.budgetTokens, 0, 1000000);
@@ -429,6 +526,8 @@ export function walkFromSignals(opts = {}) {
     noTopic: 0, // 匹配到的主题没挂任何可用棋谱
     topicsOverCap: 0, // 主题数被 maxTopics 砍掉
     folded: 0, // folded-into 的子代理局（不独立成谱）
+    crossScope: 0, // 跨工作区（scopeKey 不匹配且不是 u: 层）⇒ 不进 hits
+    scopeMissing: 0, // 缺 scopeKey / 未知哨兵（无法证明同域）⇒ 不进 hits
     noTime: 0, // 缺 occurredAt（"无时不入"）
     invalidated: 0, // 已作废的 claim
     unconnected: 0, // claim 既没依附命中棋谱、也不命中主题 key
@@ -436,17 +535,37 @@ export function walkFromSignals(opts = {}) {
     hopCap: 0, // path 超过 maxHops 被砍
   };
 
+  // 作用域闸：**候选入 hits 之前**判定（同一条目只计一次，避免多路到达重复计数）
+  const deniedScope = new Map(); // id → 'crossScope' | 'scopeMissing'
+  const allowRecord = (record, id) => {
+    const entryScope = typeof record?.scopeKey === 'string' ? record.scopeKey : '';
+    const normalized = normalizeScopeKey(entryScope);
+    let reason = null;
+    if (normalized === '' || isUnknownScope(normalized)) reason = 'scopeMissing';
+    else if (currentScope === null) reason = normalized.startsWith('u:') ? null : 'crossScope';
+    else if (!isScopeVisible(normalized, currentScope)) reason = 'crossScope';
+    if (reason === null) return true;
+    if (!deniedScope.has(id)) deniedScope.set(id, reason);
+    return false;
+  };
+
   const topics = readRecords(store, 'topics');
-  const matches = matchTopics({ signal: sig, topics });
+  // S9（2026-11-02 自裁，依据 evidence/M4-precision.md）：泛工具主题不做"起跳种子"。
+  // 30 个 df 最高 key 里 19 个是 kind=tool（echo/grep/bash/ls/git），tool 种子命中行仅 17.65% 有用；
+  // 过滤后 hopPrecision 50.38% → 87.38%（零注入 14.29% → 34.29%）。显式实体（用户点名某工具）仍可起跳。
+  const matches = matchTopics({ signal: sig, topics })
+    .filter((m) => m.topic.kind !== 'tool' || m.matchedBy === 'entity');
   dropped.topicsOverCap = Math.max(0, matches.length - maxTopics);
   const picked = matches.slice(0, maxTopics);
 
   const emptyResult = () => ({
     hits: [],
     path: [],
-    omitted: { count: 0, reason: null, byLimit: 0, byBudget: 0 },
+    omitted: { count: 0, reason: null, byLimit: 0, byBudget: 0, crossScope: 0 },
     tokens: 0,
     maxDepth,
+    depth: maxDepth,
+    scope: { current: currentScope, mode: scopeMode },
     matched: {
       topics: picked.map((m) => ({
         id: m.topic.id,
@@ -531,7 +650,7 @@ export function walkFromSignals(opts = {}) {
         kind: episodeHitClass(episode),
         depth: incoming.depth,
         text: typeof episode.l0 === 'string' ? episode.l0.trim() : '',
-        scopeKey: typeof episode.scopeKey === 'string' ? episode.scopeKey : null,
+        scopeKey: recordScopeKey(episode),
         direct: incoming.direct,
       });
       for (const hop of Array.isArray(incoming.via) ? incoming.via : []) addVia(hit, hop);
@@ -582,6 +701,7 @@ export function walkFromSignals(opts = {}) {
     for (const episodeId of [...holders].sort()) {
       const episode = episodeById.get(episodeId);
       if (!episode) continue;
+      if (!allowRecord(episode, `episodes:${episodeId}`)) continue; // 作用域闸：跨域/无域不入 hits
       if (isFolded(episode)) {
         if (!foldedSeen.has(episodeId)) {
           foldedSeen.add(episodeId);
@@ -655,6 +775,8 @@ export function walkFromSignals(opts = {}) {
       for (const hop of adjacency.get(parent.episode) ?? []) {
         const target = episodeById.get(hop.to);
         if (!target || isFolded(target)) continue;
+        // 作用域闸放在 followedLinks 之前：跨域棋谱连"相关边"都不留（path 里也不出现）
+        if (!allowRecord(target, `episodes:${hop.to}`)) continue;
         parent.followedLinks.push({ to: hop.to, why: [...hop.why], link: hop.link });
         const occurredAt = episodeTime(target);
         if (!finiteNumber(occurredAt)) {
@@ -711,6 +833,8 @@ export function walkFromSignals(opts = {}) {
     }
 
     if (attached) {
+      // 作用域闸放在"已确认相关"之后：omitted.crossScope 只数本来会进 hits 的相关条目
+      if (!allowRecord(claim, `claims:${claim.id}`)) continue;
       const hit = makeHit({
         episode: attached.episode,
         nodeId: attachedNodeId,
@@ -725,7 +849,7 @@ export function walkFromSignals(opts = {}) {
         kind,
         depth: attached.depth,
         text,
-        scopeKey: typeof claim.scopeKey === 'string' ? claim.scopeKey : null,
+        scopeKey: recordScopeKey(claim),
         direct: false,
       });
       for (const hop of attached.via) addVia(hit, hop);
@@ -752,6 +876,7 @@ export function walkFromSignals(opts = {}) {
       dropped.unconnected += 1;
       continue;
     }
+    if (!allowRecord(claim, `claims:${claim.id}`)) continue;
     const hit = makeHit({
       episode: support[0]?.episode ?? null,
       nodeId: typeof support[0]?.nodeId === 'string' && support[0].nodeId !== '' ? support[0].nodeId : null,
@@ -766,7 +891,7 @@ export function walkFromSignals(opts = {}) {
       kind,
       depth: 1,
       text,
-      scopeKey: typeof claim.scopeKey === 'string' ? claim.scopeKey : null,
+      scopeKey: recordScopeKey(claim),
       direct: true,
     });
     addVia(hit, { kind: 'match', from: 'signal', to: textMatch.topic.id, why: [textMatch.topic.key] });
@@ -795,6 +920,13 @@ export function walkFromSignals(opts = {}) {
     tokens += hit.tokens;
   }
   const reason = byLimit > 0 && byBudget > 0 ? 'limit+budget' : byLimit > 0 ? 'limit' : byBudget > 0 ? 'budget' : null;
+
+  // 作用域闸的计数落账（同一条目只计一次；跨域与缺域分开，便于审计是谁被挡下的）
+  for (const [, deniedBy] of deniedScope) {
+    if (deniedBy === 'crossScope') dropped.crossScope += 1;
+    else dropped.scopeMissing += 1;
+  }
+  const crossScope = dropped.crossScope + dropped.scopeMissing;
 
   // ---- 证据路径（每跳必须有 why；无 why 的跳不入 path）----
   const path = [];
@@ -832,10 +964,11 @@ export function walkFromSignals(opts = {}) {
   return {
     hits: selected.map(publicHit),
     path,
-    omitted: { count: byLimit + byBudget, reason, byLimit, byBudget },
+    omitted: { count: byLimit + byBudget, reason, byLimit, byBudget, crossScope },
     tokens,
     maxDepth,
     depth: maxDepth, // 别名：R13 闸 6b 直接读 result.depth（≤2）
+    scope: { current: currentScope, mode: scopeMode },
     matched: {
       topics: picked.map((m) => ({
         id: m.topic.id,
@@ -859,6 +992,9 @@ export default {
   normalizeSignal,
   estimateTokens,
   clampDepth,
+  normalizeScopeKey,
+  isScopeVisible,
+  resolveScope,
   WalkError,
   WALK_DEFAULTS,
   MAX_DEPTH,
