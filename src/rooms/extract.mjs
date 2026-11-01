@@ -192,6 +192,7 @@ export function extractSignals({ graph = null, events = null, maxQuote = MAX_QUO
   const list = normalizeEvents(events);
   const failures = [];
   const successes = [];
+  const commandSuccesses = [];
   const unsettled = [];
   const constraints = [];
   const dropped = { noSource: 0, noQuote: 0, unknownResult: 0 };
@@ -240,6 +241,63 @@ export function extractSignals({ graph = null, events = null, maxQuote = MAX_QUO
     if (bucket === 'failures') failures.push(entry);
     else if (bucket === 'successes') successes.push(entry);
     else unsettled.push(entry);
+  }
+
+  // ── 1b. 命令成功（S11，2026-11-02）：tool/result 以 `[exit code: 0]` 结尾 ⇒ 可验证成功 ──
+  // 依据：R08 真实语料 0 候选，是因为上游成功边全是 write 型；而 `bash/node --test` 这类
+  // "命令跑通"在日志里有 DSH 自己的退出码标记，属于可机械判定的成功。只收命令文本作 quote，
+  // 不收输出（输出里常含噪声），每条带 seq/time，无源不入。
+  if (list.length > 0) {
+    const calls = new Map();
+    for (const ev of list) {
+      if (ev?.type === 'tool/call') {
+        const callId = ev.data?.callId ?? ev.data?.message?.toolCallId ?? null;
+        if (typeof callId === 'string') {
+          calls.set(callId, {
+            name: typeof ev.data?.name === 'string' ? ev.data.name : null,
+            args: typeof ev.data?.arguments === 'string' ? ev.data.arguments : '',
+            seq: Number.isFinite(ev.seq) ? ev.seq : null,
+            time: Number.isFinite(ev.time) ? ev.time : null,
+          });
+        }
+        continue;
+      }
+      if (ev?.type !== 'tool/result') continue;
+      const text = messageText(ev.data?.message ?? ev.data);
+      const m = /\[exit code: (\d+)\]\s*$/.exec(text ?? '');
+      if (!m || m[1] !== '0') continue;
+      const callId = ev.data?.toolCallId ?? ev.data?.message?.toolCallId ?? null;
+      const call = callId ? calls.get(callId) : null;
+      if (!call || call.seq === null) {
+        dropped.noSource += 1;
+        continue;
+      }
+      let command = '';
+      try {
+        const parsed = call.args ? JSON.parse(call.args) : null;
+        command = typeof parsed?.command === 'string' ? parsed.command : (call.args ?? '');
+      } catch {
+        command = call.args ?? '';
+      }
+      const q = quote(command || `${call.name ?? 'tool'} (exit 0)`);
+      if (!q) {
+        dropped.noQuote += 1;
+        continue;
+      }
+      if (commandSuccesses.some((e) => e.seq === call.seq)) continue;
+      commandSuccesses.push({
+        seq: call.seq,
+        quote: q,
+        nodeId: null,
+        edgeId: null,
+        result: 'success',
+        verifyKind: 'exit-code',
+        transposition: false,
+        occurredAt: call.time,
+        tool: call.name,
+        source: 'exit-code',
+      });
+    }
   }
 
   // ── 2. 约束（用户原话，逐字）────────────────────────────────
@@ -354,12 +412,14 @@ export function extractSignals({ graph = null, events = null, maxQuote = MAX_QUO
   return {
     failures,
     successes,
+    commandSuccesses,
     unsettled,
     constraints,
     tools,
     counts: {
       failures: failures.length,
       successes: successes.length,
+      commandSuccesses: commandSuccesses.length,
       unsettled: unsettled.length,
       constraints: constraints.length,
       tools: tools.length,
