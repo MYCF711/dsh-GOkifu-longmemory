@@ -1,6 +1,6 @@
 {
   "name": "dsh-kifuin",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜。私有自用，不发 npm。",
   "type": "module",
@@ -18,7 +18,10 @@
     "./persist": "./src/rooms/persist.mjs",
     "./thread": "./src/rooms/thread.mjs",
     "./joseki": "./src/rooms/joseki.mjs",
-    "./claim": "./src/rooms/claim.mjs"
+    "./claim": "./src/rooms/claim.mjs",
+    "./inject": "./src/rooms/inject.mjs",
+    "./gates": "./src/rooms/gates.mjs",
+    "./walk": "./src/rooms/walk.mjs"
   },
   "scripts": {
     "check": "node scripts/check.mjs",

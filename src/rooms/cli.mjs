@@ -28,12 +28,18 @@ export const USAGE = `棋院 CLI（R14）
   node scripts/cli.mjs index [--root <dir>] [--json]     渲染 index.md（写到 stdout，不落盘）
   node scripts/cli.mjs verify [--store <dir>] [--json]   校验记忆库 manifest/checksums
   node scripts/cli.mjs rebuild [--store <dir>] [--json] 从权威条目重算派生索引
+  node scripts/cli.mjs inject --shadow --signal "<文本>" [--store <dir>] [--shadow-dir <dir>] [--json]
+                                                        记忆卡（M3 影子模式：只记录，不注入模型上下文）
 
 选项：
   --root <dir>   数据根（默认 $DSH_HOME）。只读，不写。
-  --json         输出 JSON（stats/walk/index）
+  --json         输出 JSON（stats/walk/index/inject）
   --limit <n>    walk 每个主题最多列几局（默认 5）
-  --store <dir> 记忆库根（默认 <root>/memory-context；verify/rebuild 用）
+  --store <dir> 记忆库根（默认 <root>/memory-context；verify/rebuild/inject 用）
+  --signal <s>   inject：当前信号原文（根 user 消息，机械抽词）
+  --shadow       inject：把「本来会注入什么」追加到 evidence/shadow/shadow.jsonl（不注入）
+  --shadow-dir  inject：shadow 目录（默认 <repo>/evidence/shadow；不得在 $DSH_HOME 内）
+  --kind <kind>  inject：信号类型（root-message|activity|user-explicit）
 `;
 
 // ---------------------------------------------------------------------------
@@ -54,6 +60,12 @@ export function parseArgs(argv = []) {
     else if (a.startsWith('--store=')) flags.store = a.slice('--store='.length);
     else if (a === '--limit') flags.limit = Number(args.shift());
     else if (a.startsWith('--limit=')) flags.limit = Number(a.slice('--limit='.length));
+    else if (a === '--signal') flags.signal = args.shift();
+    else if (a.startsWith('--signal=')) flags.signal = a.slice('--signal='.length);
+    else if (a === '--shadow-dir') flags['shadow-dir'] = args.shift();
+    else if (a.startsWith('--shadow-dir=')) flags['shadow-dir'] = a.slice('--shadow-dir='.length);
+    else if (a === '--kind') flags.kind = args.shift();
+    else if (a.startsWith('--kind=')) flags.kind = a.slice('--kind='.length);
     else if (a.startsWith('--')) flags[a.slice(2)] = true;
     else positional.push(a);
   }
@@ -681,6 +693,14 @@ export async function runCli(argv = [], io = {}) {
       if (flags.json) json({ markdown: md, episodes: corpus.episodes.length, links: corpus.links.length });
       else write(md);
       return { code: 0, stdout, stderr: '' };
+    }
+
+    if (cmd === 'inject') {
+      // R12 inject（影子模式）：调试指针 + 命中展开，只写 evidence/shadow/，不注入任何模型上下文。
+      const { runInject } = await import('./inject.mjs');
+      const res = await runInject({ flags, positional, root });
+      if (res.stdout) write(res.stdout);
+      return { code: res.code, stdout, stderr: res.stderr ?? '' };
     }
 
     return { code: 2, stdout: '', stderr: `未知命令：${cmd}\n\n${USAGE}` };

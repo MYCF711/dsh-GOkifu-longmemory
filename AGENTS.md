@@ -96,7 +96,7 @@
 
 ## 3 · 怎么跑
 
-**当前阶段：M1 完成（0.2.0）。** 命令：`node scripts/check.mjs`、`node --test`、`node scripts/cli.mjs stats|dump|walk`、`node scripts/release.mjs --dry-run`。M2 起补：`verify`/`rebuild`、边界审计、发布门禁。
+**当前阶段：M3 完成（0.4.0）。** 命令：`node scripts/check.mjs`、`node --test`、`node scripts/cli.mjs stats|dump|walk|verify|rebuild|inject --shadow`、`node scripts/archive.mjs --dry-run`、`node scripts/release.mjs --dry-run`。
 
 当前可用的**只读侦查命令**（均已实测，2026-11-02）：
 
@@ -272,19 +272,19 @@ AGENTS.md  本文件
 
 ---
 
-## 7 · 当前状态快照（2026-11-02 · v0.2.0）
+## 7 · 当前状态快照（2026-11-02 · v0.4.0）
 
 | 项 | 状态 |
 |---|---|
-| 阶段 | **M2 完成**（0.3.0）；M3 顺藤摸瓜注入（影子模式）进行中 |
+| 阶段 | **M3 完成**（0.4.0，影子模式）；M4 闸门与开闸决策进行中 |
 | 方案 | `方案.md` v0.9；Q1–Q7、Q13 已裁定；Q8–Q12/Q14 自裁；Q16 已由主人拍板"直接开跑" |
-| 仓库 | `MYCF711/dsh-kifuin`（私有）；版本 0.3.0；不发 npm |
+| 仓库 | `MYCF711/dsh-kifuin`（私有）；版本 0.4.0；不发 npm |
 | 模式 | superagent + Team Lead；每日 09:00 巡检 |
 | 边界 | `docs/记忆的职责边界.md` v0.1（判据 + 红线 + 审计 + 接口 + 定式/裁决边界） |
 | 对标 | `docs/对标-Hindsight.md`（六轴判据 + 本机基线实测 + 擂台协议） |
 | 调研 | `docs/调研/01`（495 行）、`02`（599 行）、`03`（318 行，带 URL） |
 | 本机语料 | **92 个日志（75,922 事件）、19 张棋谱（1,701 节点 / 1,941 边）、24 局 + 68 子代理、784 主题、212 边、84 卷、128 claim** `[本] 2026-11-02 03:12` |
-| 校验 | `node scripts/check.mjs` PASS；`node --test` 150 条全绿；`archive --dry-run` 可复算 |
+| 校验 | `node scripts/check.mjs` PASS；`node --test` 216 条全绿；影子 20/20 过闸 |
 | 上游 | 压缩仓 `dsh-GOkifu-compact` 1.17.0（未发布）；只读；**工作树可能被另一会话修改，引用行号前先 `git status`** |
 
 > **本节是快照，不是实时状态。** 实时状态看 `计划表.md`（M1 建）。
