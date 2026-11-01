@@ -53,6 +53,7 @@ import {
 } from './rooms/inject.mjs';
 import { runGates } from './rooms/gates.mjs';
 import { createStore } from './rooms/persist.mjs';
+import { createWalkCache } from './rooms/walk.mjs';
 
 /** 插件名（宿主用来标识这个插件）。 */
 export const name = 'dsh-kifuin';
@@ -212,6 +213,7 @@ async function resolveDeps(config) {
   }
   return {
     createStore: typeof injected.createStore === 'function' ? injected.createStore : createStore,
+    createWalkCache: typeof injected.createWalkCache === 'function' ? injected.createWalkCache : createWalkCache,
     buildMemoryCard: typeof injected.buildMemoryCard === 'function' ? injected.buildMemoryCard : buildMemoryCard,
     runGates: typeof injected.runGates === 'function' ? injected.runGates : runGates,
     writeShadow: typeof injected.writeShadow === 'function' ? injected.writeShadow : writeShadow,
@@ -277,9 +279,10 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   const signal = signalFromText(text, { at });
   signal.scopeKey = scope;
 
+  const cache = deps.walk ? walkCacheFor(storeRoot, store, deps) : null;
   let walk = null;
   if (deps.walk) {
-    walk = deps.walk({ signal, store, scope, depth: 2, limit: config.limit, budgetTokens: config.budgetTokens }) ?? null;
+    walk = deps.walk({ signal, store, scope, cache, depth: 2, limit: config.limit, budgetTokens: config.budgetTokens }) ?? null;
   }
   if (!walk) {
     const { degradedWalk } = await import('./rooms/inject.mjs');
@@ -297,6 +300,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   };
 
   const card = deps.buildMemoryCard({
+    cache,
     signal,
     walkResult,
     store,
@@ -358,6 +362,23 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
  * @param {object} [rawConfig]
  * @returns {{name:string, hook:string, registered:boolean, config:object}}
  */
+const WALK_CACHES = new Map();
+
+function walkCacheFor(storeRoot, store, deps) {
+  try {
+    const mf = `${storeRoot}/manifest.json`;
+    const stamp = fs.existsSync(mf) ? fs.statSync(mf).mtimeMs : 0;
+    const key = `${storeRoot}::${stamp}`;
+    if (WALK_CACHES.has(key)) return WALK_CACHES.get(key);
+    const build = typeof deps.createWalkCache === 'function' ? deps.createWalkCache : createWalkCache;
+    const cache = build(store);
+    WALK_CACHES.set(key, cache);
+    return cache;
+  } catch {
+    return null;
+  }
+}
+
 export function apply(ctx, rawConfig = {}) {
   const config = sanitizeConfig(rawConfig);
   const injected = new WeakSet(); // 每会话只注入一次（对象身份；WeakSet 不留引用）
@@ -365,6 +386,19 @@ export function apply(ctx, rawConfig = {}) {
   if (typeof ctx?.on !== 'function') {
     warn(ctx, 'ctx.on 不可用（插件未挂载，宿主行为不变）');
     return { name, hook: HOOK, registered: false, config };
+  }
+
+  // 预热：把 walk 需要的四类记录读进内存一次（~0.7s），把成本挪到插件加载，而不是首轮注入。
+  // 未开 enabled/shadow 或库不存在时跳过；失败静默（首轮退回冷路径，仍不影响会话）。
+  try {
+    if (config.enabled || config.shadow) {
+      const root = resolveStoreRoot(config);
+      if (root && fs.existsSync(root)) {
+        walkCacheFor(root, createStore({ root }), { createWalkCache });
+      }
+    }
+  } catch (error) {
+    warn(ctx, `预热失败（首轮可能变慢）：${String(error?.message ?? error)}`);
   }
 
   ctx.on(HOOK, async (payload, next) => {

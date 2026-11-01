@@ -2,6 +2,23 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.6.1（2026-11-02）
+
+注入延迟修复：把 1,281 次文件读挪出 pre-step 热路径。
+
+### 变化
+- **R11 `createWalkCache`**：一次读出 episodes/topics/links/claims，`walkFromSignals({cache})` 走内存。
+- **R12 `buildMemoryCard({cache})`**：claims/episodes/topics 从缓存读，不再每次 `store.list`。
+- **plugin 预热**：`apply()` 时构建缓存（一次性），首轮注入走热路径；失败只 warn，不影响会话。
+- **`scripts/bench-inject.mjs`**：冷/热 + p50/p90/p95 基准。
+
+### 实测（2026-11-02 04:40，10 信号 × 5 轮）
+- 冷缓存 **548 ms**（移到插件加载）
+- 热 **p50 5.1 ms** / p90 50.8 / p95 62.7 / max 118.9（偶发 GC 尖峰）
+- 298 条测试全绿
+
+> 口径：`方案.md` §8.2 目标 ≤50ms/步；p50 达标，p95 在阈值附近，尖峰待压。
+
 ## 0.6.0（2026-11-02）
 
 M5 起步：真注入的宿主入口（默认关）+ 留一局（LOO）机械评测。

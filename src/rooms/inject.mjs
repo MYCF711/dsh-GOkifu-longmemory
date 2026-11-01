@@ -245,7 +245,7 @@ export function filterHitsByScope(hits, scope) {
 // store 读视图（只读；只用 list/get/counts 三个方法，缺 store 时全部降级为空）
 // ---------------------------------------------------------------------------
 
-function storeView(store) {
+function storeView(store, cache = null) {
   const view = {
     indexPath: null,
     episodeCount: 0,
@@ -265,7 +265,8 @@ function storeView(store) {
   } catch { /* 计数失败不阻塞注入：0 局如实写 0 */ }
 
   try {
-    for (const item of store.list('claims')) {
+    const claimItems = cache?.claims ? cache.claims.map((rec) => ({ record: rec })) : store.list('claims');
+    for (const item of claimItems) {
       const rec = item?.record;
       if (!rec || typeof rec.text !== 'string') continue;
       const claim = {
@@ -287,7 +288,8 @@ function storeView(store) {
   } catch { /* 坏条目跳过：注入宁可少一条，也不抛 */ }
 
   try {
-    for (const item of store.list('episodes')) {
+    const episodeItems = cache?.episodes ? cache.episodes.map((rec) => ({ record: rec })) : store.list('episodes');
+    for (const item of episodeItems) {
       const rec = item?.record;
       if (rec && typeof rec.id === 'string') view.episodesById.set(rec.id, rec);
     }
@@ -532,6 +534,7 @@ const CLIP_STEPS = Object.freeze([TEXT_CLIP, TIGHT_CLIP]);
  *            indexTokens:number, limit:number, budgetTokens:number, cardVersion:number}}
  */
 export function buildMemoryCard({
+  cache = null,
   signal = null,
   walkResult = null,
   store = null,
@@ -549,7 +552,7 @@ export function buildMemoryCard({
   const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
   // walk 在遍历时拒掉的条数（R11 自己按作用域过滤的统计）：只作审计字段，不算"卡里少了几条"。
   const crossScopeWalk = Number.isFinite(walkCrossScope) && walkCrossScope > 0 ? walkCrossScope : 0;
-  const view = storeView(store);
+  const view = storeView(store, cache);
   const hits = Array.isArray(walkResult?.hits) ? walkResult.hits : [];
   const idxPath = indexPath ?? view.indexPath ?? 'memory-context/index.md';
   const episodes = Number.isFinite(episodeCount) ? episodeCount : view.episodeCount;
@@ -714,8 +717,8 @@ export function buildMemoryCard({
  * @returns {{hits:Array, path:Array, omitted:{count:number,reason:string}, tokens:number,
  *            depth:number, degraded:true}}
  */
-export function degradedWalk({ signal = null, store = null, limit = ENTRY_LIMIT } = {}) {
-  const view = storeView(store);
+export function degradedWalk({ signal = null, store = null, limit = ENTRY_LIMIT, cache = null } = {}) {
+  const view = storeView(store, cache);
   const needles = [];
   for (const t of Array.isArray(signal?.terms) ? signal.terms : []) {
     const s = String(t ?? '').trim().toLowerCase();
@@ -737,7 +740,7 @@ export function degradedWalk({ signal = null, store = null, limit = ENTRY_LIMIT 
   let topicRecords = [];
   try {
     topicRecords = typeof store.list === 'function'
-      ? store.list('topics').map((x) => x?.record).filter((r) => r && typeof r.key === 'string')
+      ? (cache?.topics ?? store.list('topics').map((x) => x?.record)).filter((r) => r && typeof r.key === 'string')
       : [];
   } catch {
     topicRecords = [];
