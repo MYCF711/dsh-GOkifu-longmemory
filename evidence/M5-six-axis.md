@@ -1,16 +1,16 @@
 # M5 六轴报告（一条命令可复算 · 零模型调用）
 
 > 生成：`node scripts/m5-report.mjs --store tmp/memory-context --workspace . --root $DSH_HOME --evidence evidence/M5-six-axis.md`
-> 运行时刻：2026-11-01T21:01:50.428Z（UTC；epoch ms 1793566910428）· 版本 m5-report v1 · 耗时 25615 ms · 零模型调用 · 只读
+> 运行时刻：2026-11-01T21:25:50.868Z（UTC；epoch ms 1793568350868）· 版本 m5-report v1 · 耗时 28035 ms · 零模型调用 · 只读
 
 ## 1 · 六轴总表
 
 | 轴 | 判据 | 指标 | 值 | 单位 | 样本 n | 状态 |
 |---|---|---|---|---|---|---|
 | **A1** | 负迁移受控 | `staleTransferRate` | **0.00%** | rate | 9 | `measured` |
-| **A2** | 收益（主判据） | `repeatFailureRate（LOO）` | **13.33%** | rate | 105 | `measured` |
-| **A3** | 可靠性 | `injectFailureRate` | **0.00%** | rate | 21 | `not-live` |
-| **A4** | 延迟/成本 | `walk→card→gates p50` | **1.14** | ms | 50 | `measured` |
+| **A2** | 收益（主判据） | `repeatFailureRate（LOO）` | **19.18%** | rate | 73 | `measured` |
+| **A3** | 可靠性 | `injectFailureRate` | **0.00%** | rate | 22 | `not-live` |
+| **A4** | 延迟/成本 | `walk→card→gates p50` | **1.23** | ms | 50 | `measured` |
 | **A5** | 作用域隔离 | `crossScopeLeakRate` | **0.00%** | rate | 6 | `measured` |
 | **A6** | 可回溯 | `provenanceCoverage` | **100.00%** | rate | 6 | `measured` |
 
@@ -43,46 +43,50 @@
 }
 ```
 
-### A2 · 收益（不重复踩坑） —— `repeatFailureRate（LOO）` = 13.33%
+### A2 · 收益（不重复踩坑） —— `repeatFailureRate（LOO）` = 19.18%
 
-- 状态：`measured`（样本 n=105）
-- 口径与限制：LOO（both 口径）repeat=14 novel=91；1σ=±3.32%；coverage=79.17%（19/24 局）
+- 状态：`measured`（样本 n=73）
+- 口径与限制：LOO（both 口径，**只计像错误的签名**）repeat=14 novel=59；1σ=±4.61%；coverage=79.17%（19/24 局）；全量口径 13.89%（15/108，含非错误文本）
 - 明细：
 
 ```json
 {
   "repeat": 14,
-  "novel": 91,
-  "sigma": 0.033174223435207956,
+  "novel": 59,
+  "sigma": 0.046079285195645324,
+  "rateErrorOnly": 0.1917808219178082,
+  "rateAll": 0.1388888888888889,
+  "signaturesErrorOnly": 73,
+  "signaturesAll": 108,
   "rootEpisodes": 24,
   "evaluatedEpisodes": 19,
-  "distinctSignatures": 91,
+  "distinctSignatures": 93,
   "variants": {
     "both": {
       "episodes": 24,
       "evaluated": 19,
-      "signatures": 105,
-      "repeat": 14,
-      "novel": 91,
-      "rate": 0.13333333333333333,
+      "signatures": 108,
+      "repeat": 15,
+      "novel": 93,
+      "rate": 0.1388888888888889,
       "coverage": 0.7916666666666666
     },
     "edge": {
       "episodes": 24,
       "evaluated": 7,
-      "signatures": 56,
-      "repeat": 10,
-      "novel": 46,
-      "rate": 0.17857142857142858,
+      "signatures": 59,
+      "repeat": 11,
+      "novel": 48,
+      "rate": 0.1864406779661017,
       "coverage": 0.2916666666666667
     },
     "event": {
       "episodes": 24,
       "evaluated": 19,
-      "signatures": 120,
-      "repeat": 16,
-      "novel": 104,
-      "rate": 0.13333333333333333,
+      "signatures": 123,
+      "repeat": 17,
+      "novel": 106,
+      "rate": 0.13821138211382114,
       "coverage": 0.7916666666666666
     }
   }
@@ -91,8 +95,8 @@
 
 ### A3 · 可靠性（注入失败率） —— `injectFailureRate` = 0.00%
 
-- 状态：`not-live`（样本 n=21）
-- 口径与限制：真注入默认关（enabled=false，shadow=true）；0 失败率来自 21 条单测覆盖，不是线上样本；本机从未在宿主里真跑过一次注入（liveAttempts=0）⇒ 不能当可靠性证据
+- 状态：`not-live`（样本 n=22）
+- 口径与限制：真注入默认关（enabled=false，shadow=true）；0 失败率来自 22 条单测覆盖，不是线上样本；本机从未在宿主里真跑过一次注入（liveAttempts=0）⇒ 不能当可靠性证据
 - 明细：
 
 ```json
@@ -102,27 +106,27 @@
   "hook": "agent/pre-step",
   "enabledDefault": false,
   "shadowDefault": true,
-  "unitTests": 21,
+  "unitTests": 22,
   "testFile": "test/plugin.test.mjs",
   "liveAttempts": 0
 }
 ```
 
-### A4 · 延迟与成本 —— `walk→card→gates p50` = 1.14
+### A4 · 延迟与成本 —— `walk→card→gates p50` = 1.23
 
 - 状态：`measured`（样本 n=50）
-- 口径与限制：墙钟＝walk→card→gates（不含宿主导入）；p90=3.48ms · p95=5.55ms · max=103.1ms；tokens p50=46（预算 500）；冷缓存 410.37ms（一次性）；p95 受 GC 影响
+- 口径与限制：墙钟＝walk→card→gates（不含宿主导入）；p90=4.16ms · p95=5.59ms · max=8.7ms；tokens p50=46（预算 500）；冷缓存 641.88ms（一次性）；p95 受 GC 影响
 - 明细：
 
 ```json
 {
-  "p50": 1.14,
-  "p90": 3.48,
-  "p95": 5.55,
-  "max": 103.1,
+  "p50": 1.23,
+  "p90": 4.16,
+  "p95": 5.59,
+  "max": 8.7,
   "tokensP50": 46,
   "tokensP90": 296,
-  "coldCacheMs": 410.37,
+  "coldCacheMs": 641.88,
   "budgetTokens": 500,
   "gatesFailed": 0,
   "zeroInjection": 42,
@@ -170,7 +174,7 @@
 - 工作区：`D:\DeepSeek Harness\default-workspace\长期记忆系统`（scope=`w:d:/DeepSeek Harness/default-workspace/长期记忆系统`）
 - 棋谱 92 · 主题 780 · claim 125
 - 热路径 50 次（A4）· 抽样卡片 20 张（A5/A6）· 信号文本 50 条
-- 冷缓存 410.37 ms（一次性）· 闸不过 0 · 零注入 42 · walk 拒跨域 655
+- 冷缓存 641.88 ms（一次性）· 闸不过 0 · 零注入 42 · walk 拒跨域 655
 
 ## 4 · 复现命令
 

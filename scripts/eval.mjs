@@ -106,6 +106,9 @@ export function normalizeErrorSignature(text) {
   return s;
 }
 
+/** 只保留"像错误"的签名（A2 收紧口径）：用于剔除把普通输出当失败的噪声。 */
+export const ERROR_ONLY_RE = /(cannot|can't|could not|error|failed|failure|enoent|eacces|eaddrinuse|not found|refused|timeout|timed out|denied|invalid|exception|traceback|fatal)/i;
+
 /** 退化签名判定（信息量为 0 ⇒ 不参与 repeat/novel，只计数）。 */
 export function isDegenerateSignature(signature) {
   const s = String(signature ?? '').trim();
@@ -272,6 +275,8 @@ export function evaluateLoo(records, opts = {}) {
   const seenIn = new Map(); // signature → 出现过的局（坑榜）
   let repeatTotal = 0;
   let novelTotal = 0;
+  let repeatErrorTotal = 0;
+  let novelErrorTotal = 0;
 
   // 同一 startedAt 的局归一组：先用**组外**（严格更早）的 memory 判定，再把整组并入 memory
   // —— 保证"同一时刻互不可见"，也保证结果不依赖同刻局之间的排序。
@@ -289,6 +294,9 @@ export function evaluateLoo(records, opts = {}) {
       index += 1;
       const repeatSignatures = record.signatures.filter((s) => memory.has(s));
       const novelSignatures = record.signatures.filter((s) => !memory.has(s));
+      const errorOnly = record.signatures.filter((s) => ERROR_ONLY_RE.test(s));
+      const repeatError = errorOnly.filter((s) => memory.has(s)).length;
+      const novelError = errorOnly.length - repeatError;
       const denominator = record.signatures.length;
       return {
         n: index,
@@ -304,12 +312,17 @@ export function evaluateLoo(records, opts = {}) {
         memorySize,
         repeatSignatures,
         novelSignatures,
+        errorOnly: errorOnly.length,
+        repeatError,
+        novelError,
       };
     });
     for (const row of rowsInGroup) {
       rows.push(row);
       repeatTotal += row.repeat;
       novelTotal += row.novel;
+      repeatErrorTotal += row.repeatError;
+      novelErrorTotal += row.novelError;
     }
     for (const record of group.records) {
       for (const signature of record.signatures) {
@@ -321,6 +334,7 @@ export function evaluateLoo(records, opts = {}) {
   }
 
   const total = repeatTotal + novelTotal;
+  const errorOnlyTotal = repeatErrorTotal + novelErrorTotal;
   const byScope = [];
   const scopeMap = new Map();
   for (const row of rows) {
@@ -355,6 +369,10 @@ export function evaluateLoo(records, opts = {}) {
       repeat: repeatTotal,
       novel: novelTotal,
       rate: total === 0 ? null : repeatTotal / total,
+      signaturesErrorOnly: errorOnlyTotal,
+      repeatError: repeatErrorTotal,
+      novelError: novelErrorTotal,
+      rateErrorOnly: errorOnlyTotal === 0 ? null : repeatErrorTotal / errorOnlyTotal,
       distinctSignatures: memory.size,
       episodesWithRepeat: rows.filter((r) => r.repeat > 0).length,
     },
