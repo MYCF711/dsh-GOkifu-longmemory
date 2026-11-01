@@ -226,15 +226,31 @@ async function resolveDeps(config) {
   };
 }
 
+function expandHomePlaceholder(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return null;
+  const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME !== '' ? process.env.DSH_HOME : '';
+  const hasPlaceholder = /^(<DSH_HOME>|\$DSH_HOME)([\/]|$)/i.test(text);
+  if (!hasPlaceholder) return text;
+  if (!home) return null; // 占位符解析不了就当作没有配置（宁可沉默，不去猜一个路径）
+  return text.replace(/^(<DSH_HOME>|\$DSH_HOME)/i, home);
+}
+
 function resolveStoreRoot(config) {
-  if (config.storeRoot) return path.resolve(config.storeRoot);
+  if (config.storeRoot) {
+    const expanded = expandHomePlaceholder(config.storeRoot);
+    return expanded ? path.resolve(expanded) : null;
+  }
   const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME !== '' ? process.env.DSH_HOME : '';
   if (!home) return null;
   return path.resolve(home, 'memory-context');
 }
 
 function resolveShadowDir(config) {
-  if (config.shadowDir) return path.resolve(config.shadowDir);
+  if (config.shadowDir) {
+    const expanded = expandHomePlaceholder(config.shadowDir);
+    return expanded ? path.resolve(expanded) : null;
+  }
   try {
     return defaultShadowDir();
   } catch {
@@ -472,6 +488,10 @@ export function apply(ctx, rawConfig = {}) {
   });
 
   return { name, hook: HOOK, registered: true, config };
+}
+
+export function enforceStoreRoot(config = {}) {
+  return resolveStoreRoot(config);
 }
 
 export default {

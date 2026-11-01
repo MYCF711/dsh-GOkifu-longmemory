@@ -340,7 +340,9 @@ test('R16: shadow:true ⇒ 不注入、写 evidence/shadow、原 decision', asyn
 
 test('R16: shadow 写不进去（目录在 $DSH_HOME 内）⇒ 不注入、不抛、warn', async () => {
   const { workspace, storeRoot, cleanup } = makeWorkspace();
-  const home = process.env.DSH_HOME || path.join(tmpdir(), 'fake-dsh-home');
+  const home = path.join(tmpdir(), `fake-dsh-home-${process.pid}`);
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
   try {
     const { ctx, hooks, warns } = makeCtx();
     const { session } = makeSession(workspace);
@@ -352,6 +354,8 @@ test('R16: shadow 写不进去（目录在 $DSH_HOME 内）⇒ 不注入、不�
     assert.equal(out, original);
     assert.ok(warns.some((w) => w.includes('影子记录写入失败')), warns.join(' | '));
   } finally {
+    if (previousHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previousHome;
     cleanup();
   }
 });
@@ -575,5 +579,19 @@ test('R16: 闸 3 真核验 —— validity 核不过 ⇒ 闸不过 ⇒ 不注入
   } finally {
     rmSync(workspace, { recursive: true, force: true });
     rmSync(storeRoot, { recursive: true, force: true });
+  }
+});
+
+test('R16: storeRoot 支持 <DSH_HOME> / $DSH_HOME 占位符；无 home 时视为未配置', async () => {
+  const { enforceStoreRoot } = await import('../src/plugin.mjs');
+  const previousHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = path.join(tmpdir(), 'kifuin-home-placeholder');
+  try {
+    assert.equal(enforceStoreRoot('<DSH_HOME>/memory-context'), path.resolve(process.env.DSH_HOME, 'memory-context'));
+    assert.equal(enforceStoreRoot('$DSH_HOME/memory-context'), path.resolve(process.env.DSH_HOME, 'memory-context'));
+  } finally {
+    delete process.env.DSH_HOME;
+    assert.equal(enforceStoreRoot('<DSH_HOME>/memory-context'), null, '无 home 时占位符不可解析 ⇒ null（沉默，不猜路径）');
+    if (previousHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previousHome;
   }
 });
