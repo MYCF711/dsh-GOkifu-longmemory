@@ -159,3 +159,87 @@ node tmp/walk-probe2.mjs           # 真实 hit/path 样例 + depth 对比
 ---
 
 **结论**：R11 按 §7.1/§7.2 落地，17 条 tombstone 全绿、全仓 167 条不红；真实语料只读实测 6 组信号（含 4 组沉默）数字如上，写盘 0 字节。
+
+
+---
+
+## 十·T8b 修复：R11 walk 按作用域过滤（2026-11-02 04:05，仍在本刀写作用域内）
+
+**背景**：T8b（R13 闸门）在真实 20 张影子卡上抓到 F2 —— R11 只按主题走、不按 `scopeKey` 过滤：
+**93 行里 52 行来自另一个工作区**，闸 1 判 18/20 张卡红（全部 `gate1/scope-mismatch`）。
+
+**改动**（`src/rooms/walk.mjs`，+145 / −9）：
+
+| 项 | 实现 |
+|---|---|
+| 新参数 | `walkFromSignals({ …, scope })`；解析优先级 `opts.scope` > `signal.scope` > `signal.scopeKey` > `store.scope\|scopeKey\|currentScope` |
+| 归一化 | `normalizeScopeKey()` = R00 `normalizeWorkspace` / R12 `scopeKeyFromPath` / R13 `normalizeScope` 同口径（只小写盘符、反斜杠转 `/`、去尾斜杠；`u:` 全小写） |
+| 可见性 | `isScopeVisible()`：完全相同 ⇒ 可见；`u:` 用户层 ⇒ 任意 `w:` 作用域可见（不同 `u:` 之间不可见）；**`w:` 只认完全相同（不跨工作区）**；缺 `scopeKey` / 未知哨兵（`w:unknown`）⇒ 不可见 |
+| 过滤位置 | **候选入 hits 之前**：直接命中棋谱、一跳棋谱（跨域边连 `followedLinks` 都不记 ⇒ 不进 path）、claim（依附/文本命中**确认相关之后**、成 hit 之前） |
+| 可审计 | `omitted.crossScope` = 相关但被作用域闸挡下的候选数；明细 `dropped.crossScope`（跨工作区）+ `dropped.scopeMissing`（无法证明同域）；`result.scope = {current, mode}`（`same-scope+user-layer` / `user-layer-only`） |
+| 降级 | 拿不到当前作用域 ⇒ `mode="user-layer-only"`：**只放 `u:` 用户层**，`w:` 一律拒绝（默认拒绝跨域，不是放行） |
+| 回显 | `hit.scopeKey` 回显**归一后**的写法（store 里 `w:D:\work\demo` 这类别名不会冒充"另一个作用域"） |
+
+**取舍（自裁，可复核）**：walk 比闸 1 **更严** —— 闸 1/R12 都允许 `w:` 的「子看父」路径前缀
+（`w:d:/work/repo/plugin` 看得到 `w:d:/work/repo`），walk 只认完全相同。理由：① 按 Lead 指令
+「`w:` 条目不得跨工作区」；② 更严只会少给，不可能产出闸 1 判红的东西（测试用一致性断言锁住方向）；
+③ 若日后要对齐父目录可见，只改 `isScopeVisible()` 一行：
+`if (entry.startsWith('w:') && current.startsWith('w:')) { const base = entry.slice(2); const leaf = current.slice(2); return leaf === base || leaf.startsWith(base + '/'); }`
+
+### 10.1 测试（walk 23 条，新增 6 条 scope 用例）
+
+| 用例 | 断言 |
+|---|---|
+| 同 scope 命中（含写法归一） | `w:D:\work\demo`（反斜杠+盘符大写）与 `w:d:/work/demo` 视为同域；跨域棋谱/claim 不入 hits；`hit.scopeKey ∈ {同域, u:owner}` |
+| 跨 scope 不命中 | `ep-b1`、`c-scope-cross2`（同域证据、别域结论）、无 `scopeKey` 的条目全部缺席；`omitted.crossScope=4`、`dropped.crossScope=2`、`dropped.scopeMissing=2` |
+| 跨域相关边不进 path | path 里不出现 `ep-b1`，也不出现跨域边 `link-scope-2`；同域边照常带 why |
+| `u:` 用户层可见 | scope 为 `w:…` 时 `u:owner` claim 照常入选（真实语料里 `u:owner` 只有 1 条） |
+| scope 缺失降级 | 无 scope ⇒ `hits` 只剩 `u:owner` 那条，所有 `w:` 被拒并计入 `omitted.crossScope=5`；`mode="user-layer-only"` |
+| 解析优先级 + 归一化 | `opts > signal.scope > signal.scopeKey > store.scopeKey|currentScope`；`w:unknown`/`w:<unknown>` 哨兵不算作用域 |
+| 与 R13 闸 1 一致性 | 11×11 作用域矩阵：`normalizeScopeKey === normalizeScope`；**walk 可见 ⇒ 闸 1 必可见**；并显式记录"子看父"这条已知差异 |
+| crossScope 与 limit/budget 分账 | `omitted.crossScope === dropped.crossScope + dropped.scopeMissing`；`limit=1` 时 crossScope 不变 |
+
+### 10.2 真实对比（语料 `tmp/memory-context`：92 局 / 780 主题 / 199 边 / 125 claim，只读）
+
+**A. T8b 的 20 张影子卡**（同一批 df 最高的 20 个主题 key，`scope=w:d:/DeepSeek Harness/default-workspace/长期记忆系统`；
+before = HEAD(103edea) 的 walk，after = 本刀 + `scope`）：
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| hits / 渲染行 | **93** | **65** |
+| 其中越界（`w:e:/Documents/deepseek-harness/default-workspace`） | **52** | **0** |
+| 其中同域 | 41 | **65**（+24，+59%） |
+| 闸 1 结果 | **2/20 过，18 红**（全 `gate1/scope-mismatch`） | **20/20 过，0 红** |
+| 卡型 | 6 全越界 / 12 混合 / 2 干净 | 20 干净 |
+| `omitted.crossScope` 合计 | 无此字段 | **361**（相关但被作用域挡下） |
+
+> 修复前 93/52/2-of-20 与 T8b 实测（`evidence/T8b-gates-real.md`：93 行 = 同域 41 + 越界 52、2 过 18 红）**逐项吻合**，
+> 说明本刀的 before 复现口径与 T8b 一致；修复后越界清零，且同域召回反而从 41 升到 65（被越界条目挤掉的同域指针回来了）。
+
+**B. T7a 六组信号（同语料，默认 limit=5 / budget=500）**
+
+| 信号 | 修复前 hits（越界） | 修复后 hits（越界） | 修复后 crossScope | 修复后 tokens |
+|---|---|---|---|---|
+| `dsh-kifuin` | 5（0） | 5（0），全同域 | 31 | 206 |
+| `记忆` | 5（0） | 5（0），全同域 | 9 | 218 |
+| `棋谱` | 5（**5**） | **0**（沉默：该主题只挂在别的工作区） | 1 | 0 |
+| `压缩` | 3（**3**） | 1（0），`u:owner` | 5 | 29 |
+| `entities:[{kind:"tool",key:"node"}]` | 5（**2**） | 5（0），全同域（越界挤掉的同域指针回来了） | 18 | 188 |
+| `zzz-不存在的主题` | 0 | 0 | 0 | 0 |
+
+### 10.3 与 R12 的接口（给 card-smith / Lead）
+
+- 卡片的「跨作用域未纳入 N 条」应取 **`walkResult.omitted.crossScope`**（R11 已在候选入 hits 前过滤）；
+  R12 自己的 `filterHitsByScope` 只对**降级 walk**（R11 缺失时）有意义，两者相加不要重复计 0 或双计。
+- `walkResult.scope = { current, mode }` 可直接用于 shadow 记录与闸 1 的自检（不传 `scope` 给 `runGates` 时闸 1 只会 unverified）。
+- `hit.scopeKey` 是归一后写法（`w:d:/…`），可直接与 `scopeKeyFromPath(process.cwd())` 比对。
+
+### 10.4 复现
+
+```bash
+git show HEAD:src/rooms/walk.mjs > tmp/walk-before.mjs          # before（只读，不 checkout）
+node tmp/walk-scope-compare.mjs                                 # 20 卡：93/52/18红 → 65/0/20过
+node tmp/walk-probe-t7a-scope.mjs                               # T7a 六组信号 before/after
+node --test test/walk.test.mjs                                  # 23/23
+node --test                                                     # 268/268（含 R12 的 scope 兜底用例）
+```

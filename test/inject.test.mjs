@@ -29,8 +29,12 @@ import {
   defaultShadowDir,
   degradedWalk,
   estimateTokens,
+  filterHitsByScope,
   formatCardDate,
+  isScopeVisible,
+  normalizeScopeKey,
   readShadow,
+  runInject,
   scopeKeyFromPath,
   signalFromText,
   singleLine,
@@ -612,4 +616,110 @@ test('R12: estimateTokens/clipLine 口径稳定（CJK 1.5 字/token、ASCII 4 �
   assert.ok(clipLine('字'.repeat(400), TIGHT_CLIP).length <= TIGHT_CLIP);
   assert.equal(formatCardDate(T(22)), '2026-10-22');
   assert.equal(formatCardDate(Number.NaN), '????-??-??');
+});
+
+// ---------------------------------------------------------------------------
+// 作用域过滤（R12 侧兜底）+ CLI 路径把 store/scope 真喂给闸门
+// ---------------------------------------------------------------------------
+
+test('R12: normalizeScopeKey / isScopeVisible —— 与 R00 scopeKey 同口径', () => {
+  const BS = String.fromCharCode(92);
+  assert.equal(normalizeScopeKey(`D:${BS}Work${BS}Demo${BS}`), 'w:d:/Work/Demo', '只小写盘符、反斜杠转 /、去尾斜杠');
+  assert.equal(normalizeScopeKey('w:d:/Work/Demo'), 'w:d:/Work/Demo');
+  assert.equal(normalizeScopeKey('U:Owner'), 'u:owner');
+  assert.equal(normalizeScopeKey(''), '');
+  assert.equal(isScopeVisible('w:d:/work/demo', 'w:d:/work/demo'), true);
+  assert.equal(isScopeVisible('u:owner', 'w:d:/work/demo'), true, '用户层跨项目可见');
+  assert.equal(isScopeVisible('w:d:/work', 'w:d:/work/demo'), true, '子看得到祖先');
+  assert.equal(isScopeVisible('w:d:/work/demo/plugin', 'w:d:/work/demo'), false, '父看不到子');
+  assert.equal(isScopeVisible('w:e:/other', 'w:d:/work/demo'), false);
+});
+
+test('R12: filterHitsByScope —— 同域/u: 留下；别域与"作用域未知"分开计数', () => {
+  const hits = [
+    { episode: 'ep-1', scopeKey: 'w:d:/work/demo' },
+    { episode: 'ep-2', scopeKey: 'w:d:/work/demo/plugin' }, // 子作用域：父看不到
+    { episode: 'ep-3', scopeKey: 'u:owner' },
+    { episode: 'ep-4', scopeKey: 'w:e:/other' },
+    { episode: 'ep-5' }, // 没带 scopeKey ⇒ 证明不了可见
+  ];
+  const res = filterHitsByScope(hits, 'w:d:/work/demo');
+  assert.deepEqual(res.hits.map((h) => h.episode), ['ep-1', 'ep-3']);
+  assert.equal(res.dropped, 2, 'ep-2 与 ep-4');
+  assert.equal(res.droppedUnknown, 1, 'ep-5');
+  assert.equal(res.scope, 'w:d:/work/demo');
+
+  const fromChild = filterHitsByScope(hits, 'w:d:/work/demo/plugin');
+  assert.deepEqual(fromChild.hits.map((h) => h.episode), ['ep-1', 'ep-2', 'ep-3'], '子作用域能看到祖先与同域');
+
+  // 没有当前作用域就不动（由闸门在需要时点出来）
+  const noScope = filterHitsByScope(hits, '');
+  assert.equal(noScope.hits.length, 5);
+  assert.equal(noScope.dropped, 0);
+});
+
+test('R12: 跨作用域丢弃写进省略行（计数 + 原因，不静默）', () => {
+  const { store } = fixture();
+  const hits = [hit({ episodeId: 'ep-aaaaaaa2', seq: 12, claimId: 'c-0000aa02' })];
+  const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, droppedCrossScope: 2, droppedUnknownScope: 1 });
+  assert.equal(card.crossScope, 2);
+  assert.equal(card.unknownScope, 1);
+  assert.match(card.omissions, /^omitted: 3 items/);
+  assert.match(card.omissions, /跨作用域未纳入 2 条/);
+  assert.match(card.omissions, /作用域未知未纳入 1 条/);
+  assert.match(card.omissions, /index\.md/, '省略行仍然指出去哪取');
+  assert.ok(card.section.includes('cross') || card.section.includes('跨作用域'), '模型可见的省略行也要说');
+});
+
+/** 造一个只含一局/一主题/一 claim 的小库，作用域可控（runInject 会用 process.cwd() 算当前 scope）。 */
+function makeScopedStore(scopeKey) {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-scope-'));
+  const store = createStore({ root, now: T(20) });
+  store.ensureDirs();
+  store.putMany('episodes', [{ ...episode('ep-aaaaaaa1', 21, 3), scopeKey }]);
+  store.replaceDerived('topics', [
+    { id: 't:term:aaaa0001', kind: 'term', key: 'yaml', df: 2, idfNorm: 0.7, firstSeenAt: T(21), lastSeenAt: T(21), episodes: ['ep-aaaaaaa1'] },
+  ], { at: T(24) });
+  store.putMany('claims', [{
+    ...claim({ id: 'c-scope001', kind: 'antipattern', text: "Cannot find module 'yaml'", day: 21, state: 'observed', support: [{ episode: 'ep-aaaaaaa1', seq: 30 }] }),
+    scopeKey,
+  }]);
+  return { root, store };
+}
+
+test('R12: runInject 把 store + scope 传给闸门（闸 1/2/4/5 真核，不是 unverified）', async () => {
+  const scope = scopeKeyFromPath(process.cwd());
+  const { root } = makeScopedStore(scope);
+  const shadowDir = mkdtempSync(path.join(tmpdir(), 'kifuin-shadow-'));
+  try {
+    const res = await runInject({ flags: { signal: 'yaml 装不上', store: root, shadow: true, 'shadow-dir': shadowDir } });
+    assert.equal(res.code, 0, res.stderr);
+    assert.ok(res.card.claims.length >= 1, '同域命中应当展开');
+    assert.ok(res.gates.checks.scopeChecked >= 1, '闸 1 真核过');
+    assert.ok(res.gates.checks.supportChecked >= 1, '闸 2 真核过');
+    assert.ok(res.gates.checks.provenanceChecked >= 1, '闸 5 真核过');
+    const unverifiedGates = res.gates.checks.unverified.map((u) => u.gate);
+    for (const g of ['1', '2', '4', '5']) {
+      assert.equal(unverifiedGates.includes(g), false, `闸 ${g} 不该是 unverified（store 已经传进去了）`);
+    }
+    assert.ok(readShadow({ dir: shadowDir }).records.length >= 1, '--shadow 仍然只写指定目录');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(shadowDir, { recursive: true, force: true });
+  }
+});
+
+test('R12: runInject 过滤跨作用域命中 ⇒ 零注入，省略里写明（不静默）', async () => {
+  const { root } = makeScopedStore('w:e:/some/other/workspace');
+  try {
+    const res = await runInject({ flags: { signal: 'yaml 装不上', store: root } });
+    assert.equal(res.code, 0, res.stderr);
+    assert.equal(res.card.section, null, '别的工作区的记忆不注入');
+    // R11 已按作用域拒掉（它记在自己的 dropped 里）⇒ R12 侧兜底为 0，但审计字段要能看见
+    assert.ok(res.card.crossScopeWalk >= 1, '被跨作用域挡掉的条数要能被看见');
+    assert.match(res.card.omissions, /跨作用域未纳入/);
+    assert.equal(res.card.claims.length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

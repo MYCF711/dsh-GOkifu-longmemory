@@ -20,8 +20,13 @@ import {
   ACTIVE_GATES,
   GATE_DOCS,
   PENDING_GATES,
+  allowedMarkersAfterDowngrade,
+  allowedStates,
   auditGovernance,
   auditImperatives,
+  downgradeState,
+  isScopeVisible,
+  normalizeScope,
   runGates,
 } from '../src/rooms/gates.mjs';
 import {
@@ -32,6 +37,7 @@ import {
   estimateTokens,
   formatCardDate,
 } from '../src/rooms/inject.mjs';
+import { adjudicate } from '../src/rooms/adjudicate.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
 
 const T = (day, hour = 12) => Date.UTC(2026, 9, day, hour, 0, 0);
@@ -80,6 +86,11 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 const codes = (res) => res.errors.map((e) => e.code);
 const hasCode = (res, code) => res.errors.some((e) => e.code === code);
 const gatesOf = (res, code) => res.errors.filter((e) => e.code === code);
+/** 手改了 section 之后按 R12 的同一口径重算 tokens（否则闸 6 会抓到自报不符）。 */
+const retoken = (card) => {
+  card.tokens = estimateTokens(card.indexLine) + estimateTokens(card.section ?? '');
+  return card;
+};
 
 // ---------------------------------------------------------------------------
 // 合格卡
@@ -104,10 +115,10 @@ test('R13: 零注入的卡（只有 indexLine）也合格 —— 沉默不是错
   assert.equal(res.checks.claims, 0);
 });
 
-test('R13: 闸清单如实登记（本轮 4 道，其余显式列未启用）', () => {
-  assert.deepEqual([...ACTIVE_GATES], ['0', '6', '6b', 'boundary']);
-  assert.deepEqual([...PENDING_GATES], ['1', '2', '2b', '3', '4', '5', '7']);
-  for (const id of ACTIVE_GATES) assert.equal(typeof GATE_DOCS[id], 'string');
+test('R13: 闸清单如实登记（M4：十道全开，PENDING 为空）', () => {
+  assert.deepEqual([...ACTIVE_GATES], ['0', '1', '2', '2b', '3', '4', '5', '6', '6b', '7', 'boundary']);
+  assert.deepEqual([...PENDING_GATES], [], '十道都在位，不再有"未启用"的闸');
+  for (const id of ACTIVE_GATES) assert.equal(typeof GATE_DOCS[id], 'string', `闸 ${id} 必须有判据说明`);
 });
 
 // ---------------------------------------------------------------------------
@@ -389,4 +400,435 @@ test('R13: 没有 card ⇒ ok:false（不许静默放行）', () => {
   assert.equal(runGates({}).ok, false);
   assert.equal(runGates({ card: null }).errors[0].code, 'card/missing');
   assert.equal(runGates({ card: [] }).ok, false);
+});
+
+// ===========================================================================
+// M4 七闸（1 / 2 / 2b / 3 / 4 / 5 / 7）
+//
+// 这些闸要判"记录本身合不合规"，所以必须把条目记录喂进来（`records`）。
+// 判不了时不假装合规：非 strict 记进 `checks.unverified`，strict 才当失败。
+// ===========================================================================
+
+const CLAIM_ID = 'c-aaaa0001';
+const supportEntry = (episode, seq, quote = 'Error: boom') => ({ episode, seq, quote });
+
+/** 一条结构完整的 claim 记录（可覆盖任意字段）。 */
+function rec(over = {}) {
+  return {
+    id: CLAIM_ID,
+    kind: 'fact',
+    text: 'node --test 先跑本房间',
+    scopeKey: SCOPE,
+    state: 'candidate',
+    support: [supportEntry('ep-aaaaaaa1', 30), supportEntry('ep-aaaaaaa2', 12, 'ERR yaml')],
+    counter: [],
+    validity: { type: 'none', value: null },
+    preconditions: [],
+    occurredAt: T(22),
+    supersedes: null,
+    ...over,
+  };
+}
+
+/** 让 R12 渲染出一行引用 record.id 的卡片（source 取 record.support[0]）。 */
+function cardFrom({ record = rec(), extraHits = [] } = {}) {
+  const support = record.support.length ? record.support : [supportEntry('ep-aaaaaaa1', 30)];
+  const first = support[0];
+  const hits = [
+    {
+      episode: first.episode,
+      why: ['yaml'],
+      kind: 'failure',
+      occurredAt: record.occurredAt ?? T(22),
+      seq: first.seq,
+      depth: 1,
+      claim: {
+        id: record.id,
+        kind: record.kind,
+        state: record.state,
+        text: record.text,
+        occurredAt: record.occurredAt ?? T(22),
+        support: support.map((s) => ({ episode: s.episode, seq: s.seq })),
+      },
+    },
+    ...extraHits,
+  ];
+  const card = buildMemoryCard({ walkResult: walkOf(hits), scope: SCOPE, indexPath: '/mem/index.md', episodeCount: 3 });
+  return { card, hits, records: { claims: { [record.id]: record } } };
+}
+
+/** 跑闸的常用组合：默认带 scope + records（这样 1/2/4/5 都能真判）。 */
+function runWith({ card, records, hits = null, ...rest }) {
+  return runGates({ card, records, scope: SCOPE, walkResult: hits ? walkOf(hits) : undefined, ...rest });
+}
+
+// ---------------------------------------------------------------- 闸 1 作用域
+
+test('R13 闸1: 作用域工具 —— 同域可见、u: 层可见、子看父可见、父看子不可见', () => {
+  const BS = String.fromCharCode(92); // 反斜杠：用码点构造，避开源码转义在跨工具传递时被吃掉
+  const winPath = `D:${BS}Work${BS}Demo${BS}`;
+  assert.equal(isScopeVisible('w:d:/work/demo', 'w:d:/work/demo'), true);
+  assert.equal(isScopeVisible(winPath, 'w:d:/Work/Demo'), true, '反斜杠/尾斜杠同口径（与 R00 normalizeWorkspace 一致）');
+  assert.equal(isScopeVisible('u:owner', 'w:d:/work/demo'), true, '用户层跨项目可见');
+  assert.equal(isScopeVisible('w:d:/work', 'w:d:/work/demo'), true, '子作用域看得到祖先');
+  assert.equal(isScopeVisible('w:d:/work/demo', 'w:d:/work'), false, '父作用域看不到子（默认不可见）');
+  assert.equal(isScopeVisible('w:e:/other', 'w:d:/work/demo'), false);
+  assert.equal(isScopeVisible('u:owner', 'u:owner'), true);
+  assert.equal(isScopeVisible('', 'w:d:/work/demo'), false);
+  assert.equal(normalizeScope(winPath), 'w:d:/Work/Demo', '与 R00 同口径：只小写盘符，不动路径大小写');
+  assert.equal(isScopeVisible('w:d:/Work/Demo', 'w:d:/work/demo'), false, '大小写不同 = 不同作用域（跟 R00 一致）');
+});
+
+test('R13 闸1: 同域/祖先 ⇒ 过；父看子/异域 ⇒ gate1/scope-mismatch', () => {
+  const { card, records } = cardFrom({ record: rec({ scopeKey: 'w:d:/work/demo' }) });
+  assert.equal(runWith({ card, records }).ok, true, JSON.stringify(runWith({ card, records }).errors));
+
+  const child = runGates({ card, records, scope: 'w:d:/work/demo/plugin' });
+  assert.equal(child.ok, true, '子作用域看得到祖先的记忆');
+
+  const parent = runGates({ card, records, scope: 'w:d:/work' });
+  assert.equal(parent.ok, false);
+  assert.ok(hasCode(parent, 'gate1/scope-mismatch'));
+
+  const other = cardFrom({ record: rec({ scopeKey: 'w:e:/other' }) });
+  assert.ok(hasCode(runWith(other), 'gate1/scope-mismatch'));
+
+  const userLayer = cardFrom({ record: rec({ scopeKey: 'u:owner' }) });
+  assert.equal(runWith(userLayer).ok, true, '用户层条目在任何工作区可见');
+});
+
+test('R13 闸1: 没给 scope ⇒ unverified（不假装合规）；strict 才失败', () => {
+  const { card, records } = cardFrom();
+  const loose = runGates({ card, records });
+  assert.equal(loose.ok, true);
+  assert.ok(loose.checks.unverified.some((u) => u.code === 'gate1/scope-unknown'));
+  const strictRes = runGates({ card, records, strict: true });
+  assert.equal(strictRes.ok, false);
+  assert.ok(hasCode(strictRes, 'gate1/scope-unknown'));
+});
+
+// ---------------------------------------------------------------- 闸 2 支撑门槛
+
+test('R13 闸2: 状态机 —— support<2 至多 observed；=2 至多 candidate；≥3 才 standard/semantic', () => {
+  assert.deepEqual(allowedStates({ support: 1 }).allowed, ['observed', 'invalidated', 'stale']);
+  assert.deepEqual(allowedStates({ support: 2 }).allowed, ['observed', 'candidate', 'invalidated', 'stale']);
+  assert.deepEqual(allowedStates({ support: 3 }).allowed, ['observed', 'candidate', 'semantic', 'standard', 'invalidated', 'stale']);
+  assert.equal(allowedStates({ support: 2, reused: true }).allowed.includes('semantic'), true, '2 局 + 一次复用可升');
+  assert.deepEqual(allowedStates({ support: 3, counter: 1 }).allowed, ['disputed'], '有反例就只剩 disputed');
+  assert.deepEqual(allowedStates({ support: 3, counter: 2 }).allowed, ['invalidated'], '反例 ≥2 ⇒ invalidated');
+  assert.deepEqual(allowedStates({ support: 3, strongCounter: true }).allowed, ['invalidated'], '强反例 ⇒ invalidated');
+  assert.deepEqual(allowedStates({ support: 2, kind: 'joseki' }).allowed, ['candidate', 'superseded']);
+});
+
+test('R13 闸2: 正例 —— candidate/2 局、semantic/3 局、disputed/1 反例 都过', () => {
+  for (const record of [
+    rec({ state: 'candidate', support: [supportEntry('ep-1', 1), supportEntry('ep-2', 2)] }),
+    rec({ state: 'semantic', support: [supportEntry('ep-1', 1), supportEntry('ep-2', 2), supportEntry('ep-3', 3)] }),
+    rec({ state: 'disputed', counter: [supportEntry('ep-9', 9)] }),
+    rec({ state: 'invalidated', counter: [supportEntry('ep-9', 9), supportEntry('ep-8', 8)] }),
+    rec({ state: 'observed', support: [supportEntry('ep-1', 1)] }),
+  ]) {
+    const { card, records } = cardFrom({ record });
+    const res = runWith({ card, records });
+    assert.equal(res.ok, true, `${record.state} 应该过：${JSON.stringify(res.errors)}`);
+  }
+});
+
+test('R13 闸2: 负例 —— 单局 candidate / 两局 standard / 有反例还 promoted / 反例 2 次还 disputed', () => {
+  const cases = [
+    rec({ state: 'candidate', support: [supportEntry('ep-1', 1)] }),
+    rec({ state: 'standard', support: [supportEntry('ep-1', 1), supportEntry('ep-2', 2)] }),
+    rec({ state: 'candidate', counter: [supportEntry('ep-9', 9)] }),
+    rec({ state: 'disputed', counter: [supportEntry('ep-9', 9), supportEntry('ep-8', 8)] }),
+  ];
+  for (const record of cases) {
+    const { card, records } = cardFrom({ record });
+    const res = runWith({ card, records });
+    assert.equal(res.ok, false, `${record.state} 应该被打回`);
+    assert.ok(hasCode(res, 'gate2/state-over-claim'), `${record.state} ⇒ gate2/state-over-claim`);
+  }
+  const unknown = cardFrom({ record: rec({ state: 'wat' }) });
+  assert.ok(hasCode(runWith(unknown), 'gate2/unknown-state'));
+});
+
+test('R13 闸2: 没有 records ⇒ 记 unverified（不假装核过）', () => {
+  const { card } = cardFrom();
+  const res = runGates({ card, scope: SCOPE });
+  assert.equal(res.ok, true);
+  assert.ok(res.checks.unverified.some((u) => u.code === 'gate2/record-unresolved'));
+});
+
+// ---------------------------------------------------------------- 闸 2b 裁决独立性
+
+test('R13 闸2b: 合规裁决记录 ⇒ 过；共享上下文/不可回放/阈值不足/单成员 promote ⇒ 打回', () => {
+  const good = adjudicate({
+    target: CLAIM_ID,
+    votes: [
+      { member: 'm-a', verdict: 'support', contextId: 'ctx-1', evidence: [{ episode: 'ep-1', seq: 1, quote: 'q' }] },
+      { member: 'm-b', verdict: 'support', contextId: 'ctx-2', evidence: [{ episode: 'ep-2', seq: 2, quote: 'q' }] },
+      { member: 'm-c', verdict: 'oppose', contextId: 'ctx-3', evidence: [{ episode: 'ep-3', seq: 3, quote: 'q' }] },
+    ],
+    now: 1,
+  });
+  const { card, records } = cardFrom();
+  const goodRes = runWith({ card, records, adjudications: [good] });
+  assert.equal(goodRes.ok, true, JSON.stringify(goodRes.errors));
+
+  // 共享 contextId：两票塞进同一个上下文
+  const shared = {
+    ...good,
+    votes: [
+      { member: 'm-a', verdict: 'support', contextId: 'same', evidence: [{ episode: 'ep-1', seq: 1, quote: 'q' }] },
+      { member: 'm-b', verdict: 'support', contextId: 'same', evidence: [{ episode: 'ep-2', seq: 2, quote: 'q' }] },
+    ],
+    n: 2,
+    agreement: 1,
+    decision: 'promote',
+    dissent: [],
+  };
+  const sharedRes = runWith({ card, records, adjudications: [shared] });
+  assert.equal(sharedRes.ok, false);
+  assert.ok(hasCode(sharedRes, 'gate2b/shared-context'));
+
+  // 篡改一票 ⇒ 回放对不上
+  const tampered = clone(good);
+  tampered.votes[2].verdict = 'support';
+  const tamperedRes = runWith({ card, records, adjudications: [tampered] });
+  assert.equal(tamperedRes.ok, false);
+  assert.ok(hasCode(tamperedRes, 'gate2b/not-replayable'));
+
+  // 一致度不足却 promote
+  const lowAgreement = clone(good);
+  lowAgreement.agreement = 0.5;
+  const lowRes = runWith({ card, records, adjudications: [lowAgreement] });
+  assert.equal(lowRes.ok, false);
+  assert.ok(hasCode(lowRes, 'gate2b/threshold-violation'));
+
+  // 单个成员 promote（1 票不构成"多成员"）
+  const single = adjudicate({
+    target: CLAIM_ID,
+    votes: [{ member: 'm-a', verdict: 'support', evidence: [{ episode: 'ep-1', seq: 1, quote: 'q' }] }],
+  });
+  const singleRes = runWith({ card, records, adjudications: [single] });
+  assert.equal(singleRes.ok, false);
+  assert.ok(hasCode(singleRes, 'gate2b/single-member-promote'));
+
+  // 形态坏掉的记录
+  const broken = runWith({ card, records, adjudications: [{ id: 'ad-x', target: '', votes: [] }] });
+  assert.ok(hasCode(broken, 'gate2b/invalid-record'));
+});
+
+// ---------------------------------------------------------------- 闸 3 有效性/适用条件
+
+test('R13 闸3: validity 核过 ⇒ 过；核不过却展开正文 ⇒ gate3/stale-not-marked；只给指针 ⇒ 过', () => {
+  const record = rec({ validity: { type: 'file', value: 'src/rooms/gates.mjs' } });
+  const { card, records } = cardFrom({ record });
+
+  assert.equal(runWith({ card, records, validityChecks: { [CLAIM_ID]: { ok: true } } }).ok, true);
+
+  const failed = runWith({ card, records, validityChecks: { [CLAIM_ID]: { ok: false, reason: '文件已删除' } } });
+  assert.equal(failed.ok, false);
+  assert.ok(hasCode(failed, 'gate3/stale-not-marked'));
+
+  // 降级成「条件已变」的指针行 ⇒ 合规
+  const pointerCard = clone(card);
+  pointerCard.claims[0].kind = 'pointer';
+  pointerCard.claims[0].state = 'stale';
+  pointerCard.claims[0].marker = 'stale';
+  pointerCard.claims[0].line = pointerCard.claims[0].line.split('[candidate]').join('[stale]');
+  pointerCard.section = pointerCard.section.split('[candidate]').join('[stale]');
+  retoken(pointerCard);
+  const pointerRes = runWith({ card: pointerCard, records, validityChecks: { [CLAIM_ID]: { ok: false } } });
+  assert.equal(pointerRes.ok, true, JSON.stringify(pointerRes.errors));
+});
+
+test('R13 闸3: 没核过 ⇒ unverified；strict 当失败（不许"没查就算过"）', () => {
+  const record = rec({ validity: { type: 'commit', value: 'abc1234' } });
+  const { card, records } = cardFrom({ record });
+  const loose = runWith({ card, records });
+  assert.equal(loose.ok, true);
+  assert.ok(loose.checks.unverified.some((u) => u.code === 'gate3/validity-unchecked'));
+  const strictRes = runWith({ card, records, strict: true });
+  assert.equal(strictRes.ok, false);
+  assert.ok(hasCode(strictRes, 'gate3/validity-unchecked'));
+});
+
+test('R13 闸3: preconditions 未满足 ⇒ 不得展开正文', () => {
+  const record = rec({ preconditions: [{ check: 'file-exists', value: 'pnpm-lock.yaml', why: '依赖没变' }] });
+  const { card, records } = cardFrom({ record });
+  const okCheck = runWith({ card, records, preconditionChecks: { [CLAIM_ID]: { ok: true } } });
+  assert.equal(okCheck.ok, true);
+
+  const bad = runWith({ card, records, preconditionChecks: { [CLAIM_ID]: { ok: false, failed: ['file-exists'] } } });
+  assert.equal(bad.ok, false);
+  assert.ok(hasCode(bad, 'gate3/precondition-failed'));
+  assert.deepEqual(gatesOf(bad, 'gate3/precondition-failed')[0].detail.failed, ['file-exists']);
+});
+
+// ---------------------------------------------------------------- 闸 4 只增不改
+
+test('R13 闸4: 正常条目 ⇒ 过；被覆盖却没标 seq / 悬挂覆盖 / 覆盖了还展开正文 ⇒ 打回', () => {
+  const plain = cardFrom();
+  assert.equal(runWith(plain).ok, true, JSON.stringify(runWith(plain).errors));
+
+  const noSeq = cardFrom({ record: rec({ supersededBy: 'c-bbbb0002' }) });
+  const noSeqRes = runWith(noSeq);
+  assert.equal(noSeqRes.ok, false);
+  assert.ok(hasCode(noSeqRes, 'gate4/missing-superseded-at'));
+
+  const dangling = cardFrom({ record: rec({ supersedes: 'c-zzzz0009' }) });
+  const danglingRes = runWith(dangling);
+  assert.equal(danglingRes.ok, false);
+  assert.ok(hasCode(danglingRes, 'gate4/dangling-supersedes'));
+
+  const superseded = cardFrom({ record: rec({ supersededBy: 'c-bbbb0002', supersededAtSeq: 77 }) });
+  const supersededRes = runWith(superseded);
+  assert.equal(supersededRes.ok, false);
+  assert.ok(hasCode(supersededRes, 'gate4/superseded-rendered'));
+});
+
+test('R13 闸4: 同文两条却没有覆盖链 ⇒ gate4/unsuperseded-duplicate；补上链就过', () => {
+  const text = '同一句话写了两遍';
+  const base = { kind: 'fact', text, scopeKey: SCOPE, state: 'candidate', counter: [], validity: { type: 'none' }, preconditions: [], occurredAt: T(22) };
+  const a = { ...base, id: 'c-dup00001', support: [supportEntry('ep-aaaaaaa1', 30, 'q1'), supportEntry('ep-aaaaaaa2', 12, 'q2')] };
+  const b = { ...base, id: 'c-dup00002', support: [supportEntry('ep-aaaaaaa3', 33, 'q3'), supportEntry('ep-aaaaaaa4', 44, 'q4')] };
+  const inline = (record, day) => ({
+    episode: record.support[0].episode,
+    why: ['yaml'],
+    kind: 'failure',
+    occurredAt: T(day),
+    seq: record.support[0].seq,
+    depth: 1,
+    claim: {
+      id: record.id,
+      kind: 'fact',
+      state: 'candidate',
+      text,
+      occurredAt: T(day),
+      support: record.support.map((s) => ({ episode: s.episode, seq: s.seq })),
+    },
+  });
+  const hits = [inline(a, 22), inline(b, 23)];
+  const card = buildMemoryCard({ walkResult: walkOf(hits), scope: SCOPE, indexPath: '/mem/index.md', episodeCount: 4 });
+  assert.equal(card.claims.length, 2);
+
+  const dupRes = runWith({ card, records: { claims: { [a.id]: a, [b.id]: b } } });
+  assert.equal(dupRes.ok, false);
+  assert.ok(hasCode(dupRes, 'gate4/unsuperseded-duplicate'));
+
+  // 补上覆盖链（新条目 supersedes 旧条目，旧条目带 supersededAtSeq）⇒ 冲突不再算"没标"
+  const chained = runWith({
+    card,
+    records: { claims: { [a.id]: { ...a, supersededBy: b.id, supersededAtSeq: 44 }, [b.id]: { ...b, supersedes: a.id } } },
+  });
+  assert.equal(hasCode(chained, 'gate4/unsuperseded-duplicate'), false, '有了覆盖链就不算冲突');
+});
+
+// ---------------------------------------------------------------- 闸 5 来源纪律
+
+test('R13 闸5: 有 quote 且对得上 support ⇒ 过；缺 quote / 对不上 / 被篡改 / 来自摘要 ⇒ 打回', () => {
+  const plain = cardFrom();
+  assert.equal(runWith(plain).ok, true);
+  assert.equal(runWith(plain).checks.provenanceChecked, 1);
+
+  const missingQuote = cardFrom({ record: rec({ support: [supportEntry('ep-aaaaaaa1', 30, ''), supportEntry('ep-aaaaaaa2', 12, 'q')] }) });
+  assert.ok(hasCode(runWith(missingQuote), 'gate5/missing-quote'));
+
+  const notInSupport = cardFrom();
+  const offSupport = clone(notInSupport.card);
+  offSupport.claims[0].source = { episode: 'ep-aaaaaaa1', seq: 77 };
+  offSupport.claims[0].line = offSupport.claims[0].line.replace(/seq 30\)$/, 'seq 77)');
+  offSupport.section = offSupport.section.split('seq 30)').join('seq 77)');
+  retoken(offSupport);
+  const notRes = runWith({ card: offSupport, records: notInSupport.records });
+  assert.equal(notRes.ok, false);
+  assert.ok(hasCode(notRes, 'gate5/provenance-not-in-support'));
+
+  const tampered = cardFrom();
+  tampered.card.claims[0].source.quote = '这句原文里根本没有';
+  assert.ok(hasCode(runWith(tampered), 'gate5/quote-tampered'));
+
+  const summary = cardFrom({
+    record: rec({ support: [supportEntry('ep-aaaaaaa1', 30, '<compacted-summary> 摘要里抄的'), supportEntry('ep-aaaaaaa2', 12, 'q')] }),
+  });
+  assert.ok(hasCode(runWith(summary), 'gate5/summary-source'));
+});
+
+test('R13 闸5: 手工卡（无 claimId、无 quote）⇒ gate5/missing-quote；指针行豁免', () => {
+  const { card } = cardFrom();
+  const hand = clone(card);
+  delete hand.claims[0].claimId;
+  assert.ok(hasCode(runGates({ card: hand, scope: SCOPE }), 'gate5/missing-quote'));
+
+  const pointer = clone(card);
+  pointer.claims[0].kind = 'pointer';
+  assert.equal(hasCode(runGates({ card: pointer, scope: SCOPE }), 'gate5/missing-quote'), false, '指针行不主张断言');
+});
+
+// ---------------------------------------------------------------- 闸 7 事后降级
+
+test('R13 闸7: 本局否定一次 ⇒ candidate 必须降成 observed；两次 ⇒ invalidated', () => {
+  const neg = [{ claimId: CLAIM_ID, episode: 'ep-new', seq: 5, quote: '这条不成立' }];
+
+  const candidate = cardFrom({ record: rec({ state: 'candidate', support: [supportEntry('ep-1', 1), supportEntry('ep-2', 2)] }) });
+  const notDowngraded = runWith({ card: candidate.card, records: candidate.records, evidence: neg });
+  assert.equal(notDowngraded.ok, false);
+  assert.ok(hasCode(notDowngraded, 'gate7/not-downgraded'));
+  assert.equal(gatesOf(notDowngraded, 'gate7/not-downgraded')[0].detail.expected, 'observed');
+
+  // 降过级的卡（state=observed，2 局支撑仍然合法）⇒ 过
+  const downgraded = cardFrom({ record: rec({ state: 'observed', support: [supportEntry('ep-1', 1), supportEntry('ep-2', 2)] }) });
+  assert.equal(runWith({ card: downgraded.card, records: downgraded.records, evidence: neg }).ok, true);
+
+  // 两次否定 ⇒ 必须 invalidated；仍以 disputed 出现就算没降到位
+  const disputed = cardFrom({ record: rec({ state: 'disputed', counter: [supportEntry('ep-9', 9)] }) });
+  const twice = [neg[0], { ...neg[0], seq: 6 }];
+  const twiceRes = runWith({ card: disputed.card, records: disputed.records, evidence: twice });
+  assert.ok(hasCode(twiceRes, 'gate7/not-downgraded'));
+  assert.equal(gatesOf(twiceRes, 'gate7/not-downgraded')[0].detail.expected, 'invalidated');
+
+  const invalidated = cardFrom({ record: rec({ state: 'invalidated', counter: [supportEntry('ep-9', 9), supportEntry('ep-8', 8)] }) });
+  assert.equal(runWith({ card: invalidated.card, records: invalidated.records, evidence: twice }).ok, true);
+});
+
+test('R13 闸7: downgradeState 是机械映射（standard/semantic→disputed、candidate→observed、≥2→invalidated）', () => {
+  assert.equal(downgradeState('standard', 1), 'disputed');
+  assert.equal(downgradeState('semantic', 1), 'disputed');
+  assert.equal(downgradeState('candidate', 1), 'observed');
+  assert.equal(downgradeState('disputed', 1), 'invalidated');
+  assert.equal(downgradeState('observed', 1), 'observed');
+  assert.equal(downgradeState('candidate', 2), 'invalidated');
+  assert.equal(downgradeState('candidate', 0), 'candidate');
+  assert.deepEqual(allowedMarkersAfterDowngrade('disputed'), ['disputed', 'invalidated', 'stale']);
+});
+
+// ---------------------------------------------------------------- 全量绿：所有闸同时喂满
+
+test('R13: 十道闸同时喂满 ⇒ ok:true 且没有 unverified（判得到就真判）', () => {
+  const record = rec({ validity: { type: 'version', value: '1.17.0' }, preconditions: [{ check: 'scope', value: SCOPE, why: '同域才适用' }] });
+  const { card, records, hits } = cardFrom({ record });
+  const adjudication = adjudicate({
+    target: record.id,
+    votes: [
+      { member: 'm-a', verdict: 'support', contextId: 'ctx-1', evidence: [{ episode: 'ep-1', seq: 1, quote: 'q' }] },
+      { member: 'm-b', verdict: 'support', contextId: 'ctx-2', evidence: [{ episode: 'ep-2', seq: 2, quote: 'q' }] },
+    ],
+  });
+  const res = runGates({
+    card,
+    walkResult: walkOf(hits),
+    records,
+    scope: SCOPE,
+    adjudications: [adjudication],
+    validityChecks: { [CLAIM_ID]: { ok: true } },
+    preconditionChecks: { [CLAIM_ID]: { ok: true } },
+  });
+  assert.equal(res.ok, true, JSON.stringify(res.errors));
+  assert.deepEqual(res.checks.unverified, [], '全都判过了，不该有 unverified');
+  assert.equal(res.checks.scopeChecked, 1);
+  assert.equal(res.checks.supportChecked, 1);
+  assert.equal(res.checks.validityChecked, 2, 'validity + preconditions 各核一次');
+  assert.equal(res.checks.immutabilityChecked, 1);
+  assert.equal(res.checks.provenanceChecked, 1);
+  assert.equal(res.checks.adjudications, 1);
 });
