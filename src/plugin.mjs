@@ -262,6 +262,9 @@ async function resolveCreateUserMessage(config, deps) {
  * 为什么要限制范围：plugin 在每一步都会被调，扫全库太贵；卡片最多 `limit` 条。
  * 任何异常都吞成"没有结果"（⇒ 闸 3 记 unverified，而不是注入失败）。
  */
+const PROBE_CACHE = new Map();
+const PROBE_TTL_MS = 60_000;
+
 function probeCardValidity({ card, store, deps, fallbackWorkspace = null, now = null }) {
   const results = {};
   const rows = Array.isArray(card?.claims) ? card.claims : [];
@@ -277,8 +280,15 @@ function probeCardValidity({ card, store, deps, fallbackWorkspace = null, now = 
     }
     if (!record || typeof record !== 'object') continue;
     const key = validityKeyOf(record) || `${kind}:${claimId}`;
+    const bucket = Math.floor((Number.isFinite(now) ? now : Date.now()) / PROBE_TTL_MS);
+    const cacheKey = `${key}|${fallbackWorkspace ?? ''}|${bucket}`;
+    if (PROBE_CACHE.has(cacheKey)) {
+      results[key] = PROBE_CACHE.get(cacheKey);
+      continue;
+    }
     try {
       results[key] = deps.probeValidity(record, { workspace: fallbackWorkspace, now });
+      PROBE_CACHE.set(cacheKey, results[key]);
     } catch (error) {
       results[key] = { ok: false, reason: `probe-error:${String(error?.message ?? error)}`, checkedAt: now };
     }
