@@ -46,6 +46,7 @@
 ## 四、硬约束
 
 - **禁止直推 `main`**：功能分支 → PR → 必需检查 → 合并 → release。
+  - 说明：GitHub 免费私有仓库不支持分支保护（2026-11-02 实测 403），改用**本地 pre-push hook + CI 检查**兜底；hook 在 `.git/hooks/pre-push`，clone 后需重装（见 `scripts/install-hooks.sh`）。
 - 发布前必跑：`node scripts/check.mjs`（退出 0）、`node --test`、`node scripts/release.mjs --dry-run`。
 - **不发 npm**：版本发布只做 annotated tag + GitHub Release；`package.json` 保持 `private: true`。
 - 每次功能实现都要版本号 + `CHANGELOG.md` 一段（写清更新内容）。

@@ -2,7 +2,9 @@
 // 受控发布：只发 GitHub Release + annotated tag，不发 npm。
 // 用法：node scripts/release.mjs [--dry-run]
 import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const dry = process.argv.includes('--dry-run');
 const run = (cmd) => execSync(cmd, { stdio: 'inherit' });
@@ -20,12 +22,24 @@ if (out('git rev-parse HEAD') !== out('git rev-parse origin/main')) {
 run('node scripts/check.mjs');
 if (out('git tag -l ' + tag)) { console.error(`release: tag ${tag} 已存在`); process.exit(1); }
 
-const notes = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
-  .split('\n').slice(1).join('\n');
+// 从 CHANGELOG 抽出当前版本段落作为 release notes
+const lines = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8').split('\n');
+const start = lines.findIndex((l) => l.startsWith(`## ${pkg.version}`));
+if (start < 0) { console.error(`release: CHANGELOG 缺 ${pkg.version} 段`); process.exit(1); }
+let end = lines.length;
+for (let i = start + 1; i < lines.length; i++) if (lines[i].startsWith('## ')) { end = i; break; }
+const dir = mkdtempSync(join(tmpdir(), 'kifuin-rel-'));
+const notesPath = join(dir, 'notes.md');
+writeFileSync(notesPath, lines.slice(start, end).join('\n'));
 
-if (dry) { console.log(`[dry-run] git tag -a ${tag} -m ${tag}`); console.log(`[dry-run] git push origin ${tag}`); console.log(`[dry-run] gh release create ${tag} --title ${tag} --notes <CHANGELOG>`); process.exit(0); }
+if (dry) {
+  console.log(`[dry-run] git tag -a ${tag} -m ${tag}`);
+  console.log(`[dry-run] git push origin ${tag}`);
+  console.log(`[dry-run] gh release create ${tag} --title ${tag} --notes-file ${notesPath}`);
+  process.exit(0);
+}
 
 run(`git tag -a ${tag} -m ${tag}`);
 run(`git push origin ${tag}`);
-run(`gh release create ${tag} --title ${tag} --notes-file <(sed -n '/## ${pkg.version}/,/^## /p' CHANGELOG.md)`);
+run(`gh release create ${tag} --title ${tag} --notes-file ${notesPath}`);
 console.log(`released ${tag} (no npm publish)`);
