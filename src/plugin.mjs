@@ -36,6 +36,7 @@
 //   oncePerSession  true   —— 每会话只注入一次（WeakSet）
 //   now             null   —— 固定时钟（测试/回放用）
 //   createUserMessage null —— 消息构造替身（测试用；缺省动态 import 宿主包）
+//   probeValidity    true   —— 闸 3 真核验（true 才调 fs/git；false ⇒ 闸 3 记 unverified）
 //   deps             null  —— 依赖替身（测试用：createStore/walk/buildMemoryCard/runGates/writeShadow）
 
 import { createHash } from 'node:crypto';
@@ -51,7 +52,7 @@ import {
   signalFromText,
   writeShadow,
 } from './rooms/inject.mjs';
-import { runGates } from './rooms/gates.mjs';
+import { probeValidity, validityKeyOf, runGates } from './rooms/gates.mjs';
 import { createStore } from './rooms/persist.mjs';
 import { createWalkCache } from './rooms/walk.mjs';
 
@@ -77,6 +78,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   oncePerSession: true,
   now: null,
   createUserMessage: null,
+  probeValidity: true,
   deps: null,
 });
 
@@ -112,6 +114,7 @@ export function sanitizeConfig(raw = {}) {
     oncePerSession: boolOf(src.oncePerSession, DEFAULT_CONFIG.oncePerSession),
     now: Number.isFinite(src.now) ? Number(src.now) : (typeof src.now === 'function' ? src.now : null),
     createUserMessage: typeof src.createUserMessage === 'function' ? src.createUserMessage : null,
+    probeValidity: boolOf(src.probeValidity, true),
     deps: src.deps && typeof src.deps === 'object' && !Array.isArray(src.deps) ? src.deps : null,
   };
 }
@@ -216,6 +219,7 @@ async function resolveDeps(config) {
     createWalkCache: typeof injected.createWalkCache === 'function' ? injected.createWalkCache : createWalkCache,
     buildMemoryCard: typeof injected.buildMemoryCard === 'function' ? injected.buildMemoryCard : buildMemoryCard,
     runGates: typeof injected.runGates === 'function' ? injected.runGates : runGates,
+    probeValidity: typeof injected.probeValidity === 'function' ? injected.probeValidity : probeValidity,
     writeShadow: typeof injected.writeShadow === 'function' ? injected.writeShadow : writeShadow,
     walk,
     createUserMessage: typeof injected.createUserMessage === 'function' ? injected.createUserMessage : null,
@@ -252,6 +256,35 @@ async function resolveCreateUserMessage(config, deps) {
 // ---------------------------------------------------------------------------
 // 一次 pre-step 的决策（纯：不改入参、不写会话；返回值给 apply 用）
 // ---------------------------------------------------------------------------
+
+/**
+ * 只为"这张卡里出现的条目"跑 validity 核验（闸 3 的输入）。
+ * 为什么要限制范围：plugin 在每一步都会被调，扫全库太贵；卡片最多 `limit` 条。
+ * 任何异常都吞成"没有结果"（⇒ 闸 3 记 unverified，而不是注入失败）。
+ */
+function probeCardValidity({ card, store, deps, fallbackWorkspace = null, now = null }) {
+  const results = {};
+  const rows = Array.isArray(card?.claims) ? card.claims : [];
+  for (const row of rows) {
+    const claimId = typeof row?.claimId === 'string' ? row.claimId : '';
+    if (!claimId) continue;
+    const kind = claimId.startsWith('j-') ? 'joseki' : 'claims';
+    let record = null;
+    try {
+      record = store?.get ? store.get(kind, claimId) : null;
+    } catch {
+      record = null;
+    }
+    if (!record || typeof record !== 'object') continue;
+    const key = validityKeyOf(record) || `${kind}:${claimId}`;
+    try {
+      results[key] = deps.probeValidity(record, { workspace: fallbackWorkspace, now });
+    } catch (error) {
+      results[key] = { ok: false, reason: `probe-error:${String(error?.message ?? error)}`, checkedAt: now };
+    }
+  }
+  return results;
+}
 
 /**
  * @returns {{decision:object, action:string, reason:string|null, card?:object, gates?:object, digest?:string}}
@@ -311,7 +344,10 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
     droppedCrossScope: scoped.dropped,
     droppedUnknownScope: scoped.droppedUnknown,
   });
-  const gates = deps.runGates({ card, walkResult, store, cache, scope });
+  // 闸 3 真核验：只核**这张卡里出现的**条目（≤ limit 条），够用且不会每步扫全库。
+  // 每条按它自己的 scopeKey 解析工作区（probeValidity 内部做），失败只记 reason、绝不抛。
+  const validityResults = config.probeValidity === false ? null : probeCardValidity({ card, store, deps, fallbackWorkspace: cwd, now: at });
+  const gates = deps.runGates({ card, walkResult, store, cache, scope, validityResults });
   const text2 = cardText(card);
   const digest = digestOf(scope, text2);
 
