@@ -26,11 +26,14 @@ export const USAGE = `棋院 CLI（R14）
   node scripts/cli.mjs dump <sid> [--root <dir>]
   node scripts/cli.mjs walk <term> [--root <dir>] [--limit <n>] [--json]
   node scripts/cli.mjs index [--root <dir>] [--json]     渲染 index.md（写到 stdout，不落盘）
+  node scripts/cli.mjs verify [--store <dir>] [--json]   校验记忆库 manifest/checksums
+  node scripts/cli.mjs rebuild [--store <dir>] [--json] 从权威条目重算派生索引
 
 选项：
   --root <dir>   数据根（默认 $DSH_HOME）。只读，不写。
   --json         输出 JSON（stats/walk/index）
   --limit <n>    walk 每个主题最多列几局（默认 5）
+  --store <dir> 记忆库根（默认 <root>/memory-context；verify/rebuild 用）
 `;
 
 // ---------------------------------------------------------------------------
@@ -47,6 +50,8 @@ export function parseArgs(argv = []) {
     if (a === '--json') flags.json = true;
     else if (a === '--root') flags.root = args.shift();
     else if (a.startsWith('--root=')) flags.root = a.slice('--root='.length);
+    else if (a === '--store') flags.store = args.shift();
+    else if (a.startsWith('--store=')) flags.store = a.slice('--store='.length);
     else if (a === '--limit') flags.limit = Number(args.shift());
     else if (a.startsWith('--limit=')) flags.limit = Number(a.slice('--limit='.length));
     else if (a.startsWith('--')) flags[a.slice(2)] = true;
@@ -639,6 +644,28 @@ export async function runCli(argv = [], io = {}) {
       if (flags.json) json(result);
       else write(formatWalkText(result));
       return { code: 0, stdout, stderr: '' };
+    }
+
+    if (cmd === 'verify' || cmd === 'rebuild') {
+      const storeRoot = path.resolve(flags.store ?? path.join(root, 'memory-context'));
+      if (!fs.existsSync(storeRoot)) {
+        return { code: 2, stdout: '', stderr: `记忆库不存在：${storeRoot}（先跑 node scripts/archive.mjs --store <dir>）` };
+      }
+      const { createStore } = await import('./persist.mjs');
+      const store = createStore({ root: storeRoot });
+      if (cmd === 'verify') {
+        const res = store.verify();
+        if (flags.json) json(res);
+        else {
+          const errs = (res.errors ?? []).slice(0, 10).map((e) => `- ${e.code}: ${e.detail ?? e.path ?? ''}`).join(' | ');
+          write(`verify: ${res.ok ? 'OK' : 'FAIL'} · 文件 ${res.checked?.files ?? '?'} · 字节 ${res.checked?.bytes ?? '?'} · 错误 ${res.errors?.length ?? 0} · 告警 ${res.warnings?.length ?? 0}${errs ? ' | ' + errs : ''}`);
+        }
+        return { code: res.ok ? 0 : 1, stdout, stderr: '' };
+      }
+      const res = await store.rebuild();
+      if (flags.json) json(res);
+      else write(`rebuild: ${res.refused ? 'REFUSED' : 'OK'} · 派生变更 ${res.changed ?? 0} · 未变 ${res.unchanged ?? 0} · skipped ${res.skipped?.length ?? 0}`);
+      return { code: res.refused ? 1 : 0, stdout, stderr: '' };
     }
 
     if (cmd === 'index') {
