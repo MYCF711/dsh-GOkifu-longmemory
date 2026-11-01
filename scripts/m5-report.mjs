@@ -193,8 +193,13 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
   try {
     const report = await runEval({ dataRoot, storeRoot, source: 'both', now });
     const totals = report.primary.totals;
-    const n = totals.signatures;
-    const rate = totals.rate;
+    // 主值用「只有像错误的签名」口径（A2 收紧，2026-11-02 审核指出原口径 35% 不是错误文本）；
+    // 全量口径同时保留，便于对照；两者都给出样本量与 n。
+    const rateErrorOnly = Number.isFinite(totals.rateErrorOnly) ? totals.rateErrorOnly : null;
+    const rateAll = totals.rate;
+    const useErrorOnly = rateErrorOnly !== null && (totals.signaturesErrorOnly ?? 0) > 0;
+    const rate = useErrorOnly ? rateErrorOnly : rateAll;
+    const n = useErrorOnly ? totals.signaturesErrorOnly : totals.signatures;
     const sigma = rate === null || !n ? null : Math.sqrt((rate * (1 - rate)) / n);
     const measured = rate !== null && n > 0;
     return axis({
@@ -203,12 +208,16 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
       n,
       status: measured ? 'measured' : 'not-consumed',
       caveat: measured
-        ? `LOO（both 口径）repeat=${totals.repeat} novel=${totals.novel}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）`
+        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）`
         : 'LOO 分母为 0（没有可评测的失败签名）⇒ 不写 0',
       detail: {
-        repeat: totals.repeat,
-        novel: totals.novel,
+        repeat: totals.repeatError,
+        novel: totals.novelError,
         sigma,
+        rateErrorOnly,
+        rateAll,
+        signaturesErrorOnly: totals.signaturesErrorOnly ?? null,
+        signaturesAll: totals.signatures,
         rootEpisodes: report.corpus.rootEpisodes,
         evaluatedEpisodes: report.primary.coverage.evaluated,
         distinctSignatures: totals.distinctSignatures,
