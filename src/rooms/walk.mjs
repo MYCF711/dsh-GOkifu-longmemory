@@ -319,7 +319,7 @@ function compareMatches(a, b) {
  * @param {{signal:object, topics:Array}} p
  * @returns {Array<{topic:object, score:number, matchedBy:'entity'|'term', input:string}>}
  */
-export function matchTopics({ signal, topics = [] } = {}) {
+export function matchTopics({ signal, topics = [], index = null } = {}) {
   const sig = normalizeSignal(signal);
   const list = (Array.isArray(topics) ? topics : [])
     .filter((t) => t && typeof t.id === 'string' && t.id !== '' && typeof t.key === 'string');
@@ -331,7 +331,22 @@ export function matchTopics({ signal, topics = [] } = {}) {
     if (!previous || betterMatch(candidate, previous)) best.set(topic.id, candidate);
   };
 
+  const exact = index ?? null;
+  const seenExact = new Set();
+  if (exact instanceof Map) {
+    for (const entity of sig.entities) {
+      const hit = exact.get(String(entity.key ?? '').toLowerCase());
+      if (!hit) continue;
+      for (const topic of hit) { consider(topic, 1, 'entity', entity.key); seenExact.add(topic.id); }
+    }
+    for (const term of sig.terms) {
+      const hit = exact.get(String(term ?? '').toLowerCase());
+      if (!hit) continue;
+      for (const topic of hit) { consider(topic, 1, 'term', term); seenExact.add(topic.id); }
+    }
+  }
   for (const topic of list) {
+    if (seenExact.has(topic.id)) continue;
     const topicKey = topic.key.toLowerCase();
     for (const entity of sig.entities) {
       if (entity.key === topic.id) {
@@ -496,11 +511,32 @@ function readRecords(store, kind) {
  */
 export function createWalkCache(store) {
   if (!store || typeof store.list !== 'function') return null;
+  const topics = readRecords(store, 'topics');
+  const topicsByKey = new Map();
+  for (const t of topics) {
+    if (!t || typeof t.key !== 'string') continue;
+    const k = t.key.toLowerCase();
+    if (!topicsByKey.has(k)) topicsByKey.set(k, []);
+    topicsByKey.get(k).push(t);
+  }
+  const episodes = readRecords(store, 'episodes');
+  const links = readRecords(store, 'links');
+  const claims = readRecords(store, 'claims');
+  const byId = new Map();
+  for (const [kind, arr] of [['episodes', episodes], ['topics', topics], ['links', links], ['claims', claims]]) {
+    for (const rec of arr) {
+      if (rec && typeof rec.id === 'string') byId.set(`${kind}:${rec.id}`, rec);
+    }
+  }
   return Object.freeze({
-    episodes: readRecords(store, 'episodes'),
-    topics: readRecords(store, 'topics'),
-    links: readRecords(store, 'links'),
-    claims: readRecords(store, 'claims'),
+    episodes,
+    topics,
+    topicsByKey,
+    links,
+    claims,
+    get(kind, id) {
+      return byId.get(`${kind}:${id}`) ?? null;
+    },
   });
 }
 

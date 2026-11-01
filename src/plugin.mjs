@@ -311,7 +311,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
     droppedCrossScope: scoped.dropped,
     droppedUnknownScope: scoped.droppedUnknown,
   });
-  const gates = deps.runGates({ card, walkResult, store, scope });
+  const gates = deps.runGates({ card, walkResult, store, cache, scope });
   const text2 = cardText(card);
   const digest = digestOf(scope, text2);
 
