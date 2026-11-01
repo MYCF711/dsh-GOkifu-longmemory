@@ -490,6 +490,20 @@ function readRecords(store, kind) {
     .filter((record) => record && typeof record === 'object' && typeof record.id === 'string' && record.id !== '');
 }
 
+/**
+ * 预热缓存：一次读出 walk 需要的四类记录，后续 walk 直接吃内存（M5 延迟修复）。
+ * 不改变 walk 的语义；store 变化后需重建缓存（调用方负责失效）。
+ */
+export function createWalkCache(store) {
+  if (!store || typeof store.list !== 'function') return null;
+  return Object.freeze({
+    episodes: readRecords(store, 'episodes'),
+    topics: readRecords(store, 'topics'),
+    links: readRecords(store, 'links'),
+    claims: readRecords(store, 'claims'),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // walkFromSignals
 // ---------------------------------------------------------------------------
@@ -509,7 +523,7 @@ function readRecords(store, kind) {
  * @returns {object} {hits, path, omitted, tokens, maxDepth, depth, scope, matched, dropped, signal}
  */
 export function walkFromSignals(opts = {}) {
-  const { signal, store } = opts ?? {};
+  const { signal, store, cache = null } = opts ?? {};
   if (!store || typeof store.list !== 'function') {
     throw new WalkError('walk: 需要只读 store（R15 createStore 的 list/get）', 'walk/invalid-store');
   }
@@ -549,7 +563,7 @@ export function walkFromSignals(opts = {}) {
     return false;
   };
 
-  const topics = readRecords(store, 'topics');
+  const topics = cache?.topics ?? readRecords(store, 'topics');
   // S9（2026-11-02 自裁，依据 evidence/M4-precision.md）：泛工具主题不做"起跳种子"。
   // 30 个 df 最高 key 里 19 个是 kind=tool（echo/grep/bash/ls/git），tool 种子命中行仅 17.65% 有用；
   // 过滤后 hopPrecision 50.38% → 87.38%（零注入 14.29% → 34.29%）。显式实体（用户点名某工具）仍可起跳。
@@ -588,7 +602,7 @@ export function walkFromSignals(opts = {}) {
   }
 
   const matchedKeys = new Set(picked.map((m) => m.topic.key));
-  const episodes = readRecords(store, 'episodes');
+  const episodes = cache?.episodes ?? readRecords(store, 'episodes');
   const topicById = new Map(topics.map((t) => [t.id, t]));
   const episodeById = new Map(episodes.map((e) => [e.id, e]));
 
@@ -731,7 +745,7 @@ export function walkFromSignals(opts = {}) {
 
   // ---- 第 2 跳：棋谱 → 相关棋谱（store links；每跳必须有 why）----
   if (maxDepth >= 2) {
-    const links = readRecords(store, 'links');
+    const links = cache?.links ?? readRecords(store, 'links');
     const adjacency = new Map();
     const linkWhyKeys = (link) => {
       const keys = [];
@@ -801,7 +815,7 @@ export function walkFromSignals(opts = {}) {
   }
 
   // ---- claim：依附命中棋谱（机械：support.episode 已在命中里）或文本命中主题 key ----
-  const claims = readRecords(store, 'claims');
+  const claims = cache?.claims ?? readRecords(store, 'claims');
   for (const claim of claims) {
     if (isInvalidated(claim)) {
       dropped.invalidated += 1;
@@ -988,6 +1002,7 @@ export function walkFromSignals(opts = {}) {
 
 export default {
   walkFromSignals,
+  createWalkCache,
   matchTopics,
   normalizeSignal,
   estimateTokens,
