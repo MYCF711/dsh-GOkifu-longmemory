@@ -2,6 +2,11 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.1.1（2026-11-02）
+
+- 修复 `scripts/release.mjs` 在 Windows/sh 下的进程替换兼容问题：改用临时文件传 release notes。
+- 发布口径明确：只发 annotated tag + GitHub Release，不发 npm。
+
 ## 0.1.0（2026-11-02）
 
 首个版本：方案冻结 + 仓库骨架。
