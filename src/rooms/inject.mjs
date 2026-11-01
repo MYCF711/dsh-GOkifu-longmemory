@@ -245,7 +245,13 @@ export function filterHitsByScope(hits, scope) {
 // store 读视图（只读；只用 list/get/counts 三个方法，缺 store 时全部降级为空）
 // ---------------------------------------------------------------------------
 
+const VIEW_CACHE = new WeakMap();
+
 function storeView(store, cache = null) {
+  if (cache && typeof cache === 'object') {
+    const hit = VIEW_CACHE.get(cache);
+    if (hit) return hit;
+  }
   const view = {
     indexPath: null,
     episodeCount: 0,
@@ -295,6 +301,7 @@ function storeView(store, cache = null) {
     }
   } catch { /* 同上 */ }
 
+  if (cache && typeof cache === 'object') VIEW_CACHE.set(cache, view);
   return view;
 }
 
