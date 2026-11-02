@@ -82,6 +82,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   createUserMessage: null,
   probeValidity: true,
   autoBuild: true,
+  autoArchive: true,
+  autoArchiveMinutes: 30,
   deps: null,
 });
 
@@ -159,6 +161,8 @@ export function sanitizeConfig(raw = {}) {
     createUserMessage: typeof src.createUserMessage === 'function' ? src.createUserMessage : null,
     probeValidity: boolOf(src.probeValidity, true),
     autoBuild: boolOf(src.autoBuild, true),
+    autoArchive: boolOf(src.autoArchive, true),
+    autoArchiveMinutes: positiveInt(src.autoArchiveMinutes, 30, 24 * 60),
     deps: src.deps && typeof src.deps === 'object' && !Array.isArray(src.deps) ? src.deps : null,
   };
 }
@@ -475,7 +479,7 @@ const WALK_CACHES = new Map();
 const BUILDING = new Set();
 
 /** 零配置：库不存在时后台建一次（不阻塞本轮；失败只 warn，不重试风暴）。 */
-function scheduleAutoBuild({ ctx, storeRoot, deps = null }) {
+function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing' }) {
   if (!storeRoot || BUILDING.has(storeRoot)) return;
   BUILDING.add(storeRoot);
   const run = async () => {
@@ -489,7 +493,7 @@ function scheduleAutoBuild({ ctx, storeRoot, deps = null }) {
         if (!dataRoot) throw new Error('没有 DSH_HOME，无法建库');
         await mod.runArchive({ dataRoot, storeRoot, dryRun: false, user: 'owner' });
       }
-      warn(ctx, `记忆库已建好：${storeRoot}（下一轮开始生效）`);
+      warn(ctx, `记忆库已刷新（${reason}）：${storeRoot}`);
     } catch (error) {
       warn(ctx, `自动建库失败：${String(error?.message ?? error)}`);
       BUILDING.delete(storeRoot); // 失败允许下次再试；成功不重试
@@ -524,6 +528,8 @@ export const Config = {
     shadow: { type: 'boolean', meta: { default: false, description: '影子模式：只记录本来会注入什么，不真注入' } },
     storeRoot: { type: 'string', meta: { default: '', description: '记忆库地址；留空 = <DSH_HOME>/memory-context（推荐留空）' } },
     autoBuild: { type: 'boolean', meta: { default: true, description: '库不存在时后台自动建库（本次沉默）' } },
+    autoArchive: { type: 'boolean', meta: { default: true, description: '轮次收尾时按时间阈值自动刷新记忆库' } },
+    autoArchiveMinutes: { type: 'number', meta: { default: 30, description: '自动刷新间隔（分钟）' } },
     budgetTokens: { type: 'number', meta: { default: 500, description: '每次注入的 token 预算' } },
     limit: { type: 'number', meta: { default: 5, description: '每次最多注入几条' } },
     oncePerSession: { type: 'boolean', meta: { default: true, description: '每会话只注入一次（首轮）' } },
@@ -682,6 +688,28 @@ export function apply(ctx, rawConfig = {}) {
       return decision;
     }
   });
+
+  // D1（2026-11-02）：轮次收尾时增量刷新记忆库——不再只靠手动/首次 autoBuild。
+  // 条件：开了 autoArchive、库存在、且 manifest.updatedAt 已超过 autoArchiveMinutes。
+  try {
+    ctx.on('agent/turn-stopping', async () => {
+      try {
+        if (!config.autoArchive) return;
+        const root = resolveStoreRoot(config);
+        if (!root || !fs.existsSync(root)) return;
+        const marker = path.join(root, 'manifest.json');
+        let updated = 0;
+        try { updated = Number(JSON.parse(fs.readFileSync(marker, 'utf8')).updatedAt) || 0; } catch { updated = 0; }
+        const age = Date.now() - updated;
+        if (age < config.autoArchiveMinutes * 60 * 1000) return;
+        scheduleAutoBuild({ ctx, storeRoot: root, deps: config.deps ?? null, reason: 'periodic' });
+      } catch (error) {
+        warn(ctx, `增量刷新检查失败：${String(error?.message ?? error)}`);
+      }
+    });
+  } catch (error) {
+    warn(ctx, `turn-stopping 钩子没挂上：${String(error?.message ?? error)}`);
+  }
 
   return { name, hook: HOOK, registered: true, config };
 }
