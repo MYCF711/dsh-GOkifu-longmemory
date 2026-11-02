@@ -76,7 +76,7 @@ tokens            = card.tokens（= indexLine + section，与 T7b 同口径）
 | **in-scope** | 88 | 59.46% | 52 | 4 | 32 | **59.09%** | 36.36% | 可计入（仍 <70%） |
 | **cross-scope** | 60 | 40.54% | 11 | 0 | 49 | **18.33%** | 81.67% | **bug，不计入**（R11 未过滤） |
 
-- cross-scope 行的典型形态：信号 scope 是 `w:e:/Documents/...default-workspace`，行却来自 `w:d:/DeepSeek Harness/default-workspace/长期记忆系统`（本会话所在工作区），文本是 `Error: only an in-progress task can complete` / `reports: T1-REPORT.md …`。
+- cross-scope 行的典型形态：信号 scope 是 `w:<WORKSPACE>/...default-workspace`，行却来自 `w:d:/DeepSeek Harness/default-workspace/长期记忆系统`（本会话所在工作区），文本是 `Error: only an in-progress task can complete` / `reports: T1-REPORT.md …`。
 - 闸 1 抓出的 60 条 `gate1/scope-mismatch` 与这 60 行**一一对应**（零误报、零漏报）。
 - **P1 里这个分层退化为单层**：walk 过滤后 133 行全部 in-scope（cross-scope = 0），所以 P1 的 50.38% 就是"最终口径"的当前值。
 
@@ -219,7 +219,7 @@ tokens            = card.tokens（= indexLine + section，与 T7b 同口径）
 **有用，且 claim 原文也含该主题（S2 硬判据通过）**：
 
 ```
-[useful] seed="dsh-better-sidebar" ep=<ep> scope=w:e:/Documents/deepseek-harness/default-workspace
+[useful] seed="dsh-better-sidebar" ep=<ep> scope=w:<WORKSPACE>
     keys=["dsh-better-sidebar","dsh-pet","package.json"]
     text=fail=1 · topics=dsh-better-sidebar, dsh-pet, package.json
 ```

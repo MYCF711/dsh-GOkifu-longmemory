@@ -42,28 +42,28 @@
 
 | # | 日期(UTC) | episode | 失败来源 | 局内签名 | repeat | novel | 逐局率 | memorySize | scope |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | 2026-11-01 | `<ep>` | event | 3 | 0 | 3 | 0.0% | 0 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 2 | 2026-11-01 | `<ep>` | edge | 10 | 0 | 10 | 0.0% | 3 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 3 | 2026-11-01 | `<ep>` | event | 3 | 0 | 3 | 0.0% | 13 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 4 | 2026-11-01 | `<ep>` | event | 4 | 1 | 3 | 25.0% | 16 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 5 | 2026-11-01 | `<ep>` | event | 1 | 0 | 1 | 0.0% | 19 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 6 | 2026-11-01 | `<ep>` | none | 0 | 0 | 0 | n/a | 20 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 7 | 2026-11-01 | `<ep>` | none | 0 | 0 | 0 | n/a | 20 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 8 | 2026-11-01 | `<ep>` | event | 8 | 0 | 8 | 0.0% | 20 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 9 | 2026-11-01 | `<ep>` | event | 8 | 0 | 8 | 0.0% | 28 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 10 | 2026-11-01 | `<ep>` | event | 1 | 0 | 1 | 0.0% | 36 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 11 | 2026-11-01 | `<ep>` | event | 4 | 1 | 3 | 25.0% | 37 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 12 | 2026-11-01 | `<ep>` | event | 4 | 0 | 4 | 0.0% | 40 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 13 | 2026-11-01 | `<ep>` | event | 5 | 1 | 4 | 20.0% | 44 | `w:e:/Documents/deepseek-harness/default-workspace` |
+| 1 | 2026-11-01 | `<ep>` | event | 3 | 0 | 3 | 0.0% | 0 | `w:<WORKSPACE>` |
+| 2 | 2026-11-01 | `<ep>` | edge | 10 | 0 | 10 | 0.0% | 3 | `w:<WORKSPACE>` |
+| 3 | 2026-11-01 | `<ep>` | event | 3 | 0 | 3 | 0.0% | 13 | `w:<WORKSPACE>` |
+| 4 | 2026-11-01 | `<ep>` | event | 4 | 1 | 3 | 25.0% | 16 | `w:<WORKSPACE>` |
+| 5 | 2026-11-01 | `<ep>` | event | 1 | 0 | 1 | 0.0% | 19 | `w:<WORKSPACE>` |
+| 6 | 2026-11-01 | `<ep>` | none | 0 | 0 | 0 | n/a | 20 | `w:<WORKSPACE>` |
+| 7 | 2026-11-01 | `<ep>` | none | 0 | 0 | 0 | n/a | 20 | `w:<WORKSPACE>` |
+| 8 | 2026-11-01 | `<ep>` | event | 8 | 0 | 8 | 0.0% | 20 | `w:<WORKSPACE>` |
+| 9 | 2026-11-01 | `<ep>` | event | 8 | 0 | 8 | 0.0% | 28 | `w:<WORKSPACE>` |
+| 10 | 2026-11-01 | `<ep>` | event | 1 | 0 | 1 | 0.0% | 36 | `w:<WORKSPACE>` |
+| 11 | 2026-11-01 | `<ep>` | event | 4 | 1 | 3 | 25.0% | 37 | `w:<WORKSPACE>` |
+| 12 | 2026-11-01 | `<ep>` | event | 4 | 0 | 4 | 0.0% | 40 | `w:<WORKSPACE>` |
+| 13 | 2026-11-01 | `<ep>` | event | 5 | 1 | 4 | 20.0% | 44 | `w:<WORKSPACE>` |
 | 14 | 2026-11-01 | `<ep>` | none | 0 | 0 | 0 | n/a | 48 | `w:d:/tmp/hstest` |
-| 15 | 2026-11-01 | `<ep>` | edge | 8 | 1 | 7 | 12.5% | 48 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 16 | 2026-11-01 | `<ep>` | edge | 6 | 2 | 4 | 33.3% | 55 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 17 | 2026-11-01 | `<ep>` | edge | 5 | 2 | 3 | 40.0% | 59 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 18 | 2026-11-01 | `<ep>` | edge | 12 | 2 | 10 | 16.7% | 62 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 19 | 2026-11-01 | `<ep>` | event | 1 | 0 | 1 | 0.0% | 72 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 20 | 2026-11-01 | `<ep>` | event | 7 | 1 | 6 | 14.3% | 73 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 21 | 2026-11-01 | `<ep>` | none | 0 | 0 | 0 | n/a | 79 | `w:e:/Documents/deepseek-harness/default-workspace` |
-| 22 | 2026-11-01 | `<ep>` | edge | 1 | 0 | 1 | 0.0% | 79 | `w:e:/Documents/deepseek-harness/default-workspace` |
+| 15 | 2026-11-01 | `<ep>` | edge | 8 | 1 | 7 | 12.5% | 48 | `w:<WORKSPACE>` |
+| 16 | 2026-11-01 | `<ep>` | edge | 6 | 2 | 4 | 33.3% | 55 | `w:<WORKSPACE>` |
+| 17 | 2026-11-01 | `<ep>` | edge | 5 | 2 | 3 | 40.0% | 59 | `w:<WORKSPACE>` |
+| 18 | 2026-11-01 | `<ep>` | edge | 12 | 2 | 10 | 16.7% | 62 | `w:<WORKSPACE>` |
+| 19 | 2026-11-01 | `<ep>` | event | 1 | 0 | 1 | 0.0% | 72 | `w:<WORKSPACE>` |
+| 20 | 2026-11-01 | `<ep>` | event | 7 | 1 | 6 | 14.3% | 73 | `w:<WORKSPACE>` |
+| 21 | 2026-11-01 | `<ep>` | none | 0 | 0 | 0 | n/a | 79 | `w:<WORKSPACE>` |
+| 22 | 2026-11-01 | `<ep>` | edge | 1 | 0 | 1 | 0.0% | 79 | `w:<WORKSPACE>` |
 | 23 | 2026-11-01 | `<ep>` | none | 0 | 0 | 0 | n/a | 80 | `w:d:/DeepSeek Harness/default-workspace` |
 | 24 | 2026-11-01 | `<ep>` | edge | 7 | 1 | 6 | 14.3% | 80 | `w:d:/DeepSeek Harness/default-workspace/长期记忆系统` |
 
@@ -71,7 +71,7 @@
 
 | scope | 局 | 有签名 | repeat | novel | rate |
 |---|---|---|---|---|---|
-| `w:e:/Documents/deepseek-harness/default-workspace` | 21 | 18 | 11 | 80 | 12.1% |
+| `w:<WORKSPACE>` | 21 | 18 | 11 | 80 | 12.1% |
 | `w:d:/DeepSeek Harness/default-workspace/长期记忆系统` | 1 | 1 | 1 | 6 | 14.3% |
 | `w:d:/DeepSeek Harness/default-workspace` | 1 | 0 | 0 | 0 | n/a |
 | `w:d:/tmp/hstest` | 1 | 0 | 0 | 0 | n/a |

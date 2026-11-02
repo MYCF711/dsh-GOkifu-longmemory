@@ -138,7 +138,7 @@ $ env -u DSH_HOME node --test test/logread.test.mjs test/episode.test.mjs
 
 ```
 {"source":"R01 logread","events":8832,"truncated":false,"badLines":0}
-{"id":"<ep>","scope":"w:e:/Documents/deepseek-harness/default-workspace","seqFrom":0,"seqTo":8831,
+{"id":"<ep>","scope":"w:<WORKSPACE>","seqFrom":0,"seqTo":8831,
  "timeSource":"event","recordedAt":null,"endedAt":1793558885899,"last":1793558885899,"state":"archived"}
 fallback vs R00 字段差异: 无
 ```
@@ -189,7 +189,7 @@ fallback vs R00 字段差异: 无
 | `origin` | `subagent` **66** ｜ 缺省 **24** |
 | 子代理父链 | 66 份的 `parentSession` **全部指向存在的父局**（悬空 0、depth 反向 0） |
 | `agentPreset` | `standard` 79 ｜ 缺失 10 ｜ `gokifu` 1 |
-| 作用域 | `w:e:/Documents/deepseek-harness/default-workspace` 81 ｜ `w:d:/DeepSeek Harness/default-workspace/长期记忆系统` 7 ｜ `w:d:/DeepSeek Harness/default-workspace` 1 ｜ `w:d:/tmp/hstest` 1 |
+| 作用域 | `w:<WORKSPACE>` 81 ｜ `w:d:/DeepSeek Harness/default-workspace/长期记忆系统` 7 ｜ `w:d:/DeepSeek Harness/default-workspace` 1 ｜ `w:d:/tmp/hstest` 1 |
 | 时间跨度 | `dd=0`：2026-11-01 06:15 → 17:00 UTC；`dd=1`：2026-11-01 07:48 → 18:40 UTC |
 
 ⇒ **M1 可独立成谱的会话只有 24 局**（其余 66 局是子代理，按 AGENTS §4.1 归并到父局）。这是 M1 验收面的真实分母，别拿 90 当"棋谱数"。
