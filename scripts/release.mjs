@@ -44,13 +44,11 @@ try {
 if (out('git tag -l ' + tag)) { console.error(`release: tag ${tag} 已存在`); process.exit(1); }
 
 // 台账自证（2026-11-02 audit-02 教训）：发版前必须证明 MAINTENANCE 的数字能复现。
-if (!process.argv.includes('--no-ledger')) {
-  try {
-    out('node scripts/ledger-check.mjs --no-tests');
-  } catch (error) {
-    console.error('release: ledger-check 失败（台账与实测不一致），先修台账再发版；确需跳过用 --no-ledger');
-    process.exit(1);
-  }
+try {
+  out('node scripts/ledger-check.mjs --full');
+} catch (error) {
+  console.error('release: ledger-check --full 失败（台账与实测不一致或时点过旧）。先跑 node scripts/ledger-sync.mjs 再发版。');
+  process.exit(1);
 }
 
 // 从 CHANGELOG 抽出当前版本段落作为 release notes

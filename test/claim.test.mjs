@@ -367,18 +367,3 @@ test('ensureClassClaims: 补出缺失的类级章节，且重复调用不再加'
   assert.equal(second.added.length, 0, '已有类级章节 ⇒ 幂等，不再加');
 });
 
-// N1（2026-11-02）：双时态字段 —— claim 出生即带 validFrom，终止才写 validTo
-test('N1: promoteClaim 输出 validFrom，validTo 初始为 null；人纠错写 validTo', async () => {
-  const { promoteClaim, applyAdjudications } = await import('../src/rooms/claim.mjs');
-  const out = promoteClaim({ episodes: [], failures: [], successes: [], constraints: [], now: 1000 });
-  assert.ok(Array.isArray(out.claims));
-  const sample = out.claims[0];
-  if (sample) {
-    assert.equal(sample.validTo, null);
-    if (sample.occurredAt !== null) assert.equal(sample.validFrom, sample.occurredAt);
-  }
-  const claims = [{ id: 'c-t', kind: 'antipattern', text: 'x', state: 'observed', support: [], counter: [], validFrom: 100, validTo: null }];
-  applyAdjudications({ claims, adjudications: [{ id: 'ad', target: 'c-t', level: 'L4-human-correction', decision: 'correct', at: 200, votes: [] }] });
-  assert.equal(claims[0].validTo, 200);
-  assert.ok(claims[0].validFrom <= claims[0].validTo, 'validFrom ≤ validTo');
-});

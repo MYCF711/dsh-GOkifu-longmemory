@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLedger, compare } from '../scripts/ledger-check.mjs';
+import { parseLedger, compare, fullCheck } from '../scripts/ledger-check.mjs';
 
 const TEXT = `
 分支         main = 0.59.0
@@ -36,4 +36,30 @@ test('ledger-check: 缺字段时不误报（只核对能解析的项）', () => 
   const l = parseLedger('branch main = 1.0.0');
   const bad = compare(l, { version: '1.0.0', tests: null, claim: 5, threads: 6 });
   assert.deepEqual(bad, []);
+});
+
+test('ledger-check --full: 缺测点/缺 A2/A4/时点过旧都要报', () => {
+  const l = parseLedger(TEXT); // 无 [本] 时点、无 A2/A4
+  const fresh = fullCheck(l, [], { now: Date.parse('2026-11-02T22:00:00') });
+  assert.ok(fresh.some((x) => x.includes('时点')));
+  assert.ok(fresh.some((x) => x.includes('A2/A4')));
+  const noCorpus = { ...l, episodes: null };
+  assert.ok(fullCheck(noCorpus, [], { now: Date.parse('2026-11-02T22:00:00') }).some((x) => x.includes('局数')));
+
+  const stale = { ...l, stamp: '2026-11-02 20:00', a2: 26.6, a4: 2.1, episodes: 117, tests: l.tests };
+  const bad = fullCheck(stale, [], { now: Date.parse('2026-11-02T22:00:00') });
+  assert.ok(bad.some((x) => x.includes('过旧')), '过旧必须报');
+
+  const good = { ...stale, stamp: '2026-11-02 21:55' };
+  assert.deepEqual(fullCheck(good, [], { now: Date.parse('2026-11-02T22:00:00') }), []);
+});
+
+test('ledger-check compare: 局数/A2/A4 不一致（超容差）要报', () => {
+  const l = { ...parseLedger(TEXT), episodes: 117, a2: 26.6, a4: 2.1 };
+  const bad = compare(l, { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 322, threads: 143, episodes: 116, a2: 27.5, a4: 9.0 });
+  assert.ok(bad.some((x) => x.startsWith('局数')));
+  assert.ok(bad.some((x) => x.startsWith('A2')));
+  assert.ok(bad.some((x) => x.startsWith('A4')));
+  const within = compare(l, { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 322, threads: 143, episodes: 117, a2: 26.9, a4: 2.5 });
+  assert.deepEqual(within, [], '容差内不报');
 });
