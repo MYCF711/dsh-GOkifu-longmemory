@@ -16,6 +16,12 @@ const changelog = read('CHANGELOG.md');
 if (!changelog.includes(`## ${pkg.version}`)) fail.push(`CHANGELOG.md: 缺少 ${pkg.version} 段`);
 else ok.push('changelog 有当前版本段');
 
+// 防止 AGENTS §7 再写死版本/测试数（2026-11-02 审计 P1-3）：只允许指针
+const agents = read('AGENTS.md');
+if (!agents.includes('本节的旧快照会过期')) fail.push('AGENTS.md §7：必须保留「不写数字、只写去哪看」的指针段');
+else if (new RegExp(`v?${pkg.version.replace(/\./g, '\.')}\s*条测试`).test(agents)) fail.push('AGENTS.md：不要把测试数字写回状态节');
+else ok.push('AGENTS §7 指针');
+
 for (const f of ['AGENTS.md', 'MAINTENANCE.md', '方案.md', 'docs/记忆的职责边界.md', 'docs/拷问记录.md', 'docs/对标-Hindsight.md']) {
   if (!existsSync(new URL(`../${f}`, import.meta.url))) fail.push(`缺少 ${f}`); else ok.push(f);
 }

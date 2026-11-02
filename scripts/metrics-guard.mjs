@@ -28,6 +28,8 @@ export function judge(report, limits = LIMITS) {
   const axes = report?.axes ?? report ?? {};
   const fails = [];
   const a1 = axes.A1?.value;
+  const a1Coverage = axes.A1?.detail?.validityCoverage ?? axes.A1?.validityCoverage ?? null;
+  const a1Vacuous = Number.isFinite(a1) && Number.isFinite(a1Coverage) ? a1Coverage === 0 : Boolean(axes.A1?.caveat && String(axes.A1.caveat).includes('空转'));
   const a5 = axes.A5?.value;
   const a6 = axes.A6?.value;
   const a4 = axes.A4?.value;
@@ -37,12 +39,13 @@ export function judge(report, limits = LIMITS) {
   // A4.value 的单位就是 ms（m5-report 里 unit:'ms'）；不再乘 1000。
   const p50 = typeof a4 === 'number' ? a4 : null;
   if (!Number.isFinite(a1) || a1 > limits.a1Max) fails.push(`A1 负迁移 ${a1} > ${limits.a1Max}`);
+  // A1=0 但覆盖率 0 ⇒ 空转：不判失败，但必须显式标注（2026-11-02 审计 P1-5）
   if (!Number.isFinite(a5) || a5 > limits.a5Max) fails.push(`A5 越界 ${a5} != 0`);
   if (!Number.isFinite(a6) || a6 < limits.a6Min) fails.push(`A6 溯源 ${a6} < ${limits.a6Min}`);
   if (Number.isFinite(p50) && p50 > limits.a4p50MaxMs) fails.push(`A4 p50 ${p50.toFixed(2)}ms > ${limits.a4p50MaxMs}ms`);
   if (!Number.isFinite(strict) || strict < limits.a2bStrictMin) fails.push(`A2b 严格 ${strict} < ${limits.a2bStrictMin}`);
   if (!Number.isFinite(cover) || cover < limits.a2bCoverMin) fails.push(`A2b 覆盖 ${cover} < ${limits.a2bCoverMin}`);
-  return { ok: fails.length === 0, fails, values: { a1, a5, a6, p50, a2bStrict: strict, a2bCover: cover, a2bN: recall.n ?? null } };
+  return { ok: fails.length === 0, fails, values: { a1, a1Vacuous, a1Coverage, a5, a6, p50, a2bStrict: strict, a2bCover: cover, a2bN: recall.n ?? null } };
 }
 
 const invokedDirectly = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
@@ -69,7 +72,7 @@ if (invokedDirectly) {
   } catch { /* 证据写失败不影响判定 */ }
   if (json) console.log(JSON.stringify(out, null, 2));
   else {
-    console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'} · A1=${out.values.a1} A5=${out.values.a5} A6=${out.values.a6} A2b严格=${out.values.a2bStrict}（n=${out.values.a2bN}） 覆盖=${out.values.a2bCover} p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
+    console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'} · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A2b严格=${out.values.a2bStrict}（n=${out.values.a2bN}） 覆盖=${out.values.a2bCover} p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
     for (const f of verdict.fails) console.error(`ERR ${f}`);
   }
   process.exit(verdict.ok ? 0 : 1);

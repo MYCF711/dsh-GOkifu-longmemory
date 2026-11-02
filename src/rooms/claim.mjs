@@ -491,6 +491,16 @@ function supportKeyOf(s) {
 
  */
 
+/**
+ * 代表文本（2026-11-02 审计 P1-2）：类级 claim 必须始终带 `class:<name> · ` 前缀。
+ * 建组与"遇到更早支撑"两条路径都走这里 —— 否则文本会随输入顺序变化。
+ */
+export function representativeTextFor(kind, key, rawQuote, maxQuote = 200) {
+  const line = errorLineOf(String(rawQuote ?? ''));
+  const body = kind === 'antipattern' && String(key ?? '').startsWith('class:') ? `${key} · ${line}` : line;
+  return clip(body, maxQuote);
+}
+
 export function promoteClaim({ episodes = [], signals = null, now = null, options = {} } = {}) {
 
   if (episodes === null || typeof episodes !== 'object') {
@@ -585,9 +595,7 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
       const g = ensure('antipattern', key, ep.scopeKey, {
 
-        representativeText: typeof key === 'string' && key.startsWith('class:')
-          ? clip(`${key} · ${errorLineOf(rawQuote)}`, opts.maxQuote)
-          : clip(errorLineOf(rawQuote), opts.maxQuote),
+        representativeText: representativeTextFor('antipattern', key, rawQuote, opts.maxQuote),
 
         representativeAt: at,
 
@@ -601,7 +609,7 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
         g.representativeAt = at;
 
-        g.representativeText = clip(errorLineOf(rawQuote), opts.maxQuote);
+        g.representativeText = representativeTextFor(g.kind, g.key, rawQuote, opts.maxQuote);
 
       }
 
@@ -1051,7 +1059,7 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
       recordedAt: Number.isFinite(now) ? now : null,
 
-      validFrom: null,
+      validFrom: Number.isFinite(occurredAt) ? occurredAt : null,
 
       validTo: null,
 
@@ -1201,6 +1209,7 @@ export function ensureClassClaims({ claims = [], minSupport = 2, maxQuote = 200 
   const list = (Array.isArray(claims) ? claims : []).filter((c) => c && typeof c.id === 'string');
   const byClass = new Map();
   for (const claim of list) {
+    if (String(claim.kind ?? '') !== 'antipattern') continue; // 契约 §12：只巩固反模式
     const text = String(claim.text ?? '');
     if (text.startsWith('class:')) continue;
     const key = errorKeyOf(text);
