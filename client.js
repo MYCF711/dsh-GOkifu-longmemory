@@ -94,6 +94,10 @@ window.__ModuleLoader__.load({ id: 'dsh-gokifu-longmemory', factory: (require) =
   const name = NS;
 
   function apply(ctx) {
+    // 不声明 inject：本卡片只用到宿主自带的 slots 服务；若列出未加载的客户端包，
+    // 宿主会一直 pending（2026-11-02 实机：dsh-gokifu-longmemory: pending,
+    // 等 @deepseek-ai/dsh-client-ui-settings），导致 web 启动卡死。
+    if (!ctx?.slots?.inject || !ctx?.slots?.register) return;
     ctx.slots.inject('settings.section', () => ctx.slots.register({
       name: 'settings.section',
       id: NS,
@@ -103,5 +107,5 @@ window.__ModuleLoader__.load({ id: 'dsh-gokifu-longmemory', factory: (require) =
     }, LongMemorySection));
   }
 
-  return { name, apply, inject: ['@deepseek-ai/dsh-client-ui-settings'] };
+  return { name, apply, inject: [] };
 } });
