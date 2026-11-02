@@ -46,11 +46,11 @@ test('ledger-check --full: 缺测点/缺 A2/A4/时点过旧都要报', () => {
   const noCorpus = { ...l, episodes: null };
   assert.ok(fullCheck(noCorpus, [], { now: Date.parse('2026-11-02T22:00:00') }).some((x) => x.includes('局数')));
 
-  const stale = { ...l, stamp: '2026-11-02 20:00', a2: 26.6, a4: 2.1, episodes: 117, tests: l.tests };
+  const stale = { ...l, stamp: '2026-11-02 12:00', a2: 26.6, a4: 2.1, episodes: 117, tests: l.tests };
   const bad = fullCheck(stale, [], { now: Date.parse('2026-11-02T22:00:00') });
   assert.ok(bad.some((x) => x.includes('过旧')), '过旧必须报');
 
-  const good = { ...stale, stamp: '2026-11-02 21:55' };
+  const good = { ...stale, stamp: '2026-11-02 19:55' };
   assert.deepEqual(fullCheck(good, [], { now: Date.parse('2026-11-02T22:00:00') }), []);
 });
 
