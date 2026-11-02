@@ -7,6 +7,7 @@
 
 ```bash
 # ① 退出 DSH（桌面退出/重启按钮，不要用 taskkill）
+#    —— 懒人版：双击仓库根目录的「开启长期记忆.cmd」，它会先提示你关 DSH，再自动跑 re-enable
 # ② 项目根目录：
 node scripts/re-enable.mjs
 #    期望：完成。重新打开 DSH，然后跑 node scripts/install-doctor.mjs 验收。
