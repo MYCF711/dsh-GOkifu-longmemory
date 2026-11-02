@@ -243,3 +243,18 @@ test('R09: 确定性 + 不改写入参 + 空输入/非法输入', () => {
 
   assert.throws(() => promoteClaim({ episodes: null }), ClaimError);
 });
+
+// D2（2026-11-02）：同类协议错误合并
+test('D2: 同类「读-改协议」错误归一到同一 key，跨局合并成一条 claim', async () => {
+  const { errorKeyOf, classifyErrorClass } = await import('../src/rooms/claim.mjs');
+  const a = 'Error: cannot modify "D:/a/PLAN.md": file has not been read — read the file, then retry';
+  const b = 'Error: cannot edit "D:/b/x.mjs": file changed since it was read — re-read the file, then retry';
+  assert.equal(classifyErrorClass(a), 'fs-read-before-write');
+  assert.equal(classifyErrorClass(b), 'fs-read-before-write');
+  assert.equal(errorKeyOf(a), 'class:fs-read-before-write');
+  assert.equal(errorKeyOf(b), 'class:fs-read-before-write');
+  assert.equal(errorKeyOf('Error: unknown tool "bash"'), 'class:tool-unavailable');
+  assert.equal(errorKeyOf('Error: team member limit 8 reached'), 'class:sandbox-limit');
+  assert.equal(errorKeyOf('Error: this goal operation requires a direct human turn on a top-level agent'), 'class:policy-human-turn');
+  assert.equal(errorKeyOf('SyntaxError: missing ) after argument list').includes('class:'), false, '语法错误保留具体原文');
+});

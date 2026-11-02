@@ -815,3 +815,18 @@ test('R11 作用域: omitted.crossScope 与 limit/budget 分开记（可审计�
   assert.equal(tight.omitted.crossScope, full.omitted.crossScope, '作用域先行 ⇒ limit 截断不改变 crossScope');
   assert.equal(tight.omitted.byLimit, full.hits.length - 1);
 });
+
+// D3（2026-11-02）：跨局重复次数优先于权重
+test('D3: 反复出现的坑排在一次性高权重命中之前', async () => {
+  const { compareHits } = await import('../src/rooms/walk.mjs');
+  const base = { kind: 'claim', depth: 1, weight: 0.5, occurredAt: 1, episode: 'ep-a', claim: 'c-a' };
+  const repeated = { ...base, repeat: 9, claim: 'c-repeat' };
+  const oneOff = { ...base, repeat: 1, weight: 0.9, claim: 'c-oneoff' };
+  // repeat 高者排在前面（返回负数）
+  assert.ok(compareHits(repeated, oneOff) < 0, 'repeat 9 必须排在 weight 0.9 的一次性命中之前');
+  assert.ok(compareHits(oneOff, repeated) > 0);
+  // repeat 相同才比较 weight
+  const a = { ...base, repeat: 2, weight: 0.9, claim: 'c-a' };
+  const b = { ...base, repeat: 2, weight: 0.5, claim: 'c-b' };
+  assert.ok(compareHits(a, b) < 0);
+});

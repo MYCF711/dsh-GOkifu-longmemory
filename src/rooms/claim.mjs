@@ -94,6 +94,23 @@ export function errorLineOf(text) {
  * 错误原文归一（**只用于归并键**，不改写证据）：
  * 去 ANSI、取错误行、引号内绝对路径与裸盘符路径 → `<path>`、压空白、截 200。
  */
+// D2（2026-11-02）：同类协议错误合并成一条 antipattern。
+// 只合并「环境/协议」类，不合并代码语法或模块缺失（那些要保留具体原文）。
+const ERROR_CLASSES = [
+  ['fs-read-before-write', /file has not been read|file changed since it was read|file no longer exists/i],
+  ['tool-unavailable', /unknown tool|tool .* not found|unknown command/i],
+  ['policy-human-turn', /requires a direct human turn/i],
+  ['sandbox-limit', /team member limit|tool call aborted|timed out after/i],
+  ['web-search-empty', /web_search_tool_result blocks/i],
+];
+
+/** 已知的「环境/协议」错误类；返回 null 表示保持原签名（不合并）。 */
+export function classifyErrorClass(text) {
+  const s = String(text ?? '');
+  for (const [name, re] of ERROR_CLASSES) if (re.test(s)) return name;
+  return null;
+}
+
 export function errorKeyOf(text, maxLen = 200) {
   let s = errorLineOf(text);
   if (!s) return '';
@@ -102,6 +119,8 @@ export function errorKeyOf(text, maxLen = 200) {
     .replace(/(?:[A-Za-z]:[\\/])[^\s"',;)]*/g, '<path>')
     .replace(/\s+/g, ' ')
     .trim();
+  const cls = classifyErrorClass(s);
+  if (cls) return `class:${cls}`;
   return clip(s, maxLen);
 }
 

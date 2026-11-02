@@ -435,16 +435,40 @@ function hitTokens(hit) {
   return estimateTokens(hitTokenText(hit));
 }
 
+/** 错误原文归一（只做路径/空白替换，用于失败与 claim 的机械匹配；不参与渲染）。 */
+function squashErrorText(text) {
+  return String(text ?? '')
+    .replace(/"[A-Za-z]:[\/][^"]*"/g, '"<path>"')
+    .replace(/(?:[A-Za-z]:[\/])[^\s"',;)]*/g, '<path>')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/** 跨局重复次数：claim.support 里不同 episode 的数量（D3，2026-11-02）。 */
+function supportEpisodeCount(claim) {
+  const support = Array.isArray(claim?.support) ? claim.support : [];
+  const ids = new Set();
+  for (const item of support) {
+    const id = String(item?.episode ?? '');
+    if (id) ids.add(id);
+  }
+  return ids.size || 1;
+}
+
 function hopKeyOf(hop) {
   return [hop.kind, hop.from, hop.to, Array.isArray(hop.why) ? hop.why.join(',') : ''].join(HOP_DEDUPE_SEP);
 }
 
-/** 排序：档位 → depth 升序 → weight 降序 → occurredAt 降序 → 标识升序。 */
-function compareHits(a, b) {
+/** 排序：档位 → depth 升序 → **跨局重复次数降序** → weight 降序 → occurredAt 降序 → 标识升序。 */
+export function compareHits(a, b) {
   const classA = CLASS_RANK[a.kind] ?? 9;
   const classB = CLASS_RANK[b.kind] ?? 9;
   if (classA !== classB) return classA - classB;
   if (a.depth !== b.depth) return a.depth - b.depth;
+  const repeatA = finiteNumber(a.repeat) ? a.repeat : 1;
+  const repeatB = finiteNumber(b.repeat) ? b.repeat : 1;
+  if (repeatB !== repeatA) return repeatB - repeatA;
   if (b.weight !== a.weight) return b.weight - a.weight;
   const timeA = finiteNumber(a.occurredAt) ? a.occurredAt : Number.NEGATIVE_INFINITY;
   const timeB = finiteNumber(b.occurredAt) ? b.occurredAt : Number.NEGATIVE_INFINITY;
@@ -494,6 +518,7 @@ function publicHit(hit) {
   }
   if (hit.text) out.text = hit.text;
   if (hit.scopeKey) out.scopeKey = hit.scopeKey;
+  if (finiteNumber(hit.repeat)) out.repeat = hit.repeat; // D3：跨局重复次数（>1 表示反复踩过的坑）
   return out;
 }
 
@@ -678,6 +703,7 @@ export function walkFromSignals(opts = {}) {
     seq: finiteNumber(fields.seq) ? fields.seq : null,
     kind: fields.kind,
     depth: fields.depth,
+    repeat: finiteNumber(fields.repeat) ? fields.repeat : null,
     text: typeof fields.text === 'string' ? fields.text : '',
     scopeKey: fields.scopeKey ?? null,
     tokens: 0,
@@ -858,6 +884,17 @@ export function walkFromSignals(opts = {}) {
       continue;
     }
     const text = typeof claim.text === 'string' ? claim.text.trim() : '';
+    // D3（2026-11-02）：失败命中若与某条 claim 的错误原文互相包含，就把 claim 挂上去，
+    // 并把「跨局重复次数」带到失败命中上——排序据此把反复出现的坑排到最前。
+    if (text.length >= 12) {
+      const claimText = squashErrorText(text);
+      for (const [, hit] of episodeHits) {
+        if (hit.kind !== 'failure' || !hit.text || hit.text.length < 12) continue;
+        const hitText = squashErrorText(hit.text);
+        if (!(claimText.includes(hitText) || hitText.includes(claimText))) continue;
+        if (!hit.repeat || hit.repeat < supportEpisodeCount(claim)) hit.repeat = supportEpisodeCount(claim);
+      }
+    }
     const kind = claimHitClass(claim);
     const support = Array.isArray(claim.support)
       ? claim.support.filter((entry) => entry && typeof entry.episode === 'string')
@@ -900,6 +937,7 @@ export function walkFromSignals(opts = {}) {
         depth: attached.depth,
         text,
         scopeKey: recordScopeKey(claim),
+        repeat: supportEpisodeCount(claim),
         direct: false,
       });
       for (const hop of attached.via) addVia(hit, hop);
@@ -958,6 +996,7 @@ export function walkFromSignals(opts = {}) {
       depth: 1,
       text,
       scopeKey: recordScopeKey(claim),
+      repeat: supportEpisodeCount(claim),
       direct: true,
     });
     addVia(hit, { kind: 'match', from: 'signal', to: textMatch.topic.id, why: [textMatch.topic.key] });
