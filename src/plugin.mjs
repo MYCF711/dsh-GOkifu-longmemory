@@ -640,7 +640,8 @@ export function appendLiveStats(storeRoot, row) {
     if (!storeRoot) return;
     // 不创建目录：库还不存在时（首次用之前）不写心跳，避免把"无库"变成"有库"。
     if (!fs.existsSync(storeRoot)) return;
-    fs.appendFileSync(path.join(storeRoot, 'live-stats.jsonl'), `${JSON.stringify({ at: Date.now(), ...row })}
+    const src = (process.argv[1] ? path.basename(process.argv[1]) : 'host').slice(0, 40);
+    fs.appendFileSync(path.join(storeRoot, 'live-stats.jsonl'), `${JSON.stringify({ at: Date.now(), src, pid: process.pid, ...row })}
 `);
   } catch { /* 心跳失败不影响决策 */ }
 }
@@ -852,7 +853,8 @@ export function apply(ctx, rawConfig = {}) {
 
       const deps = await resolveDeps(config);
       const result = await decidePreStep({ ctx, config, deps, payload, decision });
-      if (config.liveStats !== false) {
+      // enabled=false 时的 "skip disabled" 没有诊断价值，别写（任何库内调用都会带出来一堆噪声）。
+      if (config.liveStats !== false && !(result.action === 'skip' && result.reason === 'disabled')) {
         appendLiveStats(resolveStoreRoot(config), {
           kind: 'pre-step',
           action: result.action ?? 'skip',
