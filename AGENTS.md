@@ -21,7 +21,7 @@
 3. **面向模型，不面向人**：记忆卡/索引/线索是给模型读的，人不看懂无所谓；不做人可读知识页。
 4. **人不是审批者，是纠错者**：难判的事交多成员独立解析 + 机械共识；人指出错误是最高优先级证据，触发一次纠错反思。
 
-**运行模式（2026-11-02 起）**：**superagent + Team Lead**——私有仓库 `MYCF711/dsh-kifu`；按 `magpie-plugin-scaffold` 的维护准则（分支→PR→必需检查→合并→release）；**每个功能实现都发版本并写 CHANGELOG；不发 npm**（只发 annotated tag + GitHub Release）。
+**运行模式（2026-11-02 起）**：**superagent + Team Lead**——私有仓库 `MYCF711/dsh-gokifu-longmemory`；按 `magpie-plugin-scaffold` 的维护准则（分支→PR→必需检查→合并→release）；**每个功能实现都发版本并写 CHANGELOG；不发 npm**（只发 annotated tag + GitHub Release）。
 **最小交付房间**：按"可独立验收的行为"切房间（R00–R15，见 §11），每个房间有 tombstone test；M1 最小集 = R00/R01/R02/R03/R04/R05/R07/R14。
 **粉色大象规则**：规则、提示与任务书写**正向做法**（做什么）；禁止项只写进边界成文法且写成"归谁做"。点名"不要想 X"会把注意力钉在 X 上。
 
@@ -96,7 +96,7 @@
 
 ## 3 · 怎么跑
 
-**当前阶段：M5 收口（0.15.0）。** 命令：`node scripts/check.mjs`、`node --test`、`node scripts/cli.mjs stats|dump|walk|verify|rebuild|inject --shadow`、`node scripts/archive.mjs --dry-run`、`node scripts/m5-report.mjs`、`node scripts/redteam.mjs`、`node scripts/host-sim.mjs`、`node scripts/stage-check.mjs docs/staging/shadow.json`、`node scripts/shadow-report.mjs`、`node scripts/release.mjs --dry-run`。
+**当前阶段：M5 收口（0.15.1）。** 命令：`node scripts/check.mjs`、`node --test`、`node scripts/cli.mjs stats|dump|walk|verify|rebuild|inject --shadow`、`node scripts/archive.mjs --dry-run`、`node scripts/m5-report.mjs`、`node scripts/redteam.mjs`、`node scripts/host-sim.mjs`、`node scripts/stage-check.mjs docs/staging/shadow.json`、`node scripts/shadow-report.mjs`、`node scripts/release.mjs --dry-run`。
 
 当前可用的**只读侦查命令**（均已实测，2026-11-02）：
 
@@ -272,13 +272,13 @@ AGENTS.md  本文件
 
 ---
 
-## 7 · 当前状态快照（2026-11-02 · v0.15.0）
+## 7 · 当前状态快照（2026-11-02 · v0.15.1）
 
 | 项 | 状态 |
 |---|---|
-| 阶段 | **M5 收口**（0.15.0）：宿主入口默认关；六轴/仿真/演练已跑；真注入待安装 |
+| 阶段 | **M5 收口**（0.15.1）：宿主入口默认关；六轴/仿真/演练已跑；真注入待安装 |
 | 方案 | `方案.md` v0.9；Q1–Q7、Q13 已裁定；Q8–Q12/Q14 自裁；Q16 已由主人拍板"直接开跑" |
-| 仓库 | `MYCF711/dsh-kifu`（公开）；版本 0.15.0；不发 npm |
+| 仓库 | `MYCF711/dsh-gokifu-longmemory`（公开）；版本 0.15.1；不发 npm |
 | 模式 | superagent + Team Lead；每日 09:00 巡检 |
 | 边界 | `docs/记忆的职责边界.md` v0.1（判据 + 红线 + 审计 + 接口 + 定式/裁决边界） |
 | 对标 | `docs/对标-Hindsight.md`（六轴判据 + 本机基线实测 + 擂台协议） |

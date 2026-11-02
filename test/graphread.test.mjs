@@ -25,7 +25,7 @@ import {
 
 const HOME = process.env.DSH_HOME ?? '';
 const CORPUS = HOME ? join(HOME, 'chess-context', 'sessions') : '';
-const SAMPLE_A = 'session-1286ce28-dba8-448b-9827-e6ccacdf9806';
+const SAMPLE_A = 'session-00000003-0000-4000-8000-000000000003';
 const SAMPLE_B = '3a50f4d2-8df2-4fc6-9a1d-6f69d16e594c';
 const SAMPLE_C = 'fa84bf69-0e4b-422c-aed9-85b8c2462359';
 

@@ -1,6 +1,6 @@
 # v0.10.0 独立严格审核（外部审核员）
 
-> 审核对象：`MYCF711/dsh-kifuin`，**HEAD = `ec7b6d8`（v0.10.0）** + 审核期间工作树上的未提交改动。
+> 审核对象：`MYCF711/dsh-gokifu-longmemory`，**HEAD = `ec7b6d8`（v0.10.0）** + 审核期间工作树上的未提交改动。
 > 审核时刻：`2026-11-02 05:09–05:25 +08`（本地；UTC 见各命令输出）。
 > 审核人立场：**外部审核员**——按"是否达到可交付/可安装"判定，不替实现辩护，不修改任何功能代码。
 > 本轮**只写本文件**；未 `git checkout/commit`、未安装、未重启、未写 `<DSH_HOME>`。
@@ -196,7 +196,7 @@ run3: p50 2.0 / p90 11.6 / p95 23.0  / max 43.0
 $ gh run list --limit 40 --json conclusion,...   # 结论统计：success 14 / failure 22（共 36 次）
 $ gh run view 41350496035 --log-failed           # 0.10.0 的 main 运行
   not ok 285 - R16: shadow 写不进去（目录在 $DSH_HOME 内）⇒ 不注入、不抛、warn
-  location: '/home/runner/work/dsh-kifuin/dsh-kifuin/test/plugin.test.mjs:341:1'
+  location: '/home/runner/work/dsh-gokifu-longmemory/dsh-gokifu-longmemory/test/plugin.test.mjs:341:1'
   stack: TestContext.<anonymous> (test/plugin.test.mjs:353:12)
   expected: true, actual: false
   # fail 1

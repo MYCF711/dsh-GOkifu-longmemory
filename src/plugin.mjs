@@ -57,11 +57,11 @@ import { createStore } from './rooms/persist.mjs';
 import { createWalkCache } from './rooms/walk.mjs';
 
 /** 插件名（宿主用来标识这个插件）。 */
-export const name = 'dsh-kifuin';
+export const name = 'dsh-gokifu-longmemory';
 /** 配置/消息格式的版本号（改消息形状时 +1，便于事后认账）。 */
 export const PLUGIN_VERSION = 1;
 /** 注入消息的 source 标识（宿主里一眼能认出是棋院写的）。 */
-export const CARD_SOURCE_KIND = 'dsh-kifuin';
+export const CARD_SOURCE_KIND = 'dsh-gokifu-longmemory';
 export const CARD_SOURCE_FORM = 'memory-card';
 /** 挂的钩子名。 */
 export const HOOK = 'agent/pre-step';
@@ -187,7 +187,7 @@ export function cardText(card) {
 
 function warn(ctx, line) {
   try {
-    if (typeof ctx?.logger?.warn === 'function') ctx.logger.warn(`dsh-kifuin: ${line}`);
+    if (typeof ctx?.logger?.warn === 'function') ctx.logger.warn(`dsh-gokifu-longmemory: ${line}`);
   } catch {
     // 记日志本身失败也不许影响会话
   }

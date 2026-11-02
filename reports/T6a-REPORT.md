@@ -142,7 +142,7 @@ journal/archive.jsonl  # append-only 审计（不进 checksums）
 ```
 库体积（磁盘）4.0 MiB；manifest 覆盖 1,280 个文件 / 1,947,088 B（1.86 MiB）
 manifest.json   135,004 B      index.md        3,289 B      journal 316,063 B（1,280 行）
-episodes        92 文件 / 1,412,939 B（最大 ep-1e82afca.json 120,513 B）
+episodes        92 文件 / 1,412,939 B（最大 <ep>.json 120,513 B）
 claims         125 文件 /   157,209 B
 topics         780 文件 /   245,959 B
 links          199 文件 /    88,587 B
