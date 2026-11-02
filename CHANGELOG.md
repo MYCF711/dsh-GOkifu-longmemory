@@ -2,6 +2,20 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.64.0（2026-11-02）
+
+### audit-06：活文档随机 10 条 **10/10**（口径：排除 reports/** 与 docs/调研/**）
+- 10 条陈述全部实跑复现：`cli dump`、delta 坏尾处理、`ledger-check` 条数一致、六轴判据三处同口径、
+  A1 边界（0.04/0.05 通过、0.06 失败）、S13 候选数、`re-enable` 摘除 3 条、发版闸 `--full`。
+- 三条卫生提示已修：S13 补时点与现值（4 候选 11/5/3/3）、`evidence/M7-ledger-check.md` 去掉已删选项、
+  `MAINTENANCE.md` 补「该行需重启才能实测」。
+
+### 安装闸证据
+- 新增 `evidence/M7-install-gate.md`：六轮审计收敛记录 + 当前可交付状态 + **仍未验证项**（A3 not-live、Q18 未裁定、3 条 P2 候选）。
+
+### 验证
+394 条测试（390 pass / 0 fail / 4 skip）；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.63.0（2026-11-02）
 
 ### audit-05（第二轮随机 10 条实测，9/10）与其修复
