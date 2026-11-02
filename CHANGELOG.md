@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.57.0（2026-11-02）
+
+### D5 影子遥测（开注入前就能观察）
+- `shadow:true` 时 D5 也检测「同类失败 ≥2 次」，但**不注入**，只写 `repeat-hint.jsonl`（`shadow:true`）；
+- 影子模式保证不改变 `messages`（单测断言）；遥测字段与正式一致。
+- 用途：安装后先开影子跑一天，用 `repeat-report` 看"本来会补几次、哪些类"，再决定是否开真注入。
+
+### 验证
+385 条测试（381 pass / 0 fail / 4 skip）；`metrics-guard PASS`；证据 `evidence/M7-d5-shadow-telemetry.md`。
+
 ## 0.56.0（2026-11-02）
 
 ### 调研 18：CoALA（认知架构）+ 动作空间成文法

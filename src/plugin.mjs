@@ -624,7 +624,7 @@ function repeatStateFor(map, session, after) {
  * D5 遥测：每触发一次「同类失败补卡」记一行 JSONL。
  * 字段只放机械量：时间 / 类 / 本会话内同类失败次数 / 卡片 token / digest；不含会话内容与路径。
  */
-export function writeRepeatTelemetry({ config, trigger, card, digest, at = Date.now() } = {}) {
+export function writeRepeatTelemetry({ config, trigger, card = null, digest = null, at = Date.now(), shadow = false } = {}) {
   const dir = resolveShadowDir(config);
   fs.mkdirSync(dir, { recursive: true });
   const line = JSON.stringify({
@@ -634,6 +634,7 @@ export function writeRepeatTelemetry({ config, trigger, card, digest, at = Date.
     count: trigger?.count ?? null,
     tokens: card?.tokens ?? null,
     digest: digest ?? null,
+    shadow: shadow === true,
   });
   fs.appendFileSync(path.join(dir, 'repeat-hint.jsonl'), `${line}
 `, 'utf8');
@@ -787,12 +788,19 @@ export function apply(ctx, rawConfig = {}) {
       const session = payload?.agent?.session ?? payload?.session ?? null;
 
       // D5：先看这一刀有没有"同类失败反复"。它不受 oncePerSession 限制，但每会话有上限。
-      if (config.repeatHint && config.enabled && !config.shadow) {
+      if (config.repeatHint && (config.enabled || config.shadow)) {
         try {
           const state = repeatStateFor(repeatStates, session, config.repeatHintAfter);
           if (state && state.injected < config.repeatHintMax) {
             const trigger = collectRepeatTrigger(state, payload?.messages);
-            if (trigger) {
+            if (trigger && config.shadow) {
+              // 影子模式（2026-11-02）：D5 不真注入，但**照样记录**"本来会补一张卡"——
+              // 这样在正式开注入之前就能观察触发率与类别分布。
+              try {
+                writeRepeatTelemetry({ config, trigger, at: Date.now(), shadow: true });
+              } catch { /* 影子遥测失败不影响决策 */ }
+              state.injected += 1;
+            } else if (trigger) {
               const deps5 = await resolveDeps(config);
               const inner = await decidePreStep({
                 ctx,
