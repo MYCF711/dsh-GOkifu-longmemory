@@ -247,3 +247,13 @@ test('R04: 纯函数 —— 同输入同输出、空输入不抛', () => {
   assert.deepEqual(extractCommands('cd /tmp && node x.mjs; echo hi | grep z'), ['cd', 'node', 'echo', 'grep']);
   assert.deepEqual(extractDependencies('npm i chalk@5 && import("yaml")'), ['chalk', 'yaml']);
 });
+
+// D2 扩展（2026-11-02）：类级错误主题，让不同路径的同一协议坑跨会话连起来
+test('error-class: 已知协议类归一为 class:<name>，一次性报错返回 null', async () => {
+  const { errorClassKeyOf } = await import('../src/rooms/topic.mjs');
+  assert.equal(errorClassKeyOf('Error: cannot modify "D:/a/x.md": file has not been read'), 'class:fs-read-before-write');
+  assert.equal(errorClassKeyOf('Error: cannot edit "D:/b/y.mjs": file changed since it was read'), 'class:fs-read-before-write');
+  assert.equal(errorClassKeyOf('Error: unknown tool "bash"'), 'class:tool-unavailable');
+  assert.equal(errorClassKeyOf('Error: team member limit 8 reached'), 'class:sandbox-limit');
+  assert.equal(errorClassKeyOf('SyntaxError: missing ) after argument list'), null);
+});
