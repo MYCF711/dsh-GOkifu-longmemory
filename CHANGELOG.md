@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.15.2（2026-11-02）
+
+**可安装性修复：之前"设置里找不到插件"是因为包缺 bundle 清单。**
+
+### 修复
+- 新增 `cordis.patch.yml`（`insert: kifu-longmemory`），`package.json` 增加 `main` / `exports` / `dsh.bundle.patch` / `engines.dsh` / `files`。
+- 宿主按 `dsh.bundle.patch` 把插件插入 profile 插件树；缺这个字段时包能装但不会出现在插件列表。
+
+### 安装（三选一）
+- 设置 → 插件 → 从本地目录安装：选本仓库根目录；
+- 或 `cd <DSH_HOME>/profiles/desktop && pnpm add link:<本仓库路径>`，再把 `dsh-gokifu-longmemory` 加进 `package.json` 的 `dsh.profile.bundles`。
+
 ## 0.15.1（2026-11-02）
 
 改名 **dsh-gokifu-longmemory** + 公开仓库脱敏。
