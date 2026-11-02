@@ -1,0 +1,5 @@
+# dsh-gokifu-longmemory 的 bundle patch：把插件插进 profile 的插件树。
+# 只插入一行（不动任何官方 preset / 其他插件配置）。
+- insert:
+    - id: kifu-longmemory
+      name: 'dsh-gokifu-longmemory'

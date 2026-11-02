@@ -1,29 +1,15 @@
 {
   "name": "dsh-gokifu-longmemory",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "private": true,
   "description": "DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜。私有自用，不发 npm。",
   "type": "module",
-  "main": "src/index.mjs",
+  "main": "src/plugin.mjs",
   "exports": {
-    ".": "./src/index.mjs",
-    "./logread": "./src/rooms/logread.mjs",
-    "./episode": "./src/rooms/episode.mjs",
-    "./graphread": "./src/rooms/graphread.mjs",
-    "./extract": "./src/rooms/extract.mjs",
-    "./topic": "./src/rooms/topic.mjs",
-    "./link": "./src/rooms/link.mjs",
-    "./index": "./src/rooms/index.mjs",
-    "./cli": "./src/rooms/cli.mjs",
-    "./persist": "./src/rooms/persist.mjs",
-    "./thread": "./src/rooms/thread.mjs",
-    "./joseki": "./src/rooms/joseki.mjs",
-    "./claim": "./src/rooms/claim.mjs",
-    "./inject": "./src/rooms/inject.mjs",
-    "./gates": "./src/rooms/gates.mjs",
-    "./walk": "./src/rooms/walk.mjs",
-    "./adjudicate": "./src/rooms/adjudicate.mjs",
-    "./plugin": "./src/plugin.mjs"
+    ".": "./src/plugin.mjs",
+    "./plugin": "./src/plugin.mjs",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
   },
   "scripts": {
     "check": "node scripts/check.mjs",
@@ -31,7 +17,21 @@
     "release": "node scripts/release.mjs"
   },
   "engines": {
-    "node": ">=23.8"
+    "node": ">=20",
+    "dsh": "^0.2.0-rc.2"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "src",
+    "scripts/archive.mjs",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ]
 }
