@@ -8,7 +8,7 @@ const base = () => ({
     A4: { value: 2 },
     A5: { value: 0 },
     A6: { value: 1 },
-    A2: { detail: { injectionRecall: { recall: 1, recallSpecific: 0.7 } } },
+    A2: { detail: { injectionRecall: { recall: 1, recallSpecific: 0.842 } } },
   },
 });
 
@@ -49,4 +49,17 @@ test('metrics-guard: A1=0 但 validity 覆盖 0 ⇒ 标 a1Vacuous（不判失败
   const v2 = judge(covered);
   assert.equal(v2.values.a1Vacuous, false);
   assert.equal(v2.values.a1Coverage, 0.5);
+});
+
+test('metrics-guard: A2b 严格低于「冻结基线 − 10pp」要报（防慢慢烂掉）', () => {
+  const mk = (strict) => {
+    const r = base();
+    r.axes.A2.detail = { injectionRecall: { recall: 1, recallSpecific: strict, hits: 19, specificHits: Math.round(strict * 19), n: 19 } };
+    return judge(r);
+  };
+  assert.equal(mk(0.842).ok, true, '与基线持平 ⇒ PASS');
+  assert.equal(mk(0.76).ok, true, '掉 8pp 仍在容差内');
+  const low = mk(0.70);
+  assert.equal(low.ok, false, '掉 14pp ⇒ FAIL');
+  assert.ok(low.fails.some((f) => f.includes('掉了')), '失败理由要写明掉点');
 });

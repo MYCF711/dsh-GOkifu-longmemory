@@ -22,7 +22,18 @@ const execFileAsync = promisify(execFile);
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || process.env.HOME || '.', 'DeepSeek Harness', 'home');
 
-const LIMITS = { a1Max: 0.05, a5Max: 0, a6Min: 1, a4p50MaxMs: 50, a2bStrictMin: 0.55, a2bCoverMin: 1 };
+// 2026-11-03：除了"绝对下限 0.55"，再加**回归线**（相对冻结基线最多掉 10pp）。
+// 只卡下限的话，84.2% 掉到 56% 也算 PASS —— 那是"慢慢烂掉"的典型形态。
+const LIMITS = {
+  a1Max: 0.05,
+  a5Max: 0,
+  a6Min: 1,
+  a4p50MaxMs: 50,
+  a2bStrictMin: 0.55,
+  a2bCoverMin: 1,
+  a2bStrictRef: 0.8421052631578947,
+  a2bStrictDropMax: 0.1,
+};
 
 export function judge(report, limits = LIMITS) {
   const axes = report?.axes ?? report ?? {};
@@ -49,6 +60,9 @@ export function judge(report, limits = LIMITS) {
   if (!Number.isFinite(a6) || a6 < limits.a6Min) fails.push(`A6 溯源 ${a6} < ${limits.a6Min}`);
   if (Number.isFinite(p50) && p50 > limits.a4p50MaxMs) fails.push(`A4 p50 ${p50.toFixed(2)}ms > ${limits.a4p50MaxMs}ms`);
   if (!Number.isFinite(strict) || strict < limits.a2bStrictMin) fails.push(`A2b 严格 ${strict} < ${limits.a2bStrictMin}`);
+  else if (Number.isFinite(limits.a2bStrictRef) && strict < limits.a2bStrictRef - (limits.a2bStrictDropMax ?? 0.1)) {
+    fails.push(`A2b 严格 ${strict.toFixed(4)} 比冻结基线 ${limits.a2bStrictRef.toFixed(4)} 掉了 ${((limits.a2bStrictRef - strict) * 100).toFixed(1)}pp（>${((limits.a2bStrictDropMax ?? 0.1) * 100).toFixed(0)}pp）`);
+  }
   if (!Number.isFinite(cover) || cover < limits.a2bCoverMin) fails.push(`A2b 覆盖 ${cover} < ${limits.a2bCoverMin}`);
   return { ok: fails.length === 0, fails, values: { a1, a1Vacuous, a1Coverage, a5, a6, p50, a2bStrict: strict, a2bCover: cover, a2bN: recall.n ?? null } };
 }
