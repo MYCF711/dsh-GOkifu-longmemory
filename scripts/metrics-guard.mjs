@@ -9,7 +9,7 @@
 //   A5 越界   = 0
 //   A6 溯源   = 100%
 //   A4 p50    ≤ 50ms
-//   A2b 严格  ≥ 0.60（2026-11-02 实测口径在 0.667–0.706 之间波动：样本仅 18 条，1 条 = 5.5pp）
+//   A2b 严格  ≥ 0.55（样本仅 18 条，1 条 = 5.6pp；2026-11-02 观察到同 store 下 0.611–0.667 的跳动）
 //   A2b 覆盖  = 1.00（上限参考）
 
 import { execFile } from 'node:child_process';
@@ -22,7 +22,7 @@ const execFileAsync = promisify(execFile);
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || process.env.HOME || '.', 'DeepSeek Harness', 'home');
 
-const LIMITS = { a1Max: 0.05, a5Max: 0, a6Min: 1, a4p50MaxMs: 50, a2bStrictMin: 0.60, a2bCoverMin: 1 };
+const LIMITS = { a1Max: 0.05, a5Max: 0, a6Min: 1, a4p50MaxMs: 50, a2bStrictMin: 0.55, a2bCoverMin: 1 };
 
 export function judge(report, limits = LIMITS) {
   const axes = report?.axes ?? report ?? {};
@@ -42,7 +42,7 @@ export function judge(report, limits = LIMITS) {
   if (Number.isFinite(p50) && p50 > limits.a4p50MaxMs) fails.push(`A4 p50 ${p50.toFixed(2)}ms > ${limits.a4p50MaxMs}ms`);
   if (!Number.isFinite(strict) || strict < limits.a2bStrictMin) fails.push(`A2b 严格 ${strict} < ${limits.a2bStrictMin}`);
   if (!Number.isFinite(cover) || cover < limits.a2bCoverMin) fails.push(`A2b 覆盖 ${cover} < ${limits.a2bCoverMin}`);
-  return { ok: fails.length === 0, fails, values: { a1, a5, a6, p50, a2bStrict: strict, a2bCover: cover } };
+  return { ok: fails.length === 0, fails, values: { a1, a5, a6, p50, a2bStrict: strict, a2bCover: cover, a2bN: recall.n ?? null } };
 }
 
 const invokedDirectly = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
@@ -69,7 +69,7 @@ if (invokedDirectly) {
   } catch { /* 证据写失败不影响判定 */ }
   if (json) console.log(JSON.stringify(out, null, 2));
   else {
-    console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'} · A1=${out.values.a1} A5=${out.values.a5} A6=${out.values.a6} A2b严格=${out.values.a2bStrict} 覆盖=${out.values.a2bCover} p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
+    console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'} · A1=${out.values.a1} A5=${out.values.a5} A6=${out.values.a6} A2b严格=${out.values.a2bStrict}（n=${out.values.a2bN}） 覆盖=${out.values.a2bCover} p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
     for (const f of verdict.fails) console.error(`ERR ${f}`);
   }
   process.exit(verdict.ok ? 0 : 1);

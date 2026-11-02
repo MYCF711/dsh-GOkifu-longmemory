@@ -454,7 +454,11 @@ export async function runArchive(opts = {}) {
       const check = rooms.gates.runValidityCheck({ records: { claims }, workspace: opts.workspace ?? null, now });
       for (const claim of claims) {
         const res = check.results?.[`claims:${claim.id}`] ?? check.results?.[claim.id];
-        if (res) claim.validityOk = Boolean(res.ok);
+        if (res) {
+          claim.validityOk = Boolean(res.ok);
+          // N1：核验失败 ⇒ 记忆有效期止于本次核验（不改原文、不删条目）
+          if (res.ok === false && !Number.isFinite(claim.validTo)) claim.validTo = now;
+        }
       }
       if (check.summary.failed > 0) skipped.push(`validity: ${check.summary.failed} 条核验未通过（已标记 validityOk=false）`);
     } catch (err) {

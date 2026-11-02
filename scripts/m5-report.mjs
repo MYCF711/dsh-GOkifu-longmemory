@@ -213,7 +213,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } 
   const sampled = [];
   for (const item of use) {
     const scope = item.scopeKey ?? null;
-    const signal = signalFromText(item.sig, { at: Date.now() });
+    const signal = signalFromText(item.sig, { at: splitAt }); // 固定时点：避免"跑在几点"影响结论（确定性）
     signal.scopeKey = scope;
     const cls = errorClassKeyOf(item.sig);
     if (cls) signal.entities.push({ kind: 'error', key: cls });

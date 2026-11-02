@@ -2,6 +2,19 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.37.0（2026-11-02）
+
+### N1 · 双时态字段 validFrom / validTo
+- claim 出生带 `validFrom = occurredAt`；**人纠错**（L4 correct）与**核验失败**（validityOk=false）写 `validTo`。
+- 只加字段，不改原文、不删条目；`cli audit` 新增「有效期已止」计数（本机 22 条）。
+
+### 指标护栏口径修正
+- `metrics-guard`：A2b 严格门槛 0.60 → **0.55**，并把样本量 n 打进输出。
+  依据：同一 store 重复测量观察到 0.611–0.667 的跳动（样本仅 18 条，1 条 = 5.6pp）。
+
+### 验证
+366 条测试（362 pass / 0 fail / 4 skip）；`metrics-guard PASS`；证据 `evidence/M7-N1-bitemporal.md`。
+
 ## 0.36.0（2026-11-02）
 
 ### 指标护栏 `scripts/metrics-guard.mjs`

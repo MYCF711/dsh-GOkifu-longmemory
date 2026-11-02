@@ -1176,7 +1176,12 @@ export function applyAdjudications({ claims = [], adjudications = [], now = null
 
     target.counters = { ...(target.counters ?? {}), counter: target.counter.length };
 
-    if (Number.isFinite(record.at)) target.correctedAt = record.at;
+    if (Number.isFinite(record.at)) {
+      target.correctedAt = record.at;
+      // N1（2026-11-02）：人纠错即「有效期终点」；旧值不覆盖更早的终点。
+      const prev = Number.isFinite(target.validTo) ? target.validTo : Infinity;
+      target.validTo = Math.min(prev, record.at);
+    }
 
     applied.push(target.id);
 
@@ -1242,6 +1247,8 @@ export function ensureClassClaims({ claims = [], minSupport = 2, maxQuote = 200 
       validity: { type: 'none', value: null },
       preconditions: [{ check: 'scope', value: scopeKey, why: '类级章节：证据只覆盖该作用域（排版口径同其他 claim）' }],
       occurredAt: times.length ? Math.min(...times) : null,
+      validFrom: times.length ? Math.min(...times) : null,
+      validTo: null,
       recordedAt: null,
       supersedes: null,
       counters: { support: support.length, counter: 0, injections: 0, lastInjectedAt: null },
