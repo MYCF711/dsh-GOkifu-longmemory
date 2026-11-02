@@ -21,7 +21,7 @@
 3. **面向模型，不面向人**：记忆卡/索引/线索是给模型读的，人不看懂无所谓；不做人可读知识页。
 4. **人不是审批者，是纠错者**：难判的事交多成员独立解析 + 机械共识；人指出错误是最高优先级证据，触发一次纠错反思。
 
-**运行模式（2026-11-02 起）**：**superagent + Team Lead**——公开仓库 `MYCF711/dsh-gokifu-longmemory`（main 已开分支保护：需 PR + `rules` 检查）；按 `magpie-plugin-scaffold` 的维护准则（分支→PR→必需检查→合并→release）；**每个功能实现都发版本并写 CHANGELOG；不发 npm**（只发 annotated tag + GitHub Release）。
+**运行模式（2026-11-02 起）**：**superagent + Team Lead**——公开仓库 `MYCF711/dsh-gokifu-longmemory`（main 由 ruleset 保护：必须经 PR + required check `rules`）；按 `magpie-plugin-scaffold` 的维护准则（分支→PR→必需检查→合并→release）；**每个功能实现都发版本并写 CHANGELOG；不发 npm**（只发 annotated tag + GitHub Release）。
 **最小交付房间**：按"可独立验收的行为"切房间（R00–R15，见 §11），每个房间有 tombstone test；M1 最小集 = R00/R01/R02/R03/R04/R05/R07/R14。
 **粉色大象规则**：规则、提示与任务书写**正向做法**（做什么）；禁止项只写进边界成文法且写成"归谁做"。点名"不要想 X"会把注意力钉在 X 上。
 

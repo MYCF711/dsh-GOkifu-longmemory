@@ -35,3 +35,18 @@ test('metrics-guard: A2b 严格低于下限 ⇒ FAIL；缺值也 FAIL（不把�
   const missing = base(); delete missing.axes.A2.detail.injectionRecall;
   assert.equal(judge(missing).ok, false);
 });
+
+test('metrics-guard: A1=0 但 validity 覆盖 0 ⇒ 标 a1Vacuous（不判失败）', () => {
+  const r = base();
+  r.axes.A1.detail = { validityCoverage: { withValidity: 26, rendered: 0, ratio: 0 } };
+  const v = judge(r);
+  assert.equal(v.ok, true, '空转不判失败');
+  assert.equal(v.values.a1Vacuous, true);
+  assert.equal(v.values.a1Coverage, 0);
+
+  const covered = base();
+  covered.axes.A1.detail = { validityCoverage: { withValidity: 26, rendered: 13, ratio: 0.5 } };
+  const v2 = judge(covered);
+  assert.equal(v2.values.a1Vacuous, false);
+  assert.equal(v2.values.a1Coverage, 0.5);
+});

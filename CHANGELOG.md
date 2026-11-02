@@ -2,13 +2,29 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.59.0（2026-11-02）
+
+### 调研 19：HippoRAG（海马索引 + PPR）
+- 知识图 + Personalized PageRank 模拟海马索引；多跳 QA 自报 +20%、单步检索比 IRCoT 便宜 10–30×、快 6–13×。
+- 对照：我们的 topics/links/threads + walk 与之同构，**缺 PPR 全局扩散**；列为 **N3 候选**，
+  前提是能用 A2b 严格 + hopPrecision 证明收益（当前 A2b 84.2%，无证据前不动排序）。
+
+### audit-02 复核的修复
+- **P1-3 死断言**：`check.mjs` 的 `\s` 在模板字符串里退化成 `s`，写回数字不会红。改成区间扫描（§7 出现「条测试」即失败），并做正反模拟验证。
+- **P1-4 保护补强**：legacy protection 的 `required_pull_request_reviews=null` 不足以"需 PR"。新增 **ruleset**（pull_request + required_status_checks `rules` strict + 禁删除/强推），口径四处统一。
+- **口径纠正**：26 条 `validFrom=null` 的 claim **都有 `occurredAt`**（旧代码未写该字段），此前写成"无 occurredAt"是错的；已改 CHANGELOG/契约/台账，并**披露归档会重写派生 claim 记录**。
+- **测试补强**：删除 claim 测试里恒真的正则断言；给 `metrics-guard` 的 `a1Vacuous` 补单测（空转 vs 已覆盖）。
+
+### 验证
+389 条测试（385 pass / 0 fail / 4 skip）；`check PASS`；`metrics-guard PASS`。
+
 ## 0.58.0（2026-11-02）
 
 ### 独立审计 audit-01 的修复（有条件通过 → 处理 P1 全部 5 项）
-- **P1-1** `validFrom` 真正落地（= `occurredAt`）；N1 空壳测试改成真断言。本机 322 条 claim 中 296 条有 `validFrom`，26 条历史条目（无 `occurredAt`）按只增不改保留。
+- **P1-1** `validFrom` 真正落地（= `occurredAt`）；N1 空壳测试改成真断言。本机 322 条 claim 中 296 条有 `validFrom`，26 条 0.58 之前写入的历史条目（都有 `occurredAt`，旧代码未写该字段）不回溯改写。
 - **P1-2** 新增 `representativeTextFor()`：建组与"更早支撑"共用，`class:` 前缀不再随输入顺序丢失；新增乱序一致性测试。
 - **P1-3** `AGENTS.md` §7 的状态快照删除，改为「去哪看」指针；`check.mjs` 断言指针存在。
-- **P1-4** 仓库口径统一为**公开**，并实际开启 `main` 分支保护（require PR + required check `rules`）。
+- **P1-4** 仓库口径统一为**公开**，并实际开启 `main` 保护：**ruleset**（pull_request + required check `rules` + 禁删除/强推；不做强制审批——单机单人无法自审）。
 - **P1-5** `metrics-guard` 增 `a1Vacuous/a1Coverage`：A1=0 但 validity 覆盖 0 时显式标「空转」。
 
 ### P2 顺手修
