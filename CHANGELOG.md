@@ -2,6 +2,19 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.63.0（2026-11-02）
+
+### audit-05（第二轮随机 10 条实测，9/10）与其修复
+- 唯一 FAIL 是**引用失效**而非事实失真：`reports/audit-03.md` 用裸行号引用 `ledger-check.mjs`，0.61.0 加 `--full` 后整片下移。
+- 新增引用规范（`AGENTS.md` §2.4）：**文档/PR 引用代码一律「文件 + 符号名」，不写裸行号**；`reports/引用漂移说明.md` 记录本次漂移，历史审计报告不改。
+- 纠正命名漂移：`AGENTS.md` §4.9 的 `fromJSON` 在仓内不存在，改为实际符号 `loadGraphAt`（对未知版本抛 `unsupported version`）。
+
+### 知识库
+- `docs/调研/20-RAPTOR`（递归摘要树）：我们只有**机械两层**（claim/棋谱 → 卷 headline），明确拒绝模型摘要与 embedding；「卷级降级」记为 N4 候选（需 A2b + token 对照）。
+
+### 验证
+394 条测试（390 pass / 0 fail / 4 skip）；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.62.0（2026-11-02）
 
 ### audit-04（随机 10 条陈述实测，9/10）修复

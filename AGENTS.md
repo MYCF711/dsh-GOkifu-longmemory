@@ -82,6 +82,8 @@
 - **指标先有消费者**：任何指标必须有真实语料消费者，否则会一直算假数。
 - **指标本身要被验证**：口径写清分子/分母/时点/树（工作树 vs 发布树），跨时点不可比。
 - **不引用未核实数字**：`[外]` 与 `[本]` 分开标；本仓数字带日期；不转述没读过的文献。
+- **引用代码用「文件 + 符号名」，不写裸行号**（2026-11-02 audit-05：审计报告里的裸行号在版本演进后整片漂移）。
+  例：`scripts/ledger-check.mjs` 的 `fullCheck`，而不是 `:73/:82/:85`。
 - **成本透明**：任何注入改动必须给出 token 前后对照；任何模型调用必须说明次数与失败降级。
 - **不留密钥**；不复制 `<KEYS>\` 内容。
 
@@ -222,7 +224,8 @@ claimEdge = { id, from:"c-…", to:"c-…"|"ep-…"|"t:…",
 
 - 根：`<DSH_HOME>/memory-context/`（sidecar；**不进会话日志**）。
 - 结构：`episodes/`、`topics/`、`links/`、`threads/`、`joseki/`、`adjudications/`、`claims/`、`index.md`、`graph.json`（增量协议仿压缩仓）、`journal/`。
-- 版本：`memoryGraph.version`；`fromJSON` 对未知版本必须抛错。
+- 版本：`memoryGraph.version`；读侧 `loadGraphAt`（`src/rooms/graphread.mjs`）对未知版本必须抛错
+  （`unsupported version`）；仓内**没有** `fromJSON` 这个符号——别在文档里引用它。
 
 ---
 
