@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.27.0（2026-11-02）
+
+### 新增 `cli volumes`（棋书视图）
+```bash
+node scripts/cli.mjs volumes [--limit n] [--json]
+```
+- 类级主卷（`class:*`）排最前，其余按局数降序；输出总卷数/主卷数/每卷局数。
+- 本机：138 卷 · 4 个主卷（module-missing 7 局、fs 读改写 6 局、web-search 4、sandbox 3）。
+
+### 验证
+358 条测试（354 pass / 0 fail / 4 skip）；证据 `evidence/M7-volumes-cli.md`。
+
 ## 0.26.0（2026-11-02）
 
 ### 类级错误成卷（棋书主卷）
