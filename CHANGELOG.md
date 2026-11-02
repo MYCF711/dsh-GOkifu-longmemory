@@ -2,6 +2,19 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.60.0（2026-11-02）
+
+### 台账自证 `scripts/ledger-check.mjs`
+- 把台账数字机械化核对：版本 / 测试（四个分量）/ claim / 卷，任一不一致退出 1；无 store 时跳过语料项并显式标注。
+- 同时校验 `AGENTS.md` §7 仍是指针、`CHANGELOG.md` 有当前版本段。
+- **接进发布流程**：`release.mjs` 打 tag 前先跑 `ledger-check --no-tests`，不一致中止（`--no-ledger` 可跳过）。
+
+### 为什么现在做
+audit-01 与 audit-02 两轮都因"文档写了不实数字"被判有条件通过。机械闸比"我记得更新"可靠。
+
+### 验证
+393 条测试（389 pass / 0 fail / 4 skip）；`ledger-check PASS`；证据 `evidence/M7-ledger-check.md`。
+
 ## 0.59.0（2026-11-02）
 
 ### 调研 19：HippoRAG（海马索引 + PPR）
