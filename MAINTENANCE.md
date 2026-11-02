@@ -9,7 +9,7 @@
 
 | 项 | 值 |
 |---|---|
-| 仓库 | `MYCF711/dsh-gokifu-longmemory`（私有） |
+| 仓库 | `MYCF711/dsh-gokifu-longmemory`（**公开**，main 已开分支保护：需 PR + `rules` 检查；2026-11-02 审计 P1-4 修正） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
 | 当前版本 | `0.57.0` |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
@@ -25,10 +25,10 @@
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | **385 条**（381 pass / 0 fail / 4 skip） |
-| 六轴 | A1 **0.00%**（≤5%）· A2 **24.32%** · A3 not-live · A4 p50 **2.30ms** · A5 **0.00%** · A6 **100%** |
-| 语料 | 116 局 / 141 卷 / claim 295（有效期已止 22）`[本] 2026-11-02 18:45` |
-| 当天覆盖 | 18/18（D1 全量重建后实测） |
+| 测试 | **388 条**（384 pass / 0 fail / 4 skip）[本] 2026-11-02 21:2x |
+| 六轴 | A1 **0.00%（空转：validity 覆盖 0/23，0% 不代表无风险）** · A2 **26.55%** · A3 not-live · A4 p50 **2.03ms** · A5 **0.00%** · A6 **100%** `[本] 2026-11-02 21:2x` |
+| 语料 | 116 局 / **143 卷** / **claim 322**（有效期已止 25）`[本] 2026-11-02 21:2x · node scripts/cli.mjs audit` |
+| 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
 | 已发布 | 0.15.1 改名脱敏 → 0.16 配置 schema → 0.17 设置页 → 0.18 D2/D3 → 0.19 D1 → 0.19.1 D4 否决 → 0.20 A1/A5 修复 → 0.21 D5 → 0.22 类级主题 → 0.23 类级信号 → 0.24 类表 8 类 → 0.25 设置页库状态 → 0.26 类级主卷 → 0.27 cli volumes → 0.28 cli audit → 0.29 N10 人纠错回填 → 0.30 A2 holdout → 0.31 A2b → 0.32 A2b 两口径 → 0.33 A2b 严格 70.59% → 0.34 claim 类表对齐 → 0.35 类级章节自愈 → 0.36 指标护栏 → 0.37 N1 双时态 → 0.38 宿主仿真 → 0.39 install-doctor → 0.40 方案 §8.2c/8.2d → 0.41 N9 卷首摘要 → 0.42 re-enable 精准摘除 → 0.43 A2b 冻结评估集 → 0.44 A2b 严格判据修正 → 0.45 D5 遥测 → 0.46 调研 15 Graphiti → 0.47 cli facts --at → 0.48 A2b 跨项目分桶 → 0.49 Q18 预留开关 → 0.50 安装指南单页版 → 0.51 first-live → 0.52 调研 16 → 0.53 数据契约补齐 → 0.54 Q18 预演 → 0.55 调研 17 Hindsight → 0.56 调研 18 → 0.57 D5 影子遥测（开注入前可观察） |
 | 证据 | `M6-acceptance.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
 | 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA` |
