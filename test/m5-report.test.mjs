@@ -311,6 +311,17 @@ test('m5: A1 —— 无 validity ⇒ not-consumed（value=null）；有覆盖 �
   assert.equal(vacuous.value, 0);
   assert.equal(vacuous.detail.vacuous, true);
   assert.match(vacuous.caveat, /空转/);
+
+  // ④ 闸拦下的也算锻炼 ⇒ 不再空转，且 0% 应被解释为"闸有效"（2026-11-03）
+  const blocked = await measureA1({
+    storeRoot: fixture.storeRoot,
+    workspace: fixture.root,
+    crossScopeLeakRate: 0,
+    h1Report: { staleTransferRate: 0, staleInjected: 0, injected: 9, validityCoverage: { withValidity: 8, rendered: 0, exercised: 8 } },
+  });
+  assert.equal(blocked.detail.vacuous, false);
+  assert.equal(blocked.detail.validityCoverage.ratio, 1);
+  assert.match(blocked.caveat, /闸拦下/);
 });
 
 test('m5: A3 —— 读插件事实（默认关 + 单测条数），不跑宿主', () => {

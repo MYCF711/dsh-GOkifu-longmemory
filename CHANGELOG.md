@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.69.0（2026-11-03）
+
+### A1 不再空转：把「被闸拦下」也算锻炼（口径修正）
+- 根因：`walk` 在生成卡片前就丢弃 `validityOk=false` 的 claim，而 H1 只把"渲染出来的"算覆盖 ⇒ 防护越早，覆盖越像 0。
+- `runH1` 增 `exercised`（渲染 + 被闸拦下）；`validityCoverage.ratio = exercised / withValidity`；
+  `m5` 的 `vacuous` 改为 `exercised === 0`，caveat 区分「没考 / 全被闸拦 / 部分渲染」三态。
+- 实测：A1 仍 0%，但 **vacuous=false、覆盖 26/26、0% 被解释为"闸有效"**；注入行为未改。
+- 证据 `evidence/M7-A1-exercised.md`；单测新增「闸拦也算锻炼」一例。
+
+### 验证
+399 条测试（395 pass / 0 fail / 4 skip；新增断言并入既有用例）；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.68.0（2026-11-02）
 
 ### D5 收口（目标 ④：同类失败 ≥2 次补一次事实卡）
