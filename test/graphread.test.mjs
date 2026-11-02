@@ -3,7 +3,7 @@
  * 只读 `graph.json` 会少一回合（基线边数 < 回放边数）、坏尾会把半帧当最新、版本不认识会静默降级。
  *
  * 数据来源：真实 `$DSH_HOME/chess-context/sessions/<sid>/graph.json`（只读；不写 <DSH_HOME>）。
- * 真实样本 3 张（2026-11-02 02:45 实测，均为已冻结棋谱：目录 mtime 停在 2026-11-01 22:xx–22:30）：
+ * 固定样本 3 张（2026-11-02 02:45 实测，均为已冻结棋谱：目录 mtime 停在 2026-11-01 22:xx–22:30）：
  *   A = session-1286ce28-…   基线 141 节点 / 155 边，delta 43 帧 → 172 节点 / 188 边，failure 边 6
  *   B = 3a50f4d2-…           基线 1 节点 / 0 边，   delta 41 帧 → 23 节点 / 26 边，failure 边 1
  *   C = fa84bf69-…           基线 51 节点 / 77 边，delta 0 帧（纯基线对照），failure 边 4
@@ -82,7 +82,7 @@ const edge = (id, extra = {}) => ({ id, from: null, to: null, intent: '', action
 
 /* ── 真实样本 ─────────────────────────────────────────────── */
 
-test('真实样本 A：43 帧回放后节点/边 ≥ 基线，且基线之外真的长出了节点与边', { skip: !hasSample(SAMPLE_A) }, () => {
+test('固定样本 A（未入库则跳过）：43 帧回放后节点/边 ≥ 基线，且基线之外真的长出了节点与边', { skip: !hasSample(SAMPLE_A) ? '固定样本未入库（该 session 不在本机语料；样本需脱敏后固化，见 audit P2-5）' : false }, () => {
   const baseText = readFileSync(graphPath(SAMPLE_A), 'utf8');
   const base = JSON.parse(baseText);
   const r = loadGraphAt({ basePath: graphPath(SAMPLE_A) });
@@ -109,7 +109,7 @@ test('真实样本 A：43 帧回放后节点/边 ≥ 基线，且基线之外真
   assert.ok(failures.length >= 1, '该棋谱应含 failure 边');
 });
 
-test('真实样本 B：基线 0 条边 → 回放后长出边（"直接 JSON.parse 少一回合"的极端样本）', { skip: !hasSample(SAMPLE_B) }, () => {
+test('固定样本 B（未入库则跳过）：基线 0 条边 → 回放后长出边（"直接 JSON.parse 少一回合"的极端样本）', { skip: !hasSample(SAMPLE_B) ? '固定样本未入库（该 session 不在本机语料；样本需脱敏后固化，见 audit P2-5）' : false }, () => {
   const base = JSON.parse(readFileSync(graphPath(SAMPLE_B), 'utf8'));
   const r = loadGraphAt({ basePath: graphPath(SAMPLE_B) });
   assert.equal(r.truncated, false);
@@ -121,7 +121,7 @@ test('真实样本 B：基线 0 条边 → 回放后长出边（"直接 JSON.par
   assert.ok(Object.keys(r.graph.nodes ?? {}).length > Object.keys(base.nodes ?? {}).length, '回放后节点必须多于基线');
 });
 
-test('真实样本 C：没有 delta（0 字节）时只读基线，结果与基线逐字一致', { skip: !hasSample(SAMPLE_C) }, () => {
+test('固定样本 C（未入库则跳过）：没有 delta（0 字节）时只读基线，结果与基线逐字一致', { skip: !hasSample(SAMPLE_C) ? '固定样本未入库（该 session 不在本机语料；样本需脱敏后固化，见 audit P2-5）' : false }, () => {
   const base = JSON.parse(readFileSync(graphPath(SAMPLE_C), 'utf8'));
   const r = loadGraphAt({ basePath: graphPath(SAMPLE_C) });
   assert.equal(r.frames, 0);
@@ -130,7 +130,7 @@ test('真实样本 C：没有 delta（0 字节）时只读基线，结果与基�
   assert.deepEqual(r.graph.nodes, base.nodes);
 });
 
-test('真实样本：回放幂等（同一批帧再应用一次，图不变）', { skip: !hasSample(SAMPLE_A) || !hasSample(SAMPLE_B) }, () => {
+test('固定样本（未入库则跳过）：回放幂等（同一批帧再应用一次，图不变）', { skip: !hasSample(SAMPLE_A) || !hasSample(SAMPLE_B) ? '固定样本未入库（同上）' : false }, () => {
   for (const sid of [SAMPLE_A, SAMPLE_B]) {
     const basePath = graphPath(sid);
     const r = loadGraphAt({ basePath });

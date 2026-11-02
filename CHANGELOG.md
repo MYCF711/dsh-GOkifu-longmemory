@@ -2,6 +2,17 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.65.1（2026-11-02）
+
+### 测试口径修正 + 知识库
+- `test/extract.test.mjs`、`test/graphread.test.mjs` 里 4 条"真实样本"测试改名为「**固定样本（未入库则跳过）**」，
+  skip 时带原因（不再让人误以为"真实语料回归已跑过"）。这是 audit P2-5 的低成本处理；是否固化样本另议。
+- `docs/调研/21-CRAG`：检索评估器 + 置信度降级 + decompose/recompose；对照结论——我们的「十道闸」就是机械版评估器，
+  **不引入模型打分、不联网兜底**。
+
+### 验证
+398 条测试（394 pass / 0 fail / 4 skip，skip 原因已显式化）；`check PASS`。
+
 ## 0.65.0（2026-11-02）
 
 ### 新增 `scripts/boundary-audit.mjs`（边界静态审计，补 P2-8）

@@ -265,7 +265,7 @@ test('extractConstraints：无约束词 → 空；每段最多 40 句', () => {
 
 /* ── 真实棋谱 ───────────────────────────────────────────── */
 
-test('真实样本 A：failure 边 ≥1，每条信号都带 seq/quote/边号，且 quote ≤200 字', { skip: !hasSample(SAMPLE_A) }, () => {
+test('固定样本 A（未入库则跳过）：failure 边 ≥1，每条信号都带 seq/quote/边号，且 quote ≤200 字', { skip: !hasSample(SAMPLE_A) ? '固定样本未入库（该 session 不在本机语料；样本需脱敏后固化，见 audit P2-5）' : false }, () => {
   const r = loadGraphAt({ basePath: graphPath(SAMPLE_A) });
   assert.equal(r.graph.version, 1);
   const sig = extractSignals({ graph: r.graph });
@@ -289,7 +289,7 @@ test('真实样本 A：failure 边 ≥1，每条信号都带 seq/quote/边号，
   for (const c of sig.constraints) assert.ok(c.quote.length > 0 && len(c.quote) <= MAX_QUOTE);
 });
 
-test('真实样本 C：纯基线棋谱也能抽出 failure / success / 约束 / 工具', { skip: !hasSample(SAMPLE_C) }, () => {
+test('固定样本 C（未入库则跳过）：纯基线棋谱也能抽出 failure / success / 约束 / 工具', { skip: !hasSample(SAMPLE_C) ? '固定样本未入库（该 session 不在本机语料；样本需脱敏后固化，见 audit P2-5）' : false }, () => {
   const r = loadGraphAt({ basePath: graphPath(SAMPLE_C) });
   const sig = extractSignals({ graph: r.graph });
   assert.ok(sig.counts.failures >= 1, `实际 ${sig.counts.failures}`);
@@ -301,7 +301,7 @@ test('真实样本 C：纯基线棋谱也能抽出 failure / success / 约束 / 
   assert.equal(sig.counts.failures + sig.counts.successes + sig.counts.unsettled, edgeCount, '每条边必须恰好落进一个桶');
 });
 
-test('真实棋谱自检：三条桶之和 == 边总数（口径闭合）', { skip: !hasSample(SAMPLE_A) || !hasSample(SAMPLE_C) }, () => {
+test('固定样本自检（未入库则跳过）：三条桶之和 == 边总数（口径闭合）', { skip: !hasSample(SAMPLE_A) || !hasSample(SAMPLE_C) ? '固定样本未入库（同上）' : false }, () => {
   for (const sid of [SAMPLE_A, SAMPLE_C]) {
     const r = loadGraphAt({ basePath: graphPath(sid) });
     const sig = extractSignals({ graph: r.graph });
