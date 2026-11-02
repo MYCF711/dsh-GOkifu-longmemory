@@ -15,7 +15,7 @@
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
-## 二、当前状态（2026-11-02 05:35）
+## 二、当前状态（2026-11-02 10:45 · 巡检）
 
 ```
 分支         main = 0.12.0（M5 收口 + A2 收紧）；功能分支 → PR → 合并 → release
@@ -38,11 +38,12 @@
 
 ## 三、下一步
 
-**真注入（等安装决策）**：
+**主人已选「两个都做」（2026-11-02 10:45）：先装影子 + 裁定 Q17。**
 
-1. **合并与发版**：已完成（0.6.0–0.11.0）。
-2. **安装 = 主人动作**：plugin 声明进 profile/preset，**先只开影子**（`enabled:false, shadow:true`），跑 1–2 天攒 `evidence/shadow/*.jsonl`；改配置走设置 UI 或 staging 脚本，**运行中不动 `profiles/*/cordis.patch.yml`**；重启只在主人明确要求时做。
-3. **两边同点共存验证**：与压缩插件的 `agent/pre-step` 同时开启时，核对一次真实会话的 `decision.messages` 顺序（两条记忆行相邻、互不覆盖）。
+1. **安装 = 主人动作**（按 `docs/安装指南.md` §1–2）：设置 → 插件 → 本地路径 → 选本仓库；配置 `enabled:false, shadow:true, storeRoot:null, shadowDir:null`。**先建库**：`node scripts/archive.mjs`。装完看 `evidence/shadow/shadow.jsonl` 是否出现。
+2. **Hindsight 处置**：影子期**不关**（影子不注入、不耗 token，留作对照）；等真注入前只关 `autoInject`（改 `recall`→`off`），**不卸载、不清 bank**，以便随时回切。
+3. **Q17 裁定（Lead 自裁 C，待主人可否决）**：命令签名泛化到 `tool + 操作类`，但**只生成 candidate 参考层**（不进 V1、必须 ≥3 局独立支撑 + 带 preconditions），实现排在下一刀。
+4. **两边同点共存验证**：真注入开启后，核对一次真实会话的 `decision.messages` 顺序（两条记忆行相邻、互不覆盖）。
 4. **注入台账**：真注入后把"注入了哪条卡"也记进 `evidence/shadow/*.jsonl`（现在影子模式已经记；真注入路径建议同记一份，便于事后复盘）。
 
 **M4 收尾（按顺序）**：
