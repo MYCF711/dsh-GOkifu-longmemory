@@ -100,17 +100,20 @@ apply(ctx, {
 const handler = hooks['agent/pre-step'];
 const rows = [];
 const latencies = [];
+const injectionLatencies = []; // 只统计"真正走到注入判定"的第一步（不被 oncePerSession 短路）
 let leakCount = 0;
 let leakTotal = 0;
 for (const r of replays) {
   const session = { id: `replay-${r.id}`, cwd: cwdFromScope(r.scopeKey) };
   let injectedAny = false;
   let lastDecision = null;
-  for (const text of r.messages) {
+  for (const [msgIndex, text] of r.messages.entries()) {
     const payload = { agent: { session }, messages: [{ role: 'user', content: [{ type: 'text', text }] }] };
     const started = process.hrtime.bigint();
     const decision = await handler(payload, async () => ({ kind: 'enter', messages: [{ role: 'assistant', content: [] }] }));
-    latencies.push(Number(process.hrtime.bigint() - started) / 1e6);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    latencies.push(elapsedMs);
+    if (msgIndex === 0) injectionLatencies.push(elapsedMs);
     lastDecision = decision;
     const rendered = JSON.stringify(decision?.messages ?? []);
     if (rendered.includes('<memory-ledger>') || rendered.includes('[antipattern]') || rendered.includes('[fact]')) injectedAny = true;
@@ -133,6 +136,7 @@ const summary = {
   failed: 0,
   warns: warns.length,
   latencyMs: { p50: pct(latencies, 50), p95: pct(latencies, 95), max: latencies.length ? Math.max(...latencies) : null },
+  injectionLatencyMs: { p50: pct(injectionLatencies, 50), p95: pct(injectionLatencies, 95), max: injectionLatencies.length ? Math.max(...injectionLatencies) : null },
   provenanceRefs: leakTotal,
   crossScopeRefs: leakCount,
   crossScopeLeakRate: leakTotal ? leakCount / leakTotal : 0,
@@ -142,7 +146,8 @@ const summary = {
 if (json) console.log(JSON.stringify(summary, null, 2));
 else {
   console.log(`replay-live：真实会话 ${summary.sessions} 局 · 注入 ${summary.injected} · 沉默 ${summary.empty} · warn ${summary.warns}`);
-  console.log(`延迟：p50 ${summary.latencyMs.p50?.toFixed?.(2) ?? 'n/a'}ms · p95 ${summary.latencyMs.p95?.toFixed?.(2) ?? 'n/a'}ms · max ${summary.latencyMs.max?.toFixed?.(1) ?? 'n/a'}ms`);
+  console.log(`延迟（含短路）：p50 ${summary.latencyMs.p50?.toFixed?.(2) ?? 'n/a'}ms · p95 ${summary.latencyMs.p95?.toFixed?.(2) ?? 'n/a'}ms`);
+  console.log(`注入路径：p50 ${summary.injectionLatencyMs.p50?.toFixed?.(2) ?? 'n/a'}ms · p95 ${summary.injectionLatencyMs.p95?.toFixed?.(2) ?? 'n/a'}ms · max ${summary.injectionLatencyMs.max?.toFixed?.(1) ?? 'n/a'}ms`);
   console.log(`溯源引用 ${summary.provenanceRefs} 条 · 跨作用域 ${summary.crossScopeRefs} 条（${(summary.crossScopeLeakRate * 100).toFixed(2)}%）`);
   for (const r of summary.rows.slice(0, 8)) console.log(`- ${r.episode} · 注入=${r.injected ? 'yes' : 'no'} · 消息 ${r.userMessages} · scope ${String(r.scopeKey).slice(0, 48)}`);
 }
