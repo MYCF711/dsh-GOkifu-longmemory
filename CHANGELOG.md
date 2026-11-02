@@ -2,6 +2,17 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.73.0（2026-11-03）
+
+### Q19-B 预置：`preferenceHardOnly` 开关（默认关）
+- `buildMemoryCard` 增 `preferenceHardOnly`：true 时丢弃 `soft` 偏好（理由句/闲聊），保留 `hard` 约束；默认 false ⇒ 行为不变。
+- 插件配置同名键 + 归一化 + 透传；Q19 裁定为 B 时把默认值翻成 true 即可。
+- **顺手修一个真 bug**：`storeView` 投影 claim 时丢掉了 `level` 字段，导致 hard/soft 分流永远拿不到值（写测试时发现）。
+
+### 实测
+- 401 条测试（397 pass / 0 fail / 4 skip）；新增「flag 开/关」对照用例。
+- 12 局真实会话首条消息：开与不开**结果一致**（没命中 soft 偏好）⇒ 暂无可观测差异，如实记录在 `evidence/M7-preference-hard-flag.md`。
+
 ## 0.72.0（2026-11-03）
 
 ### 偏好类注入的噪声测量（不夹带改动）

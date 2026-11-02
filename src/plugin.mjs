@@ -86,6 +86,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   autoArchive: true,
   autoArchiveMinutes: 30,
   crossScopeClass: false,
+  // Q19 预置（2026-11-03）：true = 只注入 hard 约束，丢弃 soft 偏好（理由句/闲聊）。默认关，等主人裁定。
+  preferenceHardOnly: false,
   repeatHint: true,
   repeatHintAfter: 2,
   repeatHintMax: 1,
@@ -169,6 +171,7 @@ export function sanitizeConfig(raw = {}) {
     autoArchive: boolOf(src.autoArchive, true),
     autoArchiveMinutes: positiveInt(src.autoArchiveMinutes, 30, 24 * 60),
     crossScopeClass: boolOf(src.crossScopeClass, false),
+    preferenceHardOnly: boolOf(src.preferenceHardOnly, false),
     repeatHint: boolOf(src.repeatHint, true),
     repeatHintAfter: positiveInt(src.repeatHintAfter, 2, 20),
     repeatHintMax: positiveInt(src.repeatHintMax, 1, 5),
@@ -427,6 +430,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   };
 
   const card = deps.buildMemoryCard({
+    preferenceHardOnly: config.preferenceHardOnly === true,
     cache,
     signal,
     walkResult,
