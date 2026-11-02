@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.74.2（2026-11-03）
+
+### 发版工具健壮性：`gh release create` 失败时的可诊断兜底
+- 0.74.1 首次发版时 `gh release create` 失败（tag 已推、Release 未建），错误被吞成半截输出。
+- `release.mjs` 现在：① 捕获 stderr 并打印；② 用 `--notes` 内联正文**重试一次**。
+- 0.74.1 的 Release 已手动补建（`gh release create v0.74.1 --notes-file …`）。
+
+### 验证
+`check PASS`；401 条测试全绿；本版发布用于验证兜底路径。
+
 ## 0.74.1（2026-11-03）
 
 ### 调研清单漂移修复 + 守卫

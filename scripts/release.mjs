@@ -70,5 +70,14 @@ if (dry) {
 
 run(`git tag -a ${tag} -m ${tag}`);
 run(`git push origin ${tag}`);
-run(`gh release create ${tag} --title ${tag} --notes-file ${notesPath}`);
+try {
+  run(`gh release create ${tag} --title ${tag} --notes-file "${notesPath}"`);
+} catch (error) {
+  // 2026-11-03：0.74.1 首次发布时 gh release create 失败（tag 已推），这里给一次可诊断的兜底：
+  // ① 打印 stderr；② 用 --notes 直接传正文重试一次。
+  const stderr = String(error?.stderr ?? '');
+  console.error(`release: gh release create 失败：${stderr.trim() || String(error?.message ?? error)}`);
+  const inline = execSync(`python -c "import json,sys;print(json.dumps(open(r'${notesPath}',encoding='utf-8').read())[1:-1])"`, { encoding: 'utf8' }).trim();
+  run(`gh release create ${tag} --title ${tag} --notes "${inline}"`);
+}
 console.log(`released ${tag} (no npm publish)`);
