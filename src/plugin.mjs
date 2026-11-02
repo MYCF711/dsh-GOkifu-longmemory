@@ -617,6 +617,25 @@ function repeatStateFor(map, session, after) {
   return state;
 }
 
+/**
+ * D5 遥测：每触发一次「同类失败补卡」记一行 JSONL。
+ * 字段只放机械量：时间 / 类 / 本会话内同类失败次数 / 卡片 token / digest；不含会话内容与路径。
+ */
+export function writeRepeatTelemetry({ config, trigger, card, digest, at = Date.now() } = {}) {
+  const dir = resolveShadowDir(config);
+  fs.mkdirSync(dir, { recursive: true });
+  const line = JSON.stringify({
+    at,
+    kind: 'repeat-hint',
+    cls: trigger?.cls ?? null,
+    count: trigger?.count ?? null,
+    tokens: card?.tokens ?? null,
+    digest: digest ?? null,
+  });
+  fs.appendFileSync(path.join(dir, 'repeat-hint.jsonl'), `${line}
+`, 'utf8');
+}
+
 export const CONFIG_ROUTE = '/kifu-longmemory/config';
 
 /**
@@ -781,6 +800,13 @@ export function apply(ctx, rawConfig = {}) {
               });
               if (inner?.action === 'inject') {
                 state.injected += 1;
+                // D5 遥测（2026-11-02）：真注入后要能统计"二次命中触发率与误报"。
+                // 只写影子台账目录；任何异常不影响本轮注入。
+                try {
+                  writeRepeatTelemetry({ config, trigger, card: inner.card, digest: inner.digest, at: Date.now() });
+                } catch (error) {
+                  warn(ctx, `D5 遥测写入失败（忽略）：${String(error?.message ?? error)}`);
+                }
                 return inner.decision;
               }
             }
