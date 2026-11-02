@@ -268,6 +268,9 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     sameScopeSampled,
     sameScopeHits,
     recallSameScope: sameScopeSampled > 0 ? sameScopeHits / sameScopeSampled : null,
+    // Q18 量化（2026-11-02）：把「只有跨工作区先例」的样本单独算一列 —— 只统计，不改变行为。
+    crossScopeSampled: sampled.filter((x) => !x.sameScope).length,
+    crossScopeStrict: sampled.filter((x) => !x.sameScope && x.specific).length,
     sampled,
   };
 }
@@ -315,7 +318,7 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
       n,
       status: measured ? 'measured' : 'not-consumed',
       caveat: measured
-        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout** rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}）；**注入召回 A2b** 覆盖=${injectionRecall && Number.isFinite(injectionRecall.recall) ? pct(injectionRecall.recall) : 'n/a'}（${injectionRecall?.hits ?? '?'}/${injectionRecall?.n ?? '?'}）· **严格**=${injectionRecall && Number.isFinite(injectionRecall.recallSpecific) ? pct(injectionRecall.recallSpecific) : 'n/a'}（${injectionRecall?.specificHits ?? '?'}/${injectionRecall?.n ?? '?'}，claim 文本与该错误 ≥2 词重合）`
+        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout** rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}）；**注入召回 A2b** 覆盖=${injectionRecall && Number.isFinite(injectionRecall.recall) ? pct(injectionRecall.recall) : 'n/a'}（${injectionRecall?.hits ?? '?'}/${injectionRecall?.n ?? '?'}）· **严格**=${injectionRecall && Number.isFinite(injectionRecall.recallSpecific) ? pct(injectionRecall.recallSpecific) : 'n/a'}（${injectionRecall?.specificHits ?? '?'}/${injectionRecall?.n ?? '?'}）；**跨项目唯先例** ${injectionRecall?.crossScopeStrict ?? '?'}/${injectionRecall?.crossScopeSampled ?? '?'}（Q18 的上限）`
         : 'LOO 分母为 0（没有可评测的失败签名）⇒ 不写 0',
       detail: {
         holdout,
