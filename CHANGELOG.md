@@ -2,6 +2,22 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.13.0（2026-11-02）
+
+Q17 裁定 C 落地：定式长出「参考层」（只作 candidate，不进 V1）。
+
+### 新增（R08）
+- **`generalizeCommand`**：命令 → `tool + 操作类`（`node --test` → `cmd:node test`；github 参数 JSON → `tool:github commits`）。
+- **`promoteReferenceJoseki`**：泛化签名 **≥3 局独立支撑**才出候选；`layer:'reference'`、`entersV1:false`、`state:'candidate'`、必须带 `preconditions`（原文命令）。
+- **archive**：参考层与精确层并列写入 store（`j-ref-*`）。
+
+### 真实语料（100 局）
+- 参考层候选 **2 个**：`tool:github path`（8 局）、`tool:github contents`（5 局）
+- 精确层仍 **0**（真实命令参数高度 episode 特异）
+- 343 条测试全绿
+
+> 这一层的定位写死：**只回答“历史上这类操作成功过”，不进第一验收面（V1）**，避免把一次偶然成功当通用招法。
+
 ## 0.12.0（2026-11-02）
 
 A2 口径收紧：只把"像错误"的签名算进 repeat/novel。

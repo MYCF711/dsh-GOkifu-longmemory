@@ -23,3 +23,16 @@
 - S11 保留（`commandSuccesses` 独立字段，不破坏边桶闭合）：它让 R03 的"成功"语义更完整，也为将来泛化提供原料。
 - R08 的 Q5 门槛（≥2 局独立支撑 + 每招 source）**不放宽**；定式继续 0，如实记账。
 - 已记入 `方案.md` §5.1b 注与 `docs/拷问记录.md`（Q17 待裁定：定式签名是否泛化）。
+
+## 3 · Q17-C 参考层（2026-11-02 11:05 实测）
+
+裁定 C 落地后，把成功签名泛化成 `tool + 操作类`，要求 **≥3 局独立支撑**，且 `layer:"reference"`、`entersV1:false`、必须带 `preconditions`（原文命令）。
+
+| 候选 | 支撑局数 | 说明 |
+|---|---|---|
+| `tool:github path` | 8 | 用 github 工具按 path 查仓库内容 |
+| `tool:github contents` | 5 | 用 github 工具读文件内容 |
+
+- 精确层（S12）仍 **0**：真实命令参数高度 episode 特异。
+- 参考层**不进 V1 验收**：它只回答“历史上这类操作成功过”，不证明“这次该这么做”。
+- 复算：`node scripts/archive.mjs --store <tmp>` 后看 `joseki` 里的 `j-ref-*`；`node scripts/archive.mjs --dry-run` 输出「定式 2」。
