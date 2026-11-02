@@ -135,6 +135,7 @@ const summary = {
   empty: rows.filter((r) => !r.injected).length,
   failed: 0,
   warns: warns.length,
+  warnSamples: warns.slice(0, 5).map((w) => String(w).slice(0, 160)),
   latencyMs: { p50: pct(latencies, 50), p95: pct(latencies, 95), max: latencies.length ? Math.max(...latencies) : null },
   injectionLatencyMs: { p50: pct(injectionLatencies, 50), p95: pct(injectionLatencies, 95), max: injectionLatencies.length ? Math.max(...injectionLatencies) : null },
   provenanceRefs: leakTotal,
