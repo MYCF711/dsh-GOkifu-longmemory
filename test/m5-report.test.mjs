@@ -318,8 +318,8 @@ test('m5: A3 —— 读插件事实（默认关 + 单测条数），不跑宿主
   assert.equal(a3.status, 'not-live');
   assert.equal(a3.value, 0);
   assert.equal(a3.unit, 'rate');
-  assert.equal(a3.detail.enabledDefault, false, '插件入口默认 must be false');
-  assert.equal(a3.detail.shadowDefault, true);
+  assert.equal(a3.detail.enabledDefault, true, '零配置默认开启（2026-11-02 裁定）');
+  assert.equal(a3.detail.shadowDefault, false);
   assert.ok(a3.detail.unitTests > 0, '必须数到单测条数');
   assert.match(a3.caveat, /not|未|单测/);
 });

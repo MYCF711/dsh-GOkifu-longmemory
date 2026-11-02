@@ -139,6 +139,7 @@ async function runHook({ hooks, payload, decision }) {
 const baseConfig = (over = {}) => ({
   enabled: true,
   shadow: false,
+  autoBuild: false, // 测试里不真的建库（autoBuild 会写盘并跑 14s 归档）
   now: T(24),
   limit: 5,
   budgetTokens: 500,
@@ -364,9 +365,10 @@ test('R16: shadow 写不进去（目录在 $DSH_HOME 内）⇒ 不注入、不�
 // 7/8. 默认关 & 非 enter
 // ---------------------------------------------------------------------------
 
-test('R16: 默认配置（enabled:false, shadow:false）⇒ 什么都不做', async () => {
-  assert.equal(DEFAULT_CONFIG.enabled, false, '默认必须关');
-  assert.equal(DEFAULT_CONFIG.shadow, true, '默认走影子（安全）');
+test('R16: 显式关掉（enabled:false）⇒ 什么都不做', async () => {
+  assert.equal(DEFAULT_CONFIG.enabled, true, '零配置默认开（2026-11-02 主人裁定）');
+  assert.equal(DEFAULT_CONFIG.shadow, false, '零配置默认真注入');
+  assert.equal(DEFAULT_CONFIG.autoBuild, true, '零配置默认自动建库');
 
   const { ctx, hooks, warns } = makeCtx();
   const { session } = makeSession(tmpdir());
@@ -377,11 +379,11 @@ test('R16: 默认配置（enabled:false, shadow:false）⇒ 什么都不做', as
   assert.deepEqual(warns, [], '关掉的时候连 warn 都不该有');
 });
 
-test('R16: apply 默认参数 ⇒ 注册钩子但不注入（不配 config 也安全）', async () => {
+test('R16: apply 默认参数 ⇒ 注册钩子且默认开启（无库时沉默）', async () => {
   const { ctx, hooks } = makeCtx();
   const res = apply(ctx);
   assert.equal(res.registered, true);
-  assert.equal(res.config.enabled, false);
+  assert.equal(res.config.enabled, true);
   assert.equal(typeof hooks[HOOK], 'function');
 });
 
@@ -594,4 +596,22 @@ test('R16: storeRoot 支持 <DSH_HOME> / $DSH_HOME 占位符；无 home 时视�
     assert.equal(enforceStoreRoot('<DSH_HOME>/memory-context'), null, '无 home 时占位符不可解析 ⇒ null（沉默，不猜路径）');
     if (previousHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = previousHome;
   }
+});
+
+test('R16: 零配置自动建库 —— 库不存在时后台调 buildStore 一次，本次沉默', async () => {
+  const { ctx, hooks, warns } = makeCtx();
+  const { session } = makeSession(tmpdir());
+  let calls = 0;
+  const storeRoot = path.join(tmpdir(), `kifuin-autobuild-${process.pid}-${Date.now()}`);
+  apply(ctx, baseConfig({
+    storeRoot,
+    autoBuild: true,
+    deps: { buildStore: async () => { calls += 1; } },
+  }));
+  const original = enterDecision([userMessage('yaml 装不上')]);
+  const out = await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: original });
+  assert.equal(out, original, '建库期间必须沉默');
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 1, '后台应当只建一次');
+  assert.ok(warns.some((w) => w.includes('记忆库不存在')), warns.join(' | '));
 });
