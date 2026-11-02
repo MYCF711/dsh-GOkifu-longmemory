@@ -141,6 +141,11 @@ export function buildThreads({ episodes = [], links = [], topics = null, options
   const eligible = (id) => {
     const d = df.get(id) ?? 0;
     if (d < opts.minKifus) return false;
+    // 类级错误主题（class:*）是「棋书」的主卷：同一类坑天然跨很多局，
+    // 不套「df ≤ 10%」的判别性阈值，否则最该成册的那一类永远不成卷（2026-11-02）。
+    if (String(id).includes('class:') || String(id).startsWith('t:error:')) {
+      return true;
+    }
     if (Number.isFinite(opts.maxDf)) return d <= opts.maxDf;
     return linkEligible(d, N);
   };
