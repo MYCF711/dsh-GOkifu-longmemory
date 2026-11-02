@@ -224,6 +224,23 @@ const ERROR_MARKERS = [
 // 合成标记：只说明「命令失败」，不说明「错在哪」——可用于 mention，但不建 same-error 边。
 const GENERIC_ERROR_RE = /^(?:exit code \d+|\[exit code: \d+\])$/;
 
+// 类级错误主题（D2 口径，2026-11-02）：同一个「协议类坑」在不同路径/文件下也应连起来，
+// 否则跨会话重复只能靠原文完全相等才成立（实测 12 条跨局重复里 10 条被路径差异拆散）。
+const ERROR_CLASS_RULES = [
+  ['fs-read-before-write', /file has not been read|file changed since it was read|file no longer exists/i],
+  ['tool-unavailable', /unknown tool|tool .* not found|unknown command/i],
+  ['policy-human-turn', /requires a direct human turn/i],
+  ['sandbox-limit', /team member limit|tool call aborted|timed out after/i],
+  ['web-search-empty', /web_search_tool_result blocks/i],
+];
+
+/** 类级错误 key；没有匹配返回 null（只连已知协议类，避免把一次性报错并进来）。 */
+export function errorClassKeyOf(text) {
+  const value = String(text ?? '');
+  for (const [name, re] of ERROR_CLASS_RULES) if (re.test(value)) return `class:${name}`;
+  return null;
+}
+
 /** exit code 之类的合成标记不构成「同一报错原文」的证据。 */
 export function isGenericErrorKey(key) {
   return GENERIC_ERROR_RE.test(String(key ?? '').trim());
@@ -610,6 +627,8 @@ export function extractTopics({ episode = null, events = [], graph = null, limit
         const err = extractErrorKey(head);
         if (err) {
           add('error', err, { seq, occurredAt: ts, quote: clip(err, 120), source: 'event:tool/result' });
+          const cls = errorClassKeyOf(err);
+          if (cls) add('error', cls, { seq, occurredAt: ts, quote: cls, source: 'error:class' });
         }
       }
       if (/"dependencies"\s*:/.test(head)) {
@@ -703,6 +722,8 @@ export function extractTopics({ episode = null, events = [], graph = null, limit
       const err = extractErrorKey(edge.errorSnippet) ?? null;
       if (err) {
         add('error', err, { seq, occurredAt: ts, edgeId: execId, quote: clip(edge.errorSnippet, lim.quoteChars), source: 'graph:edge.failure' });
+        const cls = errorClassKeyOf(err);
+        if (cls) add('error', cls, { seq, occurredAt: ts, edgeId: execId, quote: cls, source: 'error:class' });
       }
     }
   }
