@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.53.0（2026-11-02）
+
+### 数据契约补齐（只改文档）
+- 新增 §9 claim（含 `validFrom/validTo/validityOk/repeat` + 四条不变量）、§10 adjudication、
+  §11 thread（`headline`）、§12 巩固（consolidation）、§13 配置（13 键默认值）、§14 版本与迁移纪律。
+- 明确：新字段缺失按 null 处理，旧库不迁移、不重写历史文件。
+
+### 验证
+383 条测试全绿；`metrics-guard PASS`；证据 `evidence/M7-contract-sync.md`。
+
 ## 0.52.0（2026-11-02）
 
 ### 知识库
