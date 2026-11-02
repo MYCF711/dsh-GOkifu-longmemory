@@ -2,6 +2,21 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.14.0（2026-11-02）
+
+影子台账复盘工具：装完就能一眼看出"本来会注入多少、多长、哪些信号命中"。
+
+### 新增
+- **`scripts/shadow-report.mjs`**：读 `evidence/shadow/shadow.jsonl`（只读），输出：
+  - `wouldInject` / `silent` / `silentRate`
+  - `tokens`（会注入卡的 p50/p90/max）与 `tokensAll`、`silentIndexOnlyTokens`
+  - `topSignals`（按信号词频）、`claimsPerCard`
+- 台账不存在 ⇒ 退出码 **2**，不伪造 0。
+- **`test/shadow-report.test.mjs`**：2 条（正常统计 / 缺台账）。
+
+### 说明
+- 影子卡没有命中时 `section:null`、`tokens` 只有 INDEX 行（约 16），报告把两类分开统计，避免把"沉默"算成"注入"。
+
 ## 0.13.0（2026-11-02）
 
 Q17 裁定 C 落地：定式长出「参考层」（只作 candidate，不进 V1）。
