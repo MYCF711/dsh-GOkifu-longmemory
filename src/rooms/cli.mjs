@@ -717,7 +717,7 @@ export async function runCli(argv = [], io = {}) {
         const lines = [];
         lines.push(`卷（棋书视图，只读）：${threads.length} 个 · 类级主卷 ${threads.filter(isClass).length} 个`);
         for (const t of shown) {
-          lines.push(`- ${t.title} · ${t.kifuCount ?? 0} 局 · ${String(t.id)}${isClass(t) ? ' · 主卷' : ''}`);
+          lines.push(`- ${t.headline ?? `${t.title} · ${t.kifuCount ?? 0} 局`} · ${String(t.id)}${isClass(t) ? ' · 主卷' : ''}`);
         }
         write(lines.join(String.fromCharCode(10)));
       }

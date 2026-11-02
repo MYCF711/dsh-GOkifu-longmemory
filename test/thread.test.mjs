@@ -152,3 +152,20 @@ test('R06: 空输入与非法输入', () => {
   assert.equal(episodeOccurredAt({ startedAt: 5 }), 5);
   assert.equal(episodeOccurredAt({}), null);
 });
+
+// N9（2026-11-02）：卷首摘要 —— 机械拼接，含局数与最近日期，不含模型生成内容
+test('N9: 每卷都有 headline（局数 + 最近日期）', async () => {
+  const { buildThreads } = await import('../src/rooms/thread.mjs');
+  const T = 1_760_000_000_000;
+  const episodes = [
+    { id: 'ep-a', scopeKey: 'w:d:/x', startedAt: T, topics: [{ id: 't:error:x', kind: 'error', key: 'class:fs-read-before-write' }], l0: '读改写协议失败' },
+    { id: 'ep-b', scopeKey: 'w:d:/x', startedAt: T + 86_400_000, topics: [{ id: 't:error:x', kind: 'error', key: 'class:fs-read-before-write' }], l0: '又一次读改写失败' },
+  ];
+  const { threads } = buildThreads({ episodes, links: [], topics: [{ id: 't:error:x', kind: 'error', key: 'class:fs-read-before-write', df: 2 }] });
+  assert.equal(threads.length, 1);
+  const h = threads[0].headline;
+  assert.ok(typeof h === 'string' && h.length > 0, '要有 headline');
+  assert.match(h, /2 局/);
+  assert.match(h, /最近 \d{4}-\d{2}-\d{2}/);
+  assert.match(h, /class:fs-read-before-write/);
+});
