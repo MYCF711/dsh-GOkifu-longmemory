@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.67.0（2026-11-02）
+
+### 安装彩排：在假 home 上跑通 re-enable 全链路
+- 复制真实 profile 到 `tmp/rehearse-home/`，跑 `re-enable`（dry-run + 实跑）与 `install-doctor`：
+  摘除 3 条禁用、补 `link:` 依赖、补 bundle、生成两份备份；复制体 patch 不再含本包。
+- `install-doctor`：`ok 插件注册（未见 disabled）`、`ok 设置接口 GET status=200`（无 store 时 `exists:false`，符合零配置预期）。
+- **真实 home 全程未被改动**（patch 4 处包名 / 6 条 disabled / 无依赖，三项逐条核对）。
+- 证据：`evidence/M7-reenable-rehearsal.md`。
+
+### 验证
+398 条测试全绿；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.66.0（2026-11-02）
 
 ### 知识库
