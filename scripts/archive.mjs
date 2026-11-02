@@ -92,7 +92,7 @@ async function loadOptional(relPath) {
 }
 
 async function loadRooms() {
-  const [logread, episode, graphread, extract, topic, link, thread, joseki, claim] = await Promise.all([
+  const [logread, episode, graphread, extract, topic, link, thread, joseki, claim, gates] = await Promise.all([
     loadOptional('../src/rooms/logread.mjs'),
     loadOptional('../src/rooms/episode.mjs'),
     loadOptional('../src/rooms/graphread.mjs'),
@@ -102,8 +102,9 @@ async function loadRooms() {
     loadOptional('../src/rooms/thread.mjs'),
     loadOptional('../src/rooms/joseki.mjs'),
     loadOptional('../src/rooms/claim.mjs'),
+    loadOptional('../src/rooms/gates.mjs'),
   ]);
-  return { logread, episode, graphread, extract, topic, link, thread, joseki, claim };
+  return { logread, episode, graphread, extract, topic, link, thread, joseki, claim, gates };
 }
 
 /** 会话日志的绝对路径 → 相对 dataRoot 的路径（非法/跨盘 ⇒ null，绝不落绝对路径）。 */
@@ -445,6 +446,20 @@ export async function runArchive(opts = {}) {
     }
   } else {
     skipped.push('claims: R09 claim 缺失（未产出 claim）');
+  }
+
+  // 入馆时核一次 validity，结果写进 claim（walk 据此跳过过期条目，AGENTS §2.3 时间戳纪律）。
+  if (rooms.gates?.runValidityCheck && claims.length > 0) {
+    try {
+      const check = rooms.gates.runValidityCheck({ records: { claims }, workspace: opts.workspace ?? null, now });
+      for (const claim of claims) {
+        const res = check.results?.[`claims:${claim.id}`] ?? check.results?.[claim.id];
+        if (res) claim.validityOk = Boolean(res.ok);
+      }
+      if (check.summary.failed > 0) skipped.push(`validity: ${check.summary.failed} 条核验未通过（已标记 validityOk=false）`);
+    } catch (err) {
+      skipped.push(`validity: 核验失败（${String(err?.message ?? err)}）`);
+    }
   }
 
   const authoritative = {

@@ -779,7 +779,9 @@ test('R11 作用域: 解析优先级（opts > signal.scope > signal.scopeKey > s
   // opts.scope 优先：把当前作用域指到另一个工作区 ⇒ 只看那边
   const other = walkScope(scopeStore(), { scope: OTHER_SCOPE, signal: { kind: 'root-message', terms: ['yaml'], scopeKey: SCOPE } });
   assert.deepEqual(episodeIds(other), ['ep-b1']);
-  assert.deepEqual(claimIds(other).sort(), ['c-scope-b', 'c-scope-cross2', 'c-scope-u']);
+  // 2026-11-02：u:/claim 也必须有**同作用域证据棋谱**才进卡片（A5 独立复核要求 0 越界行）。
+  // c-scope-cross2 的证据在 demo、c-scope-u 的证据也不在 e:/other-workspace ⇒ 两者都不出现。
+  assert.deepEqual(claimIds(other).sort(), ['c-scope-b']);
 });
 
 test('R11 作用域: 与 R13 闸 1 同口径（walk 可见 ⇒ 闸 1 必可见；归一化一致）', () => {
