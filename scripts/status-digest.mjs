@@ -41,11 +41,14 @@ run('git', ['checkout', '--', 'evidence/metrics-guard.json']);
 const m5 = run(node, ['scripts/m5-report.mjs', '--json']);
 const doctor = run(node, ['scripts/install-doctor.mjs']);
 const replay = run(node, ['scripts/replay-live.mjs', '--sessions', sessions, '--json']);
+const liveStats = run(node, ['scripts/live-stats.mjs', '--json']);
 
 let axes = null;
 try { axes = JSON.parse(m5.out).axes; } catch { /* 无 store 时 m5 会失败 */ }
 let replaySum = null;
 try { replaySum = JSON.parse(replay.out); } catch { /* 同上 */ }
+let liveSum = null;
+try { liveSum = JSON.parse(liveStats.out); } catch { /* 还没有心跳台账 */ }
 
 const digest = {
   generatedAt: new Date().toISOString(),
@@ -61,6 +64,7 @@ const digest = {
   metrics: guard.out.split('\n').filter((l) => l.includes('metrics-guard PASS')).pop() ?? null,
   sixAxis: axes ? Object.fromEntries(Object.entries(axes).map(([k, v]) => [k, v?.value ?? null])) : null,
   install: doctor.out.split('\n').filter((l) => l.startsWith('ok') || l.startsWith('ERR')).slice(0, 6),
+  live: liveSum ? { lines: liveSum.lines, lastAt: liveSum.lastAt, actions: liveSum.actions, tokens: liveSum.tokens } : null,
   replay: replaySum ? {
     sessions: replaySum.sessions, injected: replaySum.injected, empty: replaySum.empty,
     crossScope: replaySum.crossScopeRefs, p50: replaySum.injectionLatencyMs?.p50, p95: replaySum.injectionLatencyMs?.p95,
@@ -75,6 +79,7 @@ const md = [
   `- 质量门：check **${digest.gates.check}** · ledger **${digest.gates.ledger}** · guard **${digest.gates.metricsGuard}**`,
   digest.metrics ? `- \`${digest.metrics}\`` : null,
   digest.sixAxis ? `- 六轴：${Object.entries(digest.sixAxis).map(([k, v]) => `${k}=${v}`).join(' · ')}` : null,
+  digest.live ? `- **A3 心跳**：${digest.live.lines} 行 · 最近 ${new Date(digest.live.lastAt).toLocaleString()} · ${Object.entries(digest.live.actions).map(([k, v]) => `${k}=${v}`).join(' · ')}` : '- A3 心跳：**无台账**（插件还没在宿主里跑过）',
   digest.replay ? `- 真实会话回放（${digest.replay.sessions} 局）：注入 ${digest.replay.injected} · 沉默 ${digest.replay.empty} · 跨作用域 ${digest.replay.crossScope} · 注入 p50 ${Number(digest.replay.p50).toFixed(1)}ms / p95 ${Number(digest.replay.p95).toFixed(1)}ms` : null,
   '',
   '## 安装状态',

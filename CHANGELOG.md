@@ -2,11 +2,29 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.79.0（2026-11-03）
+
+### A3 心跳：`live-stats.jsonl`（插件真的在宿主里跑过的证据）
+- 每走完一次 pre-step 决策，向 `<sidecar>/live-stats.jsonl` 追加一行：`{at, action, reason, digest, tokens, shadow}`。
+- 用途：**装了之后不用猜**——文件里有行 = 插件在真宿主里跑过；没有行 = 没加载或 `liveStats:false`。
+- 默认开（`liveStats: true`），库不存在时不创建目录、不写心跳；仿真脚本（host-sim / replay-live）显式 `liveStats:false`，避免污染证据。
+- 新增 `scripts/live-stats.mjs` 汇总（动作分布/原因/tokens p50·p95/最近 N 行）；`status-digest` 增加「A3 心跳」一行。
+- 新增单测：默认写、关掉不写。
+
+### 验证
+403 条测试（399 pass / 0 fail / 4 skip）；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.78.0（2026-11-03）
 
 ### 一键开启脚本 `开启长期记忆.cmd`
 - 双击即用：先提示「把 DSH 完全关掉」，再执行 `node scripts/re-enable.mjs`（自动备份 patch/package.json）。
 - 解决的真实问题：主人重启 DSH ≠ 启用插件——**只重启不会加载它**，必须先跑 re-enable。
+- **实测过两个致命 bug 并修掉**：① `cd /d "%~dp0"` 尾反斜杠把引号转义 → 改为 `"%~dp0."`；
+  ② GBK 写入时 `scripts
+e-enable.mjs` 里的 `
+` 被当成回车 → 全改成正斜杠。
+- 假 home 实测：摘除 3 条禁用、依赖补齐、`dsh-gokifu-longmemory` 在 patch 中归零。
+- `re-enable` 增 **no-op 路径**：已是启用状态时不再重写 patch/package.json（避免重复备份噪音）。
 - `docs/runbook-装完之后.md` §1 增加懒人路径。
 
 ### 验证
