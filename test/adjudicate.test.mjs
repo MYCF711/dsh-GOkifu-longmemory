@@ -47,7 +47,7 @@ test('R10: 契约常量（票型/裁决/层/阈值/上限）', () => {
   assert.equal(MAX_REASON, 200);
   assert.equal(MIN_MEMBERS, 2);
   assert.equal(ADJUDICATION_VERSION, 1);
-  assert.equal(ADJUDICATION_SCHEMA, 'dsh-kifuin/adjudication@1');
+  assert.equal(ADJUDICATION_SCHEMA, 'dsh-gokifu-longmemory/adjudication@1');
 });
 
 test('R10: 支持多数 ⇒ promote；agreement = 多数 ÷ 有效票；dissent 收反对票', () => {

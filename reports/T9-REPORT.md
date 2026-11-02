@@ -50,7 +50,7 @@ const entered = decision.messages.toSpliced(Math.max(lastClaimed, 0) + 1, 0, mes
 ```js
 createUserMessage({
   content: [{ type: "text", text }],
-  source: { kind: "dsh-kifuin", form: "memory-card", digest, pluginVersion: 1 },
+  source: { kind: "dsh-gokifu-longmemory", form: "memory-card", digest, pluginVersion: 1 },
 })
 ```
 
@@ -117,7 +117,7 @@ $ node scripts/check.mjs → check: PASS
 | warn | **0** |
 | 注入体量 | 1,108 字符 / **297 tokens**（预算 500） |
 | 插入位置 | `index 1`（唯一一条 claimed 消息之后），`total 2` |
-| `source` | `{kind:"dsh-kifuin", form:"memory-card", digest:"e3a300d1e0f9509b", pluginVersion:1}` |
+| `source` | `{kind:"dsh-gokifu-longmemory", form:"memory-card", digest:"e3a300d1e0f9509b", pluginVersion:1}` |
 
 注入正文（节选，就是模型会读到的东西）：
 
@@ -125,8 +125,8 @@ $ node scripts/check.mjs → check: PASS
 MEMORY: …/memory-context/index.md（scope=w:d:/…长期记忆系统, 92 局, 未列出≠不存在）
 <memory-ledger>
 # markers: [semantic]=≥3 局且无反例 · …
-- [antipattern] Error: only an in-progress task can complete (ep-8cc34e32, 2026-11-01, seq 2146)
-- [observed] fail=5 · topics=github.com (ep-8cc34e32, 2026-11-01, seq 0)
+- [antipattern] Error: only an in-progress task can complete (<ep>, 2026-11-01, seq 2146)
+- [observed] fail=5 · topics=github.com (<ep>, 2026-11-01, seq 0)
 </memory-ledger>
 ```
 
@@ -139,7 +139,7 @@ MEMORY: …/memory-context/index.md（scope=w:d:/…长期记忆系统, 92 局, 
 3. **宿主包**：`@deepseek-ai/dsh-llm` 必须可解析（宿主自带；本仓测试用替身，所以测试环境缺它也能过）。
 4. **配置声明**：插件要在 profile/preset 里声明，config 建议**先只开影子**：
    ```yaml
-   dsh-kifuin:
+   dsh-gokifu-longmemory:
      enabled: false
      shadow: true          # 先跑 1–2 天，攒 evidence/shadow/*.jsonl
      budgetTokens: 500

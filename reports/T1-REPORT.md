@@ -138,7 +138,7 @@ $ env -u DSH_HOME node --test test/logread.test.mjs test/episode.test.mjs
 
 ```
 {"source":"R01 logread","events":8832,"truncated":false,"badLines":0}
-{"id":"ep-1e82afca","scope":"w:e:/Documents/deepseek-harness/default-workspace","seqFrom":0,"seqTo":8831,
+{"id":"<ep>","scope":"w:e:/Documents/deepseek-harness/default-workspace","seqFrom":0,"seqTo":8831,
  "timeSource":"event","recordedAt":null,"endedAt":1793558885899,"last":1793558885899,"state":"archived"}
 fallback vs R00 字段差异: 无
 ```

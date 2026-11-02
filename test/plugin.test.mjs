@@ -533,9 +533,9 @@ test('R16: sanitizeConfig 只认已知键、类型不对退回默认', () => {
 });
 
 test('R16: 插件名与常量（宿主靠它认人）', () => {
-  assert.equal(name, 'dsh-kifuin');
+  assert.equal(name, 'dsh-gokifu-longmemory');
   assert.equal(HOOK, 'agent/pre-step');
-  assert.equal(CARD_SOURCE_KIND, 'dsh-kifuin');
+  assert.equal(CARD_SOURCE_KIND, 'dsh-gokifu-longmemory');
   assert.equal(CARD_SOURCE_FORM, 'memory-card');
   assert.equal(PLUGIN_VERSION, 1);
 });

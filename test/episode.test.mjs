@@ -16,7 +16,7 @@ import { EpisodeError, buildEpisode, normalizeWorkspace, shortSessionId } from '
 const HEADER = {
   type: 'session',
   version: 4,
-  id: 'session-1e82afca-8be2-42f9-8186-2bd274e30342',
+  id: 'session-00000001-0000-4000-8000-000000000001',
   createdAt: 1793513948708,
   cwd: 'E:\\Documents\\deepseek-harness\\default-workspace',
   isSeeded: false,
@@ -56,7 +56,7 @@ test('R00 墓碑：导出面存在（删掉房间即红）', () => {
 test('构建：字段形状与数据契约 §2 一致', () => {
   const episode = buildEpisode({ header: HEADER, events: EVENTS, logPath: 'L', graphPath: 'G', now: 1793600000000 });
 
-  assert.equal(episode.id, 'ep-1e82afca');
+  assert.equal(episode.id, 'ep-00000001');
   assert.equal(episode.sessionId, HEADER.id);
   assert.equal(episode.scopeKey, 'w:e:/Documents/deepseek-harness/default-workspace');
   assert.equal(episode.startedAt, HEADER.createdAt);
@@ -176,7 +176,7 @@ test('作用域：scopeKey 用 header.cwd 规范化（反斜杠/盘符/尾斜杠
 });
 
 test('id：shortSessionId 去前缀取前 8（缺前缀/非字符串也稳）', () => {
-  assert.equal(shortSessionId('session-1e82afca-8be2-42f9-8186-2bd274e30342'), '1e82afca');
+  assert.equal(shortSessionId('session-00000001-0000-4000-8000-000000000001'), '00000001');
   assert.equal(shortSessionId('5c4bf5c6-8ee2-4b31-bf91-07134464215e'), '5c4bf5c6');
   assert.equal(shortSessionId(undefined), 'unknown');
   assert.equal(shortSessionId(''), 'unknown');
@@ -187,13 +187,13 @@ test('归并：子代理会话带出 parentSessionId/origin/depth，归并动作
   const sub = {
     ...HEADER,
     id: '5c4bf5c6-8ee2-4b31-bf91-07134464215e',
-    parentSession: 'session-8cc34e32-c35d-41c1-90f4-f658dc7244d2',
+    parentSession: 'session-00000002-0000-4000-8000-000000000002',
     origin: 'subagent',
     delegationDepth: 1,
   };
   const episode = buildEpisode({ header: sub, events: EVENTS, now: null });
   assert.equal(episode.id, 'ep-5c4bf5c6');
-  assert.equal(episode.parentSessionId, 'session-8cc34e32-c35d-41c1-90f4-f658dc7244d2');
+  assert.equal(episode.parentSessionId, 'session-00000002-0000-4000-8000-000000000002');
   assert.equal(episode.origin, 'subagent');
   assert.equal(episode.delegationDepth, 1);
   // R00 不改写归属：仍按自己的 cwd 出作用域，归并策略由调用方（§4.1「只收 depth=0」）决定

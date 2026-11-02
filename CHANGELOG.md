@@ -2,6 +2,19 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.15.1（2026-11-02）
+
+改名 **dsh-gokifu-longmemory** + 公开仓库脱敏。
+
+### 改名
+- `package.json` / 插件 name / 注入消息 `source.kind` / 裁决 schema → `dsh-gokifu-longmemory`。
+- 仓库 `MYCF711/dsh-gokifu-longmemory`（旧地址自动重定向）。
+
+### 脱敏（公开仓库前）
+- 清掉：内网 IP、本机密钥目录名、本机用户目录、真实会话 UUID、本机绝对路径。
+- 数据类证据只保留结构（`<ep>` / `<session-id>` / `<workspace>` 占位），测试夹具改用合成 id。
+- **`scripts/privacy-scan.mjs`**：公开仓库的脱敏守卫（内网 IP / 用户目录 / 密钥 / 真实 UUID / 私钥）；接入 `scripts/check.mjs`，CI 会拦。
+
 ## 0.15.0（2026-11-02）
 
 **改名 + 零配置 + 开源**：从 `dsh-kifuin` 改为 **`dsh-kifu`**；仓库转公开。

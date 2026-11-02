@@ -29,7 +29,7 @@
 | 真实任务句 | 5 | `DSH_HOME` 全部会话日志 → `collectRootUserTexts` 取首条 root user 消息；长度 ≥20 字符、不含口令标记；按 episode id 升序取前 5 | 用户逐字原话（仅空白归一） |
 
 - key 样本 scope 取该主题的 **modal scope**（含该主题的棋谱里出现最多的 `scopeKey`）；句样本取该 episode 的 `scopeKey`。
-- 5 条任务句（逐字；含口令的样本已剔除）：`ep-00b50089` 定时任务/goal、`ep-08e54b9c` sub2api_poc.zip、`ep-1a49c80a` 找回 GOkifu 记录、`ep-4d31fc71` 两插件上传 github、`ep-7520721a` 侧边栏设置回滚。
+- 5 条任务句（逐字；含口令的样本已剔除）：`<ep>` 定时任务/goal、`<ep>` sub2api_poc.zip、`<ep>` 找回 GOkifu 记录、`<ep>` 两插件上传 github、`<ep>` 侧边栏设置回滚。
 
 ### 2.2 渲染行与三档判据
 
@@ -205,11 +205,11 @@ tokens            = card.tokens（= indexLine + section，与 T7b 同口径）
 | k28 | key | dsh-session-superagent | dependency/9 | 8 | 4 | 4 | 4 | 0 | 0 | 222 | ok |
 | k29 | key | job_output | tool/9 | 1 | 4 | 4 | 0 | 0 | 4 | 246 | ok |
 | k30 | key | mkdir | tool/9 | 1 | 5 | 5 | 0 | 0 | 5 | 285 | ok |
-| s1 | 句 | ep-00b50089 · 定时任务/goal | sentence | 8 | 4 | 4 | 4 | 0 | 0 | 268 | ok |
-| s2 | 句 | ep-08e54b9c · sub2api_poc.zip | sentence | 8 | 5 | 5 | 0 | 3 | 2 | 205 | ok |
-| s3 | 句 | ep-1a49c80a · 找 GOkifu 记录 | sentence | 8 | 5 | 5 | 2 | 3 | 0 | 234 | ok |
-| s4 | 句 | ep-4d31fc71 · 两插件传 github | sentence | 8 | 5 | 5 | 5 | 0 | 0 | 279 | ok |
-| s5 | 句 | ep-7520721a · 侧边栏设置回滚 | sentence | 8 | 5 | 5 | 5 | 0 | 0 | 255 | ok |
+| s1 | 句 | <ep> · 定时任务/goal | sentence | 8 | 4 | 4 | 4 | 0 | 0 | 268 | ok |
+| s2 | 句 | <ep> · sub2api_poc.zip | sentence | 8 | 5 | 5 | 0 | 3 | 2 | 205 | ok |
+| s3 | 句 | <ep> · 找 GOkifu 记录 | sentence | 8 | 5 | 5 | 2 | 3 | 0 | 234 | ok |
+| s4 | 句 | <ep> · 两插件传 github | sentence | 8 | 5 | 5 | 5 | 0 | 0 | 279 | ok |
+| s5 | 句 | <ep> · 侧边栏设置回滚 | sentence | 8 | 5 | 5 | 5 | 0 | 0 | 255 | ok |
 
 合计：渲染 133 = 67 U + 6 N + 60 Z；claim 69 / 指针 64；闸 35/35。
 （P0 的 35 行表见 `tmp/t8-precision-prefix.json` 与 `reports/T8a-REPORT.md` §3.2 摘要：148 行 = 63 U + 4 N + 81 Z，in-scope 88 / cross 60。）
@@ -219,7 +219,7 @@ tokens            = card.tokens（= indexLine + section，与 T7b 同口径）
 **有用，且 claim 原文也含该主题（S2 硬判据通过）**：
 
 ```
-[useful] seed="dsh-better-sidebar" ep=ep-7520721a scope=w:e:/Documents/deepseek-harness/default-workspace
+[useful] seed="dsh-better-sidebar" ep=<ep> scope=w:e:/Documents/deepseek-harness/default-workspace
     keys=["dsh-better-sidebar","dsh-pet","package.json"]
     text=fail=1 · topics=dsh-better-sidebar, dsh-pet, package.json
 ```
@@ -227,7 +227,7 @@ tokens            = card.tokens（= indexLine + section，与 T7b 同口径）
 **有用但仅 S0 过（claim 原文没提该主题 —— "整局级重叠"会把弱关联算成有用，S2 口径就是扣掉这些）**：
 
 ```
-[useful] seed="exit code 1" ep=ep-1e82afca
+[useful] seed="exit code 1" ep=<ep>
     keys=["@codemirror/commands","@codemirror/lang-cpp","No such file or directory"]
     text=Error: Team member limit 8 reached
 ```
@@ -235,7 +235,7 @@ tokens            = card.tokens（= indexLine + section，与 T7b 同口径）
 **噪声（仅靠泛工具主题搭上）**：
 
 ```
-[noise] seed="echo" ep=ep-7520721a
+[noise] seed="echo" ep=<ep>
     keys=["echo","dsh-pet","uniq"]
     text=63015=401 56006=000 [exit code: 7]
 ```
@@ -243,7 +243,7 @@ tokens            = card.tokens（= indexLine + section，与 T7b 同口径）
 **P0 里的 cross-scope（bug；P1 已消失）**：
 
 ```
-[noise] seed="echo" ep=ep-8cc34e32 scope=w:d:/DeepSeek Harness/default-workspace/长期记忆系统
+[noise] seed="echo" ep=<ep> scope=w:d:/DeepSeek Harness/default-workspace/长期记忆系统
     keys=["echo","send_message","spawn_teammate"]
     text=Error: only an in-progress task can complete
 ```

@@ -31,6 +31,16 @@ else ok.push('房间齐');
 // 防止误发 npm：package.json 里不得出现 publishConfig.registry
 if (pkg.publishConfig?.registry) fail.push('package.json: 不允许 publishConfig.registry（不发 npm）');
 
+// 脱敏守卫：公开仓库不允许内网地址/本机用户目录/密钥形态/真实会话 UUID
+try {
+  const { scanPrivacy } = await import('./privacy-scan.mjs');
+  const leaks = scanPrivacy();
+  if (leaks.length) fail.push(`脱敏：${leaks.length} 处（${leaks.slice(0, 3).map((l) => `${l.file}:${l.line}[${l.rule}]`).join(' ')}…）`);
+  else ok.push('privacy-scan 0 处');
+} catch (error) {
+  fail.push(`脱敏扫描跑不起来：${String(error?.message ?? error)}`);
+}
+
 // 工作树干净检查只在 release.mjs 做，这里只报分支
 try { const br = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim(); ok.push(`branch=${br}`); } catch { fail.push('不是 git 仓库'); }
 
