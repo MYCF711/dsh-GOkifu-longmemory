@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.77.2（2026-11-03）
+
+### Runbook：装完之后按这个顺序跑（`docs/runbook-装完之后.md`）
+- 六节：① 安装三步（人做）② 验收（doctor 的期望输出）③ 出第一份线上证据（m5/first-live/repeat/digest）
+  ④ 日常巡检 ⑤ **回滚**（用 re-enable 的备份，不手改 patch）⑥ 已知正常现象（warn=5、exists:false、A3 not-live 等）。
+- 每步都带**期望输出**，避免"装完不知道对不对"。
+
+### 验证
+402 条测试全绿；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.77.1（2026-11-03）
 
 ### 冷启动演练 + 两处误报修正
