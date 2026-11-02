@@ -907,11 +907,20 @@ export function walkFromSignals(opts = {}) {
       ? claim.support.filter((entry) => entry && typeof entry.episode === 'string')
       : [];
 
+    // 2026-11-02（A2b 修复）：同一条 claim 常有多局支撑；优先用**与当前作用域相同**的那局做
+    // 证据载体——否则卡片显示的总是"别的工作区那条"，用户看到的日期/棋谱对不上自己的项目。
+    const orderedSupport = currentScope === null
+      ? support
+      : [...support].sort((x, y) => {
+        const sx = normalizeScopeKey(episodeById.get(x.episode)?.scopeKey ?? '') === currentScope ? 0 : 1;
+        const sy = normalizeScopeKey(episodeById.get(y.episode)?.scopeKey ?? '') === currentScope ? 0 : 1;
+        return sx - sy;
+      });
     let attached = null;
     let attachedDepth = Number.POSITIVE_INFINITY;
     let attachedNodeId = null;
     let attachedSeq = null;
-    for (const entry of support) {
+    for (const entry of orderedSupport) {
       const hit = episodeHits.get(entry.episode);
       if (!hit || hit.depth >= attachedDepth) continue;
       // 作用域闸也看**承载证据的棋谱**：u: 层 claim 可能由别的工作区支撑，
