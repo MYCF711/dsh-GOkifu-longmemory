@@ -20,7 +20,7 @@
 
 | 项 | 值 | 意义 |
 |---|---|---|
-| `serverMode` / `apiUrl` | `self-hosted` / `http://<LAN_HOST>:8888` | 本机服务，走 HTTP；**记忆不在进程内** |
+| `serverMode` / `apiUrl` | `self-hosted` / `http://<LAN_HOST>` | 本机服务，走 HTTP；**记忆不在进程内** |
 | `bankId` | **`coding-agent::default-workspace`**（静态） | **所有项目共用一个 bank**（不是 per-repo）——跨项目混流的结构性来源 |
 | `autoInject` | `recall` | 首轮注入改走 recall（用户注释：pages 模式实测注入 3,879 字符里**真实记忆 = 0**；recall 平均 **1,666 字符真实记忆**）`[本·配置注释]` |
 | `recallOptions` | types `world/observation/experience`、budget `low`、`max_tokens: 2000`、`min_scores.reranker: 0.005` | 用户两轮调参：MRR@8 0.857→0.929、65/103→77/103（+10.7pp）、token 170→400/轮 `[本·配置注释]` |

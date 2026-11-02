@@ -251,8 +251,8 @@ export const REAL_PROBE = Object.freeze({
 
 /**
  * 记录里的路径 → 磁盘路径。两种历史写法都要认：
- *   · Windows 原生：`d:/主工作区/…`、`D:\主工作区\…`
- *   · Git Bash 风格：`/d/主工作区/…`（真实语料里确实这么写）⇒ 还原成 `d:/主工作区/…`
+ *   · Windows 原生：`d:/workspace/…`、`D:\workspace\…`
+ *   · Git Bash 风格：`/d/workspace/…`（真实语料里确实这么写）⇒ 还原成 `d:/workspace/…`
  * 相对路径按 workspace 解析。
  */
 export function resolveValidityPath(value, workspace) {

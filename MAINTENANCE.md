@@ -64,7 +64,7 @@
 - **不发 npm**：版本发布只做 annotated tag + GitHub Release；`package.json` 保持 `private: true`。
 - 每次功能实现都要版本号 + `CHANGELOG.md` 一段（写清更新内容）。
 - 改 `AGENTS.md` 的硬规则前先在本文件记一条「决策」，说明依据。
-- 不发密钥；不复制 `D:\MyKey\`。
+- 不发密钥；不复制 `<KEYS>\`。
 
 ## 五、相关棋谱
 

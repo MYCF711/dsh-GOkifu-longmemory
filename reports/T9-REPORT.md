@@ -130,7 +130,7 @@ MEMORY: …/memory-context/index.md（scope=w:d:/…长期记忆系统, 92 局, 
 </memory-ledger>
 ```
 
-**怎么读这个 1/20**：本机语料是 T6a 从**另一个工作区**（`w:e:/Documents/…`）入档的；当前工作区只有 11 条 claim / 11 张棋谱，而主题匹配又偏向泛词 —— 所以安装后**典型信号会是沉默**。这不是坏，正是 F8「不相关时不打扰」；但必须让观察者知道"沉默 ≠ 坏了"，判断依据是 `evidence/shadow/shadow.jsonl` 有没有记录、以及 `node scripts/cli.mjs inject --signal …` 的输出。
+**怎么读这个 1/20**：本机语料是 T6a 从**另一个工作区**（`w:<WORKSPACE>/…`）入档的；当前工作区只有 11 条 claim / 11 张棋谱，而主题匹配又偏向泛词 —— 所以安装后**典型信号会是沉默**。这不是坏，正是 F8「不相关时不打扰」；但必须让观察者知道"沉默 ≠ 坏了"，判断依据是 `evidence/shadow/shadow.jsonl` 有没有记录、以及 `node scripts/cli.mjs inject --signal …` 的输出。
 
 ## 6 · 安装前置条件（给下一步的人）
 

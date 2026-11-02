@@ -1,6 +1,6 @@
 # GOkifu 插件测绘简报（供「以单会话棋谱为节点的巨型棋谱」设计用）
 
-> 测绘对象：`D:\主工作区\repos\dsh-GOkifu-compact`（包名 `dsh-gokifu-compact`）
+> 测绘对象：`<WORKSPACE>\repos\dsh-GOkifu-compact`（包名 `dsh-gokifu-compact`）
 > 测绘时点：2026-11-02 01:0x–01:2x（+08）。**只读仓库，未改任何文件，未 git 提交。**
 > ⚠ **工作树不是干净树**：`HEAD = d9e4ffb`，另有 9 个已修改文件 + 1 个未跟踪文件（`src/engine.mjs`、`src/rooms/kifu-model.mjs`、`scripts/doctor.mjs`、`test/engine-harness.test.mjs`、`test/tier2.test.mjs`、`CHANGELOG.md`、`HANDOFF.md`、`docs/research/00-*.md`、`?? test/fold-closure.test.mjs`）。**另一个会话正在同一棵树上写代码**（C24「可寻址闭包」）。本简报的行号按**当前工作树**取，重读前请先 `git status`。
 > 数字引用纪律（本仓自己的规矩）：每个数字都要带「时点 + 树」。下文凡未注明者，均为上述工作树 + 上述时点。

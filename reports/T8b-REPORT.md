@@ -96,14 +96,14 @@ $ node scripts/check.mjs --strict-rooms  → check: PASS（房间清单已含 ad
 | support 分布 | 1 局 117 / 2 局 3 / 3 局 4 / 6 局 1 |
 | **闸 2 违规** | **0 / 125**（状态与计数完全自洽） |
 | **闸 5 违规** | **0 / 125**（每条 support 都带非空 quote，且无摘要标记） |
-| 作用域 | `w:e:/Documents/…default-workspace` 113、`w:d:/…长期记忆系统` 11、`u:owner` 1 |
+| 作用域 | `w:<WORKSPACE>/…default-workspace` 113、`w:d:/…长期记忆系统` 11、`u:owner` 1 |
 
 ### 5.2 闸 1 的作用域矩阵
 
 | 当前作用域 | 可见 | 不可见 | 说明 |
 |---|---|---|---|
 | `w:d:/…/长期记忆系统` | **12** / 125 | 113 | 11 同域 + 1 用户层 |
-| `w:e:/Documents/deepseek-harness/default-workspace` | **114** / 125 | 11 | 113 同域 + 1 用户层 |
+| `w:<WORKSPACE>` | **114** / 125 | 11 | 113 同域 + 1 用户层 |
 
 ### 5.3 把闸接上 store 后跑 20 张真实影子卡（关键发现）
 

@@ -34,7 +34,7 @@ const HEADER = {
   version: 4,
   id: 'session-0123456789abcdef',
   createdAt: 1793513948708,
-  cwd: 'E:\\Documents\\deepseek-harness\\default-workspace',
+  cwd: 'E:\\workspace',
   isSeeded: false,
   delegationDepth: 0,
   agentPreset: 'standard',

@@ -25,7 +25,7 @@
 
 ## 上游
 
-- 上下文压缩：`D:\主工作区\repos\dsh-GOkifu-compact`（只读；其 `docs/research/00–07` 是本项目的证据来源）
+- 上下文压缩：`<WORKSPACE>\repos\dsh-GOkifu-compact`（只读；其 `docs/research/00–07` 是本项目的证据来源）
 - 宿主：DeepSeek Harness（DSH）；记忆数据放 `<DSH_HOME>/memory-context/` sidecar，不进会话日志。
 
 ## 推进方式

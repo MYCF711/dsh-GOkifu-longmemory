@@ -18,7 +18,7 @@ const HEADER = {
   version: 4,
   id: 'session-00000001-0000-4000-8000-000000000001',
   createdAt: 1793513948708,
-  cwd: 'E:\\Documents\\deepseek-harness\\default-workspace',
+  cwd: 'E:\\workspace',
   isSeeded: false,
   delegationDepth: 0,
   agentPreset: 'standard',
@@ -58,7 +58,7 @@ test('构建：字段形状与数据契约 §2 一致', () => {
 
   assert.equal(episode.id, 'ep-00000001');
   assert.equal(episode.sessionId, HEADER.id);
-  assert.equal(episode.scopeKey, 'w:e:/Documents/deepseek-harness/default-workspace');
+  assert.equal(episode.scopeKey, 'w:e:/workspace');
   assert.equal(episode.startedAt, HEADER.createdAt);
   assert.equal(episode.endedAt, 1793558504769, 'endedAt = 最后事件 time');
   assert.equal(episode.firstEventAt, 1793513948710);
@@ -159,7 +159,7 @@ test('seq：闭包取 min/max（乱序事件也正确），不按首尾', () => 
 });
 
 test('作用域：scopeKey 用 header.cwd 规范化（反斜杠/盘符/尾斜杠）', () => {
-  assert.equal(normalizeWorkspace('E:\\Documents\\deepseek-harness\\default-workspace'), 'e:/Documents/deepseek-harness/default-workspace');
+  assert.equal(normalizeWorkspace('E:\\workspace'), 'e:/workspace');
   assert.equal(normalizeWorkspace('d:/Work/W/'), 'd:/Work/W');
   assert.equal(normalizeWorkspace('E:'), 'e:');
   assert.equal(normalizeWorkspace(''), '');
@@ -197,7 +197,7 @@ test('归并：子代理会话带出 parentSessionId/origin/depth，归并动作
   assert.equal(episode.origin, 'subagent');
   assert.equal(episode.delegationDepth, 1);
   // R00 不改写归属：仍按自己的 cwd 出作用域，归并策略由调用方（§4.1「只收 depth=0」）决定
-  assert.equal(episode.scopeKey, 'w:e:/Documents/deepseek-harness/default-workspace');
+  assert.equal(episode.scopeKey, 'w:e:/workspace');
   assert.equal(episode.state, 'archived');
 });
 

@@ -65,7 +65,7 @@ $ node --test                # 全仓（含并行的 plugin 工作）
 
 | scope | 局 | 有签名 | repeat | novel | rate |
 |---|---|---|---|---|---|
-| `w:e:/Documents/deepseek-harness/default-workspace` | 21 | 18 | 11 | 80 | 12.1% |
+| `w:<WORKSPACE>` | 21 | 18 | 11 | 80 | 12.1% |
 | `w:d:/…/长期记忆系统` | 1 | 1 | 1 | 6 | 14.3% |
 | `w:d:/DeepSeek Harness/default-workspace` | 1 | 0 | — | — | n/a |
 | `w:d:/tmp/hstest` | 1 | 0 | — | — | n/a |

@@ -11,7 +11,7 @@ node tmp/gates-real.mjs tmp/memory-context
 
 # 作用域可见性矩阵
 node tmp/scope-matrix.mjs "D:/DeepSeek Harness/default-workspace/长期记忆系统"
-node tmp/scope-matrix.mjs "w:e:/Documents/deepseek-harness/default-workspace"
+node tmp/scope-matrix.mjs "w:<WORKSPACE>"
 
 # 把 records/scope 真正喂给 runGates，跑 20 张真实影子卡
 node tmp/gate-real-cards.mjs      # 汇总：2 过 / 18 红
@@ -26,7 +26,7 @@ node tmp/gate-real-detail.mjs     # 明细：93 行里 52 行越界
 | support 局数分布 | 1 局 117 · 2 局 3 · 3 局 4 · 6 局 1 |
 | 闸 2（state 与计数匹配）违规 | **0** |
 | 闸 5（每条有 quote、非摘要）违规 | **0** |
-| 作用域分布 | `w:e:/Documents/deepseek-harness/default-workspace` 113 · `w:d:/DeepSeek Harness/default-workspace/长期记忆系统` 11 · `u:owner` 1 |
+| 作用域分布 | `w:<WORKSPACE>` 113 · `w:d:/DeepSeek Harness/default-workspace/长期记忆系统` 11 · `u:owner` 1 |
 
 **结论**：闸 2 / 闸 5 的口径与 M2 入档的真实数据自洽，不会一开就红一片。
 

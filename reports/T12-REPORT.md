@@ -58,7 +58,7 @@
 
 **这 8 条全过不了**，不是因为探针坏了，而是它们指向的机器状态已经变了：
 - `version: "dsh-gokifu-compact@1.16.0"` —— 该工作区的 node_modules 里没有这个包；
-- `file: "/d/主工作区/projects/dsh-github-bridge/package.json"` —— 路径已不存在（Git Bash 写法被正确还原成 `d:\主工作区\…` 之后仍是 missing）。
+- `file: "<WORKSPACE>/projects/dsh-github-bridge/package.json"` —— 路径已不存在（Git Bash 写法被正确还原成 `<WORKSPACE>\…` 之后仍是 missing）。
 
 这正是闸 3 应该说的：**这 8 条记忆在当前机器上已经过期**。
 

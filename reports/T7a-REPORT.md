@@ -207,7 +207,7 @@ before = HEAD(103edea) 的 walk，after = 本刀 + `scope`）：
 | 指标 | 修复前 | 修复后 |
 |---|---|---|
 | hits / 渲染行 | **93** | **65** |
-| 其中越界（`w:e:/Documents/deepseek-harness/default-workspace`） | **52** | **0** |
+| 其中越界（`w:<WORKSPACE>`） | **52** | **0** |
 | 其中同域 | 41 | **65**（+24，+59%） |
 | 闸 1 结果 | **2/20 过，18 红**（全 `gate1/scope-mismatch`） | **20/20 过，0 红** |
 | 卡型 | 6 全越界 / 12 混合 / 2 干净 | 20 干净 |

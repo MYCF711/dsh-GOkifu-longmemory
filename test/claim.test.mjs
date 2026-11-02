@@ -197,7 +197,7 @@ test('R09: 无 quote / 无 seq ⇒ 不产出（无源不入）', () => {
     episodes: [ep('ep-aaaaaaaa', 'session-a')],
     signals: new Map([['ep-aaaaaaaa', signalsOf({
       failures: [{ seq: 1, quote: '   ', occurredAt: T0 }],
-      constraints: [constraint(2, ''), { seq: null, quote: '不要动 D:\\MyKey。', level: 'hard', occurredAt: T0 }],
+      constraints: [constraint(2, ''), { seq: null, quote: '不要动 D:\\keys。', level: 'hard', occurredAt: T0 }],
     })]]),
   });
   assert.deepEqual(claims, []);
