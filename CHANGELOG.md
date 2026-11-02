@@ -2,6 +2,17 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.81.1（2026-11-03）
+
+### 发版重试：GitHub API 间歇故障下的自愈
+- 今天 API 多次 502/503，`gh release create` 失败会中断发版流程、且错误输出被吞成半截 JSON。
+- `release.mjs` 现在对创建 Release **重试 5 次**（15s×n 退避），每次都打印可读错误；
+  全失败时明确说"tag 已推、Release 未建"并给出可复制的补救命令，而不是抛栈。
+- 发版链路其余部分（check → ledger → tag → push）保持原样。
+
+### 验证
+403 条测试（399 pass / 0 fail / 4 skip）。
+
 ## 0.81.0（2026-11-03）
 
 ### 知识库：调研 26 Reflexion
