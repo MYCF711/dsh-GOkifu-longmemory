@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.38.0（2026-11-02）
+
+### 真实 store 下的宿主仿真（A3 simulated 证据刷新）
+- `host-sim --store $DSH_HOME/memory-context`：40 首轮 × 2 次 ⇒ injected 24/40、failed 0、warn 0、
+  session.append 0、p50 3.3–3.7ms、p95 5.5–6.0ms、tokens p50 248。
+
+### 知识库
+- `docs/调研/13-MIRIX`（六类记忆对照；确立 Procedural/Semantic 区分与我们一致）。
+
+### 说明
+- 仍是 simulated，不是线上；真机安装待主人执行 `scripts/re-enable.mjs`。
+
 ## 0.37.0（2026-11-02）
 
 ### N1 · 双时态字段 validFrom / validTo
