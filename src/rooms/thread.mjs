@@ -197,6 +197,8 @@ export function buildThreads({ episodes = [], links = [], topics = null, options
       updatedAt: times.length ? Math.max(...times) : null,
       links: intraLinks,
       kifuCount: kifuIds.length,
+      // N9（2026-11-02）：卷首摘要 —— 机械拼接（类名 · 局数 · 最近日期 · 代表棋谱 l0），不调模型。
+      headline: [key, `${kifuIds.length} 局`, times.length ? `最近 ${new Date(Math.max(...times)).toISOString().slice(0, 10)}` : '无日期', kifus[0]?.episode?.l0 ? `代表：${String(kifus[0].episode.l0).replace(/\s+/g, ' ').slice(0, 60)}` : null].filter(Boolean).join(' · '),
     });
 
     for (const kifuId of kifuIds) {
