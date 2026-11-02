@@ -83,7 +83,6 @@ export const DEFAULT_CONFIG = Object.freeze({
   now: null,
   createUserMessage: null,
   probeValidity: true,
-  autoBuild: true,
   autoArchive: true,
   autoArchiveMinutes: 30,
   crossScopeClass: false,

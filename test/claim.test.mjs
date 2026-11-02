@@ -78,7 +78,9 @@ test('R09: 失败边 → antipattern（support≥2 独立局 ⇒ candidate，tex
   const c = anti[0];
   assert.match(c.id, /^c-[0-9a-f]{8}$/);
   assert.equal(c.state, 'candidate', '2 局独立支撑 ⇒ candidate');
-  assert.equal(c.text, YAML_ERROR, 'text 逐字取最早支撑局的错误原文');
+  // 2026-11-02 审计 P1-2：类级映射的 claim 文本必须带 `class:<name> · ` 前缀
+  assert.ok(c.text.endsWith(YAML_ERROR), 'text 以最早支撑局的错误原文结尾（逐字）');
+  assert.match(c.text, /^(class:[a-z-]+ · )?/, 'class: 前缀可有（错误类命中时必有）');
   assert.deepEqual(c.support.map((s) => s.episode), ['ep-aaaaaaaa', 'ep-bbbbbbbb']);
   assert.equal(c.counters.support, 2);
   assert.equal(c.counters.counter, 0);
@@ -88,7 +90,7 @@ test('R09: 失败边 → antipattern（support≥2 独立局 ⇒ candidate，tex
   assert.equal(c.recordedAt, null, 'recordedAt 只取入参 now');
   assert.equal(c.supersedes, null);
   assert.deepEqual(c.threadIds, []);
-  assert.equal(c.validFrom, null);
+  assert.equal(c.validFrom, c.occurredAt, 'validFrom = occurredAt（2026-11-02 审计 P1-1 落地）');
   assert.equal(c.validTo, null);
   for (const s of c.support) {
     assert.ok(s.quote.length > 0, 'support 必须带 quote（无 quote 不产出）');
@@ -285,6 +287,62 @@ test('N10: L4 人纠错回填到目标 claim；非 L4 / 非 correct 不动', asy
   // 幂等：同一纠错重放两次不重复加 counter
   applyAdjudications({ claims, adjudications });
   assert.equal(claims.find((c) => c.id === 'c-1').counter.length, 1);
+});
+
+// 2026-11-02：类级章节自愈 —— 多局支撑但缺类级 claim 时补一条；幂等
+test('ensureClassClaims: 补出缺失的类级章节，且重复调用不再加', async () => {
+  const { ensureClassClaims } = await import('../src/rooms/claim.mjs');
+  const claims = [
+    { id: 'c-m1', kind: 'antipattern', text: "Error: Cannot find module './a.json'", scopeKey: 'w:d:/x', state: 'observed', support: [{ episode: 'ep-a', seq: 1, quote: "Error: Cannot find module './a.json'", occurredAt: 10 }], counter: [] },
+    { id: 'c-m2', kind: 'antipattern', text: "Error: Cannot find module './b.json'", scopeKey: 'w:d:/x', state: 'observed', support: [{ episode: 'ep-b', seq: 2, quote: "Error: Cannot find module './b.json'", occurredAt: 20 }], counter: [] },
+    { id: 'c-ok', kind: 'antipattern', text: 'class:fs-read-before-write · file has not been read', scopeKey: 'w:d:/x', state: 'candidate', support: [{ episode: 'ep-c', seq: 3, quote: 'x', occurredAt: 30 }], counter: [] },
+  ];
+  const first = ensureClassClaims({ claims });
+  assert.equal(first.added.length, 1, 'module-missing 缺类级章节 ⇒ 补 1 条');
+  assert.match(first.added[0].text, /^class:module-missing · /);
+  assert.equal(first.added[0].support.length, 2, '支撑来自两局');
+  assert.equal(first.added[0].scopeKey, 'w:d:/x');
+
+  const withAdded = [...claims, ...first.added];
+  const second = ensureClassClaims({ claims: withAdded });
+  assert.equal(second.added.length, 0, '已有类级章节 ⇒ 幂等，不再加');
+});
+
+// N1（2026-11-02）：双时态字段 —— claim 出生即带 validFrom（审计 P1-1 修正后的真断言）
+test('N1: 每条 claim 的 validFrom 等于 occurredAt；人纠错写 validTo', async () => {
+  const { promoteClaim, applyAdjudications } = await import('../src/rooms/claim.mjs');
+  const { episodes, signals } = fixture();
+  const out = promoteClaim({ episodes, signals, now: 1000 });
+  assert.ok(out.claims.length > 0, 'fixture 必须产出 claim');
+  for (const claim of out.claims) {
+    if (Number.isFinite(claim.occurredAt)) {
+      assert.equal(claim.validFrom, claim.occurredAt, `validFrom 必须等于 occurredAt（${claim.id}）`);
+    } else {
+      assert.equal(claim.validFrom, null);
+    }
+    assert.equal(claim.validTo, null);
+  }
+  const claims = [{ id: 'c-t', kind: 'antipattern', text: 'x', state: 'observed', support: [], counter: [], validFrom: 100, validTo: null }];
+  applyAdjudications({ claims, adjudications: [{ id: 'ad', target: 'c-t', level: 'L4-human-correction', decision: 'correct', at: 200, votes: [] }] });
+  assert.equal(claims[0].validTo, 200);
+  assert.ok(claims[0].validFrom <= claims[0].validTo, 'validFrom ≤ validTo');
+});
+
+// 审计 P1-2：同一组证据、不同输入顺序 ⇒ 代表文本一致（class: 前缀不能丢）
+test('P1-2: 输入顺序不影响代表文本，class: 前缀不丢失', async () => {
+  const { promoteClaim } = await import('../src/rooms/claim.mjs');
+  const { episodes, signals } = fixture();
+  const asc = promoteClaim({ episodes, signals });
+  const revEpisodes = [...episodes].reverse();
+  const desc = promoteClaim({ episodes: revEpisodes, signals });
+  const pick = (out, label) => out.claims
+    .filter((c) => c.kind === 'antipattern' && c.text.includes('Cannot find module'))
+    .map((c) => `${label}:${c.text}`).sort();
+  const a = pick(asc);
+  const d = pick(desc);
+  assert.equal(a.length, 1);
+  assert.deepEqual(d.map((x) => x.split(':')[1]), a.map((x) => x.split(':')[1]), '两种顺序必须得到同一文本');
+  assert.match(a[0], /class:.*Cannot find module/, '类级映射必须带 class: 前缀');
 });
 
 // 2026-11-02：类级章节自愈 —— 多局支撑但缺类级 claim 时补一条；幂等
