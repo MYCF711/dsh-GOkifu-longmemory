@@ -88,6 +88,46 @@ export const DEFAULT_CONFIG = Object.freeze({
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---------------------------------------------------------------------------
+// 用户配置（GUI 保存的「记忆库地址」等）落在 <DSH_HOME>/kifu-longmemory.json。
+// 优先级：profile 配置 > 用户文件 > 默认值。文件坏了只 warn，不阻塞。
+// ---------------------------------------------------------------------------
+export const USER_CONFIG_FILE = 'kifu-longmemory.json';
+
+function dshHomeOf() {
+  return typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME ? process.env.DSH_HOME : null;
+}
+
+export function readUserConfig({ dshHome = null } = {}) {
+  const home = dshHome ?? dshHomeOf();
+  if (!home) return {};
+  try {
+    const raw = fs.readFileSync(path.join(home, USER_CONFIG_FILE), 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function writeUserConfig(patch, { dshHome = null } = {}) {
+  const home = dshHome ?? dshHomeOf();
+  if (!home) throw new Error('没有 DSH_HOME，无法保存插件配置');
+  const current = readUserConfig({ dshHome: home });
+  const next = { ...current, ...patch };
+  const file = path.join(home, USER_CONFIG_FILE);
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}
+`, 'utf8');
+  fs.renameSync(tmp, file);
+  return next;
+}
+
+/** profile 配置覆盖用户文件；两者都不认识的值由 sanitizeConfig 兜底。 */
+export function resolveConfig(rawConfig = {}) {
+  return sanitizeConfig({ ...readUserConfig(), ...(rawConfig && typeof rawConfig === 'object' ? rawConfig : {}) });
+}
+
+// ---------------------------------------------------------------------------
 // 小工具（全部纯函数，单独导出便于单测）
 // ---------------------------------------------------------------------------
 
@@ -502,8 +542,64 @@ export const Config = {
   },
 };
 
+export const CONFIG_ROUTE = '/kifu-longmemory/config';
+
+/**
+ * 设置页用的纯处理函数（不碰 http 对象，便于单测）。
+ * GET  → { config, effectiveStoreRoot, userConfigFile }
+ * POST → 保存 { storeRoot } 到 <DSH_HOME>/kifu-longmemory.json
+ */
+export function handleConfigRoute({ method = 'GET', body = null, profileConfig = {}, dshHome = null } = {}) {
+  const home = dshHome ?? dshHomeOf();
+  const merged = resolveConfig({ ...readUserConfig({ dshHome: home }), ...profileConfig });
+  if (method === 'GET') {
+    return {
+      status: 200,
+      body: {
+        config: merged,
+        effectiveStoreRoot: merged.storeRoot ? resolveStoreRoot(merged) : (home ? path.join(home, 'memory-context') : resolveStoreRoot(merged)),
+        userConfigFile: home ? path.join(home, USER_CONFIG_FILE) : null,
+      },
+    };
+  }
+  if (method !== 'POST') return { status: 405, body: { error: 'method not allowed' } };
+  let patch;
+  try {
+    patch = typeof body === 'string' ? JSON.parse(body) : body;
+  } catch {
+    return { status: 400, body: { error: 'invalid JSON' } };
+  }
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return { status: 400, body: { error: 'body must be an object' } };
+  const next = {};
+  if (patch.storeRoot !== undefined) {
+    if (typeof patch.storeRoot !== 'string') return { status: 400, body: { error: 'storeRoot must be a string' } };
+    const trimmed = patch.storeRoot.trim();
+    if (trimmed !== '' && !/^[A-Za-z]:[\/]|^\//.test(trimmed)) return { status: 400, body: { error: 'storeRoot 必须是绝对路径或留空' } };
+    next.storeRoot = trimmed;
+  }
+  for (const key of ['enabled', 'shadow', 'autoBuild', 'oncePerSession']) {
+    if (patch[key] !== undefined) {
+      if (typeof patch[key] !== 'boolean') return { status: 400, body: { error: `${key} must be a boolean` } };
+      next[key] = patch[key];
+    }
+  }
+  for (const key of ['budgetTokens', 'limit']) {
+    if (patch[key] !== undefined) {
+      const n = Number(patch[key]);
+      if (!Number.isFinite(n) || n <= 0) return { status: 400, body: { error: `${key} must be a positive number` } };
+      next[key] = n;
+    }
+  }
+  try {
+    writeUserConfig(next, { dshHome: home });
+  } catch (error) {
+    return { status: 500, body: { error: String(error?.message ?? error) } };
+  }
+  return { status: 200, body: { ok: true, saved: next, file: home ? path.join(home, USER_CONFIG_FILE) : null } };
+}
+
 export function apply(ctx, rawConfig = {}) {
-  const config = sanitizeConfig(rawConfig);
+  const config = resolveConfig(rawConfig);
   const injected = new WeakSet(); // 每会话只注入一次（对象身份；WeakSet 不留引用）
 
   if (typeof ctx?.on !== 'function') {
@@ -522,6 +618,45 @@ export function apply(ctx, rawConfig = {}) {
     }
   } catch (error) {
     warn(ctx, `预热失败（首轮可能变慢）：${String(error?.message ?? error)}`);
+  }
+
+  // 设置页的读写接口（只在本机 webServer 上注册；没有该服务就跳过）。
+  try {
+    if (typeof ctx?.inject === 'function') {
+      ctx.inject(['webServer'], (host) => {
+        if (typeof host?.webServer?.register !== 'function') return;
+        host.webServer.register({
+          kind: 'exact',
+          path: CONFIG_ROUTE,
+          handler: (request, response) => {
+            const method = String(request?.method ?? 'GET').toUpperCase();
+            if (method === 'GET') {
+              const out = handleConfigRoute({ method, profileConfig: rawConfig });
+              response.writeHead(out.status, { 'content-type': 'application/json; charset=utf-8' });
+              response.end(JSON.stringify(out.body));
+              return;
+            }
+            if (method !== 'POST') {
+              response.writeHead(405, { allow: 'GET, POST' });
+              response.end();
+              return;
+            }
+            let raw = '';
+            request.on('data', (chunk) => {
+              raw += chunk;
+              if (raw.length > 64 * 1024) request.destroy();
+            });
+            request.on('end', () => {
+              const out = handleConfigRoute({ method, body: raw, profileConfig: rawConfig });
+              response.writeHead(out.status, { 'content-type': 'application/json; charset=utf-8' });
+              response.end(JSON.stringify(out.body));
+            });
+          },
+        });
+      });
+    }
+  } catch (error) {
+    warn(ctx, `设置接口没注册上：${String(error?.message ?? error)}`);
   }
 
   ctx.on(HOOK, async (payload, next) => {
