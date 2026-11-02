@@ -11,14 +11,14 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-gokifu-longmemory`（私有） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
-| 当前版本 | `0.32.0` |
+| 当前版本 | `0.33.0` |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
 ## 二、当前状态（2026-11-02 17:45 · 整点巡检）
 
 ```
-分支         main = 0.32.0；功能分支 → PR → CI → 合并 → release（--require-ci）
+分支         main = 0.33.0；功能分支 → PR → CI → 合并 → release（--require-ci）
 里程碑       M6 记忆质量收口：D1/D2/D3/D5/N10 已发布；A1/A5 回归已修；类级主卷 + volumes/audit 已上线
 插件         仓库已改名 dsh-gokifu-longmemory；包名小写；`link:` 安装；当前被临时禁用（等主人重启后跑 scripts/re-enable.mjs）
 ```
@@ -29,7 +29,7 @@
 | 六轴 | A1 **0.00%**（≤5%）· A2 **24.32%** · A3 not-live · A4 p50 **2.30ms** · A5 **0.00%** · A6 **100%** |
 | 语料 | 116 局 / 1124 主题 / 138 卷（类级主卷 4）/ claim 250+ `[本] 2026-11-02 17:10` |
 | 当天覆盖 | 18/18（D1 全量重建后实测） |
-| 已发布 | 0.15.1 改名脱敏 → 0.16 配置 schema → 0.17 设置页 → 0.18 D2/D3 → 0.19 D1 → 0.19.1 D4 否决 → 0.20 A1/A5 修复 → 0.21 D5 → 0.22 类级主题 → 0.23 类级信号 → 0.24 类表 8 类 → 0.25 设置页库状态 → 0.26 类级主卷 → 0.27 cli volumes → 0.28 cli audit → 0.29 N10 人纠错回填 → 0.30 A2 holdout → 0.31 A2b → 0.32 A2b 两口径 |
+| 已发布 | 0.15.1 改名脱敏 → 0.16 配置 schema → 0.17 设置页 → 0.18 D2/D3 → 0.19 D1 → 0.19.1 D4 否决 → 0.20 A1/A5 修复 → 0.21 D5 → 0.22 类级主题 → 0.23 类级信号 → 0.24 类表 8 类 → 0.25 设置页库状态 → 0.26 类级主卷 → 0.27 cli volumes → 0.28 cli audit → 0.29 N10 人纠错回填 → 0.30 A2 holdout → 0.31 A2b → 0.32 A2b 两口径 → 0.33 A2b 严格 70.59% |
 | 证据 | `M6-acceptance.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
 | 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank` |
 
