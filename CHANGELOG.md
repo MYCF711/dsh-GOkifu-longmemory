@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.25.0（2026-11-02）
+
+### 设置页显示库状态
+- `GET /kifu-longmemory/config` 返回 `stats {exists, episodes, claims, updatedAt}`。
+- 卡片显示「当前库：N 局 · M 条教训 · 更新于 …」；库不存在时提示会自动建库。
+
+### 说明
+- 本轮试过的两处扩大召回（额外 3 个错误类、首条消息路径实体）实测 A2 **0 变化**，已回退，不进 CHANGELOG 当收益。
+
+### 验证
+357 条测试（353 pass / 0 fail / 4 skip）；证据 `evidence/M7-settings-stats.md`。
+
 ## 0.24.0（2026-11-02）
 
 ### 错误类表 5 → 8 类

@@ -624,17 +624,37 @@ export const CONFIG_ROUTE = '/kifu-longmemory/config';
  * GET  → { config, effectiveStoreRoot, userConfigFile }
  * POST → 保存 { storeRoot } 到 <DSH_HOME>/kifu-longmemory.json
  */
+/** 库状态（只读、失败静默）：设置页要显示"当前库有多大、什么时候更新的"。 */
+export function storeStatsOf(root) {
+  if (typeof root !== 'string' || root === '') return null;
+  const countJson = (dir) => {
+    try { return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).length; } catch { return null; }
+  };
+  let updatedAt = null;
+  try { updatedAt = Number(JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')).updatedAt) || null; } catch { updatedAt = null; }
+  return {
+    exists: fs.existsSync(root),
+    episodes: countJson(path.join(root, 'episodes')),
+    claims: countJson(path.join(root, 'claims')),
+    updatedAt,
+  };
+}
+
 export function handleConfigRoute({ method = 'GET', body = null, profileConfig = {}, dshHome = null } = {}) {
   const home = dshHome ?? dshHomeOf();
   const merged = resolveConfig({ ...readUserConfig({ dshHome: home }), ...profileConfig });
   if (method === 'GET') {
     return {
       status: 200,
-      body: {
-        config: merged,
-        effectiveStoreRoot: merged.storeRoot ? resolveStoreRoot(merged) : (home ? path.join(home, 'memory-context') : resolveStoreRoot(merged)),
-        userConfigFile: home ? path.join(home, USER_CONFIG_FILE) : null,
-      },
+      body: (() => {
+        const effective = merged.storeRoot ? resolveStoreRoot(merged) : (home ? path.join(home, 'memory-context') : resolveStoreRoot(merged));
+        return {
+          config: merged,
+          effectiveStoreRoot: effective,
+          stats: storeStatsOf(effective),
+          userConfigFile: home ? path.join(home, USER_CONFIG_FILE) : null,
+        };
+      })(),
     };
   }
   if (method !== 'POST') return { status: 405, body: { error: 'method not allowed' } };
