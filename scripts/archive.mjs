@@ -468,6 +468,22 @@ export async function runArchive(opts = {}) {
     claims: claims.filter((r) => r && typeof r.id === 'string'),
   };
 
+  // N10（2026-11-02）：人纠错（L4）回填 —— 只加 counter + 标 disputed，不改原文。
+  try {
+    const adjudicationDir = path.join(storeRoot, 'adjudications');
+    const adjudications = fs.existsSync(adjudicationDir)
+      ? fs.readdirSync(adjudicationDir).filter((f) => f.endsWith('.json')).map((f) => {
+        try { return JSON.parse(fs.readFileSync(path.join(adjudicationDir, f), 'utf8')); } catch { return null; }
+      }).filter(Boolean)
+      : [];
+    if (adjudications.length > 0) {
+      const applied = rooms.claim.applyAdjudications({ claims: authoritative.claims, adjudications, now });
+      if (applied.applied.length > 0) skipped.push(`adjudications: ${applied.applied.length} 条 claim 收到人纠错（state=disputed）`);
+    }
+  } catch (err) {
+    skipped.push(`adjudications: 回填失败（${String(err?.message ?? err)}）`);
+  }
+
   // ---- 5. 派生（R04/R05/R07/R06 重算；与 rebuild 共用同一函数 ⇒ 产物一致） ----
   const derived = await deriveStore({ episodes, derive: opts.derive ?? null, at: now });
   for (const note of derived.skipped) skipped.push(note);
