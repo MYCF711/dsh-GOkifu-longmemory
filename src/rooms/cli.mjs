@@ -28,6 +28,7 @@ export const USAGE = `棋院 CLI（R14）
   node scripts/cli.mjs index [--root <dir>] [--json]     渲染 index.md（写到 stdout，不落盘）
   node scripts/cli.mjs verify [--store <dir>] [--json]   校验记忆库 manifest/checksums
   node scripts/cli.mjs rebuild [--store <dir>] [--json] 从权威条目重算派生索引
+  node scripts/cli.mjs facts [--at <date>] [--store <dir>] [--json]   某时点上为真的 claim（双时态）
   node scripts/cli.mjs audit [--store <dir>] [--json]   记忆健康检查：遮蔽/过期/无支撑/主卷
   node scripts/cli.mjs volumes [--store <dir>] [--limit <n>] [--json]
                                                         卷（棋书视图）：类级主卷优先，其余按局数排序
@@ -69,6 +70,8 @@ export function parseArgs(argv = []) {
     else if (a.startsWith('--shadow-dir=')) flags['shadow-dir'] = a.slice('--shadow-dir='.length);
     else if (a === '--kind') flags.kind = args.shift();
     else if (a.startsWith('--kind=')) flags.kind = a.slice('--kind='.length);
+    else if (a === '--at') flags.at = args.shift();
+    else if (a.startsWith('--at=')) flags.at = a.slice('--at='.length);
     else if (a.startsWith('--')) flags[a.slice(2)] = true;
     else positional.push(a);
   }
@@ -719,6 +722,52 @@ export async function runCli(argv = [], io = {}) {
         for (const t of shown) {
           lines.push(`- ${t.headline ?? `${t.title} · ${t.kifuCount ?? 0} 局`} · ${String(t.id)}${isClass(t) ? ' · 主卷' : ''}`);
         }
+        write(lines.join(String.fromCharCode(10)));
+      }
+      return { code: 0, stdout, stderr: '' };
+    }
+
+    if (cmd === 'facts') {
+      // 双时态查询（只读）：某时点上「为真」的 claim —— validFrom ≤ at 且（无 validTo 或 validTo > at）。
+      const storeRoot = path.resolve(flags.store ?? path.join(root, 'memory-context'));
+      if (!fs.existsSync(storeRoot)) {
+        return { code: 2, stdout: '', stderr: `记忆库不存在：${storeRoot}（先跑 node scripts/archive.mjs）` };
+      }
+      const atRaw = flags.at ?? null;
+      const at = atRaw === null ? Date.now() : Date.parse(String(atRaw));
+      if (!Number.isFinite(at)) return { code: 2, stdout: '', stderr: `--at 不是可解析的时间：${atRaw}` };
+      const { createStore } = await import('./persist.mjs');
+      const store = createStore({ root: storeRoot });
+      const claims = store.list('claims').map((r) => r.record);
+      // 起始时间：validFrom → occurredAt → support 里最早的 occurredAt（旧 claim 没有 validFrom）
+      const startOf = (c) => {
+        if (Number.isFinite(c.validFrom)) return c.validFrom;
+        if (Number.isFinite(c.occurredAt)) return c.occurredAt;
+        const times = (Array.isArray(c.support) ? c.support : []).map((x) => x?.occurredAt).filter(Number.isFinite);
+        return times.length ? Math.min(...times) : null;
+      };
+      const validAt = claims.filter((c) => {
+        if (String(c.state ?? '') === 'invalidated') return false;
+        const from = startOf(c);
+        const to = Number.isFinite(c.validTo) ? c.validTo : null;
+        if (from !== null && from > at) return false;
+        if (to !== null && to <= at) return false;
+        return true;
+      });
+      const limit = Number.isFinite(flags.limit) ? flags.limit : 40;
+      const rows = validAt.slice(0, limit).map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        at: (() => { const st = startOf(c); return Number.isFinite(st) ? new Date(st).toISOString().slice(0, 10) : null; })(),
+        until: Number.isFinite(c.validTo) ? new Date(c.validTo).toISOString().slice(0, 10) : null,
+        support: Array.isArray(c.support) ? c.support.length : 0,
+        text: String(c.text ?? '').slice(0, 80),
+      }));
+      if (flags.json) json({ at, atIso: new Date(at).toISOString(), total: claims.length, valid: validAt.length, rows });
+      else {
+        const lines = [];
+        lines.push(`某时点为真的 claim（只读）：at=${new Date(at).toISOString()} · 合计 ${claims.length} · 当时有效 ${validAt.length}`);
+        for (const r of rows) lines.push(`- [${r.kind}] ${r.at ?? '????-??-??'} → ${r.until ?? '至今'} · ${r.support} 局 · ${r.text}`);
         write(lines.join(String.fromCharCode(10)));
       }
       return { code: 0, stdout, stderr: '' };

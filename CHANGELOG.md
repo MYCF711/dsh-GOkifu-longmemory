@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.47.0（2026-11-02）
+
+### 新增 `cli facts --at`（双时态查询）
+- 回答「某时点上哪些 claim 为真」：`validFrom ≤ at` 且（无 `validTo` 或 `validTo > at`），invalidated 永不返回。
+- 起始时间回退链：`validFrom → occurredAt → support 最早时间`；`--at` 非法退出码 2。
+- 本机：`at=2026-11-02` 有效 184 / 303；`at=2020-01-01` 有效 0（时间轴单调）。
+
+### 验证
+378 条测试（374 pass / 0 fail / 4 skip）；证据 `evidence/M7-cli-facts-at.md`。
+
 ## 0.46.0（2026-11-02）
 
 ### 知识库
