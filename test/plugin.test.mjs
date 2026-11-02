@@ -655,3 +655,46 @@ test('D1: turn-stopping 在库过期时触发一次刷新，未过期不触发',
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(calls, 1, '未过期不应刷新');
 });
+
+// D5（2026-11-02，主人批准）：同会话同类失败 ≥N 次 ⇒ 补一次事实卡
+test('D5: 同类失败第二次出现才触发，且每会话只补一次', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const root = mkdtempSync(path.join(tmpdir(), 'kifu-d5-'));
+  const { ctx, hooks } = makeCtx();
+  let injectedCount = 0;
+  const res = apply(ctx, baseConfig({
+    storeRoot: root,
+    repeatHint: true,
+    repeatHintAfter: 2,
+    repeatHintMax: 1,
+    createUserMessage: (m) => ({ role: 'user', content: [{ type: 'text', text: `CARD:${m.content[0].text}` }] }),
+    deps: {
+      createStore: () => ({ list: () => [], get: () => null }),
+      walk: () => ({ hits: [{ episode: 'ep-x', seq: 1, occurredAt: 1, kind: 'failure', text: 'boom', why: ['x'] }], dropped: {} }),
+      buildMemoryCard: () => ({ section: '- [antipattern] boom  (ep-x, 2026-11-02, seq 1)', tokens: 12 }),
+      runGates: () => ({ ok: true, errors: [] }),
+      createWalkCache: () => ({}),
+    },
+  }));
+  assert.equal(res.registered, true);
+
+  const session = { id: 's-d5' };
+  const step = (texts) => hooks['agent/pre-step'](
+    { agent: { session }, messages: texts.map((t) => ({ role: 'user', content: [{ type: 'text', text: t }] })) },
+    async () => ({ kind: 'enter', messages: [{ role: 'assistant', content: [] }] }),
+  );
+
+  const first = await step(['hello', 'Error: file has not been read — read the file, then retry']);
+  assert.equal(first.kind, 'enter');
+  // 第一次是「首轮正常注入」；D5 不在这一步动手
+  assert.equal(first.messages.length, 2, '第一次同类失败只走正常首轮注入');
+
+  const second = await step(['hello', 'Error: file has not been read — read the file, then retry', 'step', 'Error: file changed since it was read — re-read the file, then retry']);
+  assert.ok(second.messages.some((m) => String(m.content?.[0]?.text ?? '').startsWith('CARD:')), '第二次同类失败应补一张卡（oncePerSession 已被首轮占用）');
+  injectedCount += 1;
+
+  const third = await step(['a', 'b', 'c', 'd', 'Error: unknown tool "bash"', 'e', 'f', 'Error: unknown tool "bash"', 'g']);
+  assert.equal(third.messages.some((m) => String(m.content?.[0]?.text ?? '').startsWith('CARD:')), false, '每会话最多补一次');
+  assert.equal(injectedCount, 1);
+});
