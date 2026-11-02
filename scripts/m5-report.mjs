@@ -178,7 +178,66 @@ export async function measureA1({ storeRoot, workspace, now, signals, crossScope
 
 // ---------------------------------------------------------------------------
 // A2 · 收益（复用 runEval 的 LOO repeatFailureRate）
+//    + A2b 注入召回：对「切点之后的局里、以前出现过的失败签名」，用该签名建信号跑 walk+card，
+//      看卡片是否真的指向**当年那条**（provenance 命中 prior episodes）。这是唯一衡量"记忆有没有用"的口径。
 // ---------------------------------------------------------------------------
+
+export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } = {}) {
+  const rows = Array.isArray(report?.primary?.rows) ? report.primary.rows : [];
+  const priorEpisodes = new Map(); // signature -> Set(episode)
+  const eligible = [];
+  for (const row of rows) {
+    if (!row || !Number.isFinite(row.startedAt)) continue;
+    if (row.startedAt > splitAt) {
+      for (const sig of row.repeatSignatures ?? []) {
+        if (priorEpisodes.has(sig)) eligible.push({ sig, scopeKey: row.scopeKey, episode: row.episode });
+      }
+    } else {
+      for (const sig of [...(row.repeatSignatures ?? []), ...(row.novelSignatures ?? [])]) {
+        if (!priorEpisodes.has(sig)) priorEpisodes.set(sig, new Set());
+        priorEpisodes.get(sig).add(row.episode);
+      }
+    }
+  }
+  const scopeOf = new Map(rows.filter((x) => x && typeof x.episode === 'string').map((x) => [x.episode, x.scopeKey]));
+  let sameScopeEligible = 0;
+  for (const item of eligible) {
+    const priorList = [...(priorEpisodes.get(item.sig) ?? [])];
+    if (priorList.some((id) => scopeOf.get(id) === item.scopeKey)) sameScopeEligible += 1;
+  }
+  if (eligible.length === 0) return { n: 0, hits: 0, recall: null, sameScopeEligible: 0, recallSameScope: null, sampled: [] };
+  const use = eligible.slice(0, limit);
+  let hits = 0;
+  const sampled = [];
+  for (const item of use) {
+    const scope = item.scopeKey ?? null;
+    const signal = signalFromText(item.sig, { at: Date.now() });
+    signal.scopeKey = scope;
+    const walk = walkFromSignals({ signal, store, scope, cache, depth: 2, limit: 5, budgetTokens: 500 });
+    const card = buildMemoryCard({ signal, walkResult: walk, store, scope, limit: 5, budgetTokens: 500 });
+    const section = String(card?.section ?? '');
+    const prior = priorEpisodes.get(item.sig) ?? new Set();
+    let hit = false;
+    for (const line of section.split(String.fromCharCode(10))) {
+      const m = PROVENANCE_LINE_RE.exec(line);
+      if (m && prior.has(m[3])) { hit = true; break; }
+    }
+    if (hit) hits += 1;
+    sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, sameScope: [...prior].some((id) => scopeOf.get(id) === scope) });
+  }
+  const sameScopeSampled = sampled.filter((x) => x.sameScope).length;
+  const sameScopeHits = sampled.filter((x) => x.sameScope && x.hit).length;
+  return {
+    n: use.length,
+    hits,
+    recall: use.length ? hits / use.length : null,
+    sameScopeEligible,
+    sameScopeSampled,
+    sameScopeHits,
+    recallSameScope: sameScopeSampled > 0 ? sameScopeHits / sameScopeSampled : null,
+    sampled,
+  };
+}
 
 export async function measureA2({ dataRoot, storeRoot, now }) {
   if (!dataRoot || !fs.existsSync(dataRoot)) {
@@ -198,6 +257,14 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
     // 全量口径同时保留，便于对照；两者都给出样本量与 n。
     const rateErrorOnly = Number.isFinite(totals.rateErrorOnly) ? totals.rateErrorOnly : null;
     const holdout = report.primary.holdout ?? null;
+    let injectionRecall = null;
+    try {
+      const store = createStore({ root: storeRoot });
+      const cache = createWalkCache(store);
+      injectionRecall = measureA2b({ store, report, splitAt: SPLIT_AT, cache, limit: 30 });
+    } catch (error) {
+      injectionRecall = { error: String(error?.message ?? error) };
+    }
     const rateAll = totals.rate;
     const useErrorOnly = rateErrorOnly !== null && (totals.signaturesErrorOnly ?? 0) > 0;
     const rate = useErrorOnly ? rateErrorOnly : rateAll;
@@ -210,10 +277,11 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
       n,
       status: measured ? 'measured' : 'not-consumed',
       caveat: measured
-        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout**（≤2026-11-02T00:00Z 作记忆）rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}，test ${holdout?.testEpisodes ?? '?'} 局）`
+        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout** rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}）；**注入召回 A2b** recall=${injectionRecall && Number.isFinite(injectionRecall.recall) ? pct(injectionRecall.recall) : 'n/a'}（${injectionRecall?.hits ?? '?'}/${injectionRecall?.n ?? '?'}；其中同域可达 ${injectionRecall?.sameScopeHits ?? '?'}/${injectionRecall?.sameScopeSampled ?? '?'}）`
         : 'LOO 分母为 0（没有可评测的失败签名）⇒ 不写 0',
       detail: {
         holdout,
+        injectionRecall,
         repeat: totals.repeatError,
         novel: totals.novelError,
         sigma,
