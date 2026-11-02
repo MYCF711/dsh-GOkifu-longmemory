@@ -856,6 +856,9 @@ export async function runH1(opts = {}) {
   const postGateIds = new Set();
   const postGateStaleIds = new Set();
   const renderedIds = new Set(); // 所有被渲染过的 claimId（用来看"带 validity 的条目有没有被覆盖到"）
+  // 2026-11-03：**被闸拦下**也算"锻炼到了"。过期条目被 walk 丢弃（dropped.stale）说明防护真的在起作用，
+  // 若只统计"渲染出来的"，A1 会永远空转（0/26）——那是口径缺陷，不是没风险。
+  const exercisedIds = new Set();
   let cardsWithContent = 0;
   let gateFailures = 0;
   let zeroInjection = 0;
@@ -895,6 +898,7 @@ export async function runH1(opts = {}) {
     });
     for (const row of rows) renderedIds.add(row.claimId);
     for (const row of rows) injectedIds.add(row.claimId);
+    if (spec.kind === 'validity' && Number(walk?.dropped?.stale ?? 0) > 0) exercisedIds.add(String(spec.label));
     for (const row of staleRows) staleIds.add(row.claimId);
     if (gates.ok) {
       for (const row of rows) postGateIds.add(row.claimId);
@@ -925,6 +929,7 @@ export async function runH1(opts = {}) {
     .filter((r) => typeof r?.validity?.type === 'string' && r.validity.type !== 'none' && typeof r.id === 'string')
     .map((r) => r.id);
   const validityRendered = validityIds.filter((id) => renderedIds.has(id)).length;
+  const validityExercised = validityIds.filter((id) => renderedIds.has(id) || exercisedIds.has(id)).length;
   const rate = injected > 0 ? staleInjected / injected : null;
   const postGateStaleRate = postGateInjected > 0 ? postGateStale / postGateInjected : null;
   return {
@@ -937,7 +942,12 @@ export async function runH1(opts = {}) {
     signals: signalSpecs.length,
     limit,
     budgetTokens,
-    validityCoverage: { withValidity: validityIds.length, rendered: validityRendered },
+    validityCoverage: {
+      withValidity: validityIds.length,
+      rendered: validityRendered,
+      exercised: validityExercised,
+      ratio: validityIds.length ? validityExercised / validityIds.length : null,
+    },
     validity: {
       total: validity.summary.total,
       ok: validity.summary.ok,
@@ -976,7 +986,7 @@ export function formatH1Report(report) {
   lines.push(`注入条目：${report.injected} · 其中 stale：${report.staleInjected}`);
   lines.push(`staleTransferRate = ${pct(report.staleTransferRate)}（${report.staleInjected} / ${report.injected}）`);
   lines.push(`闸门后：注入 ${report.postGateInjected} · stale ${report.postGateStale} · postGateStaleRate = ${pct(report.postGateStaleRate)}`);
-  lines.push(`覆盖率：带 validity 的条目 ${report.validityCoverage.withValidity} 条，其中被渲染过 ${report.validityCoverage.rendered} 条（覆盖率 0 说明这个指标还没被真正锻炼到）`);
+  lines.push(`覆盖率：带 validity 的条目 ${report.validityCoverage.withValidity} 条，其中被渲染过 ${report.validityCoverage.rendered} 条、被闸拦下 ${report.validityCoverage.exercised - report.validityCoverage.rendered} 条（两者合计为覆盖率；合计 0 才叫没锻炼到）`);
   lines.push('');
   lines.push(`耗时 ${report.elapsedMs} ms · 写入 0（唯一写入口是 --evidence）`);
   return lines.join('\n');
@@ -1020,7 +1030,7 @@ export function renderH1Markdown(report) {
   lines.push('');
   lines.push(`信号构成：话题 ${report.signalsByKind.topic} 条 + 针对性（带 validity 的条目自己的文本）${report.signalsByKind.validity} 条`);
   lines.push('');
-  lines.push(`覆盖率：带 validity 的条目 ${report.validityCoverage.withValidity} 条中，被本次信号集渲染过 **${report.validityCoverage.rendered}** 条。覆盖率为 0 ⇒ 分子恒为 0，此时 0% 不代表"没风险"，只代表"没锻炼到"。`);
+  lines.push(`覆盖率：带 validity 的条目 ${report.validityCoverage.withValidity} 条中，被本次信号集渲染过 **${report.validityCoverage.rendered}** 条、被闸拦下 **${report.validityCoverage.exercised - report.validityCoverage.rendered}** 条。覆盖率为 0 ⇒ 分子恒为 0，此时 0% 不代表"没风险"，只代表"没锻炼到"。`);
   lines.push('');
   lines.push('## 4 · 逐信号明细');
   lines.push('');

@@ -144,17 +144,19 @@ export async function measureA1({ storeRoot, workspace, now, signals, crossScope
   }
   const withValidity = Number(h1.validityCoverage?.withValidity ?? 0);
   const renderedValidity = Number(h1.validityCoverage?.rendered ?? 0);
-  const validityCoverage = withValidity === 0 ? null : renderedValidity / withValidity;
+  // 2026-11-03：闸拦下的也算锻炼（否则 A1 长期空转）
+  const exercisedValidity = Number(h1.validityCoverage?.exercised ?? renderedValidity);
+  const validityCoverage = withValidity === 0 ? null : exercisedValidity / withValidity;
   const injected = Number(h1.injected ?? 0);
   const measured = injected > 0 && withValidity > 0;
-  const vacuous = measured && validityCoverage === 0;
+  const vacuous = measured && exercisedValidity === 0;
   const detail = {
     vacuous,
     staleTransferRate: h1.staleTransferRate ?? null,
     staleInjected: h1.staleInjected ?? 0,
     injected,
     postGateStaleRate: h1.postGateStaleRate ?? null,
-    validityCoverage: { withValidity, rendered: renderedValidity, ratio: validityCoverage },
+    validityCoverage: { withValidity, rendered: renderedValidity, exercised: exercisedValidity, ratio: validityCoverage },
     crossScopeLeakRate,
     signals: h1.signals ?? null,
     cardsWithContent: h1.cardsWithContent ?? null,
@@ -163,10 +165,11 @@ export async function measureA1({ storeRoot, workspace, now, signals, crossScope
   const parts = [];
   if (injected === 0) parts.push('没有注入条目（卡片全空）⇒ 分母为 0，不写 0');
   if (withValidity === 0) parts.push('语料里没有带 validity 的条目 ⇒ stale 分子恒为 0，未锻炼到');
-  else if (renderedValidity === 0) parts.push(`带 validity 的 ${withValidity} 条一次都没被渲染到 ⇒ 覆盖率为 0，0% 不代表没风险`);
-  parts.push(`validityCoverage=${pct(validityCoverage)}（${renderedValidity}/${withValidity}）`);
+  else if (exercisedValidity === 0) parts.push(`带 validity 的 ${withValidity} 条既没被渲染、也没被闸拦下 ⇒ 覆盖率为 0，0% 不代表没风险`);
+  else if (renderedValidity === 0) parts.push(`带 validity 的 ${withValidity} 条**全部被闸拦下**（渲染 0 / 拦下 ${exercisedValidity}）⇒ 0% 是"闸有效"的证据，不是空转`);
+  parts.push(`validityCoverage=${pct(validityCoverage)}（渲染 ${renderedValidity} + 闸拦 ${exercisedValidity - renderedValidity} / 共 ${withValidity}）`);
   parts.push(`crossScopeLeakRate=${pct(crossScopeLeakRate)}（见 A5）`);
-  if (vacuous) parts.unshift('**0% 是空转的**（带 validity 的条目一条也没被渲染过）');
+  if (vacuous) parts.unshift('**0% 是空转的**（带 validity 的条目既没被渲染、也没被闸拦下）');
   return axis({
     value: measured ? (h1.staleTransferRate ?? null) : null,
     unit: 'rate',
