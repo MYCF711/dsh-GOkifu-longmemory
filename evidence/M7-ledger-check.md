@@ -17,7 +17,8 @@ audit-01 与 audit-02 **两轮都栽在同一件事**：`MAINTENANCE.md`/`CHANGE
 没有 store 时跳过语料项并**显式标注**（不当成通过）。
 
 ## 接进发布流程
-`scripts/release.mjs` 在打 tag 前调用 `ledger-check --no-tests`；不一致直接中止（确需跳过用 `--no-ledger`）。
+`scripts/release.mjs` 在打 tag 前调用 **`ledger-check --full`**；不一致直接中止。
+（0.61.0 起：旧的跳过测试口径与逃生门都已删除，`--full` 是唯一口径。）
 这样"台账写错"会挡住发版，而不是等审计发现。
 
 ## 实测
