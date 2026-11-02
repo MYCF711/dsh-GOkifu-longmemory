@@ -2,6 +2,39 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.15.0（2026-11-02）
+
+**改名 + 零配置 + 开源**：从 `dsh-kifuin` 改为 **`dsh-kifu`**；仓库转公开。
+
+### 改名
+- `package.json`：`name: dsh-kifu`；仓库 `MYCF711/dsh-kifu`（旧地址自动重定向）。
+- 文档里的安装名、命令示例同步。
+
+### 零配置（装完即用）
+- **默认 `enabled: true`、`shadow: false`、`autoBuild: true`**（此前默认关）。
+- 库不存在时：本次**沉默**（不注入），后台自动跑一次归档建库（`autoBuild`），下一轮生效；失败只 warn、不重试风暴。
+- 用户最多只需填一个保存地址（`storeRoot`，缺省 `<DSH_HOME>/memory-context`）。
+- `autoBuild: false` 可关自动建库；`enabled:false` 可完全停用。
+
+### 实测
+- 346 条测试全绿（含新增自动建库用例）。
+- 安全：库不存在/构建失败/闸门不过 ⇒ 一律原 decision，不阻塞会话。
+
+## 0.14.0（2026-11-02）
+
+影子台账复盘工具：装完就能一眼看出"本来会注入多少、多长、哪些信号命中"。
+
+### 新增
+- **`scripts/shadow-report.mjs`**：读 `evidence/shadow/shadow.jsonl`（只读），输出：
+  - `wouldInject` / `silent` / `silentRate`
+  - `tokens`（会注入卡的 p50/p90/max）与 `tokensAll`、`silentIndexOnlyTokens`
+  - `topSignals`（按信号词频）、`claimsPerCard`
+- 台账不存在 ⇒ 退出码 **2**，不伪造 0。
+- **`test/shadow-report.test.mjs`**：2 条（正常统计 / 缺台账）。
+
+### 说明
+- 影子卡没有命中时 `section:null`、`tokens` 只有 INDEX 行（约 16），报告把两类分开统计，避免把"沉默"算成"注入"。
+
 ## 0.13.0（2026-11-02）
 
 Q17 裁定 C 落地：定式长出「参考层」（只作 candidate，不进 V1）。
