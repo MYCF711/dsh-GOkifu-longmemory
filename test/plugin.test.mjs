@@ -626,3 +626,32 @@ test('R16: 设置页 schema —— 暴露 storeRoot（记忆库地址）等字�
   assert.equal(Config['~standard'].validate({}).value.enabled, true);
   assert.equal(Config['~standard'].validate(null).value.shadow, false);
 });
+
+// D1（2026-11-02）：轮次收尾时按时间阈值增量刷新
+test('D1: turn-stopping 在库过期时触发一次刷新，未过期不触发', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const root = mkdtempSync(path.join(tmpdir(), 'kifu-d1-'));
+  writeFileSync(path.join(root, 'manifest.json'), JSON.stringify({ updatedAt: Date.now() - 2 * 3600 * 1000 }));
+
+  const { ctx, hooks } = makeCtx();
+  let calls = 0;
+  const res = apply(ctx, baseConfig({
+    storeRoot: root,
+    autoArchive: true,
+    autoArchiveMinutes: 30,
+    deps: { buildStore: async () => { calls += 1; } },
+  }));
+  assert.equal(res.registered, true);
+  assert.equal(typeof hooks['agent/turn-stopping'], 'function', '必须挂上 turn-stopping');
+
+  await hooks['agent/turn-stopping']({});
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(calls, 1, '过期库应当刷新一次');
+
+  // 未过期（刚写过未来时间）⇒ 不再触发
+  writeFileSync(path.join(root, 'manifest.json'), JSON.stringify({ updatedAt: Date.now() + 3600 * 1000 }));
+  await hooks['agent/turn-stopping']({});
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(calls, 1, '未过期不应刷新');
+});
