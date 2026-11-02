@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto';
 
 export const ADJUDICATION_VERSION = 1;
-export const ADJUDICATION_SCHEMA = 'dsh-kifuin/adjudication@1';
+export const ADJUDICATION_SCHEMA = 'dsh-gokifu-longmemory/adjudication@1';
 
 /** 成员只能交这三种票（方案 §5.4 第 2 条：结构化输出，不许自由长文）。 */
 export const VERDICTS = Object.freeze(['support', 'oppose', 'insufficient']);

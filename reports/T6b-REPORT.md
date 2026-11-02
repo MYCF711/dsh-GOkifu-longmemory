@@ -97,7 +97,7 @@ joseki = { id:"j-<hash8>", version:1, title,
 
 | 房间 | 夹具规模 | 产出 |
 |---|---|---|
-| R06 | 5 局 / 2 个工作区 / 5 个主题（含 `df=N` 的 `tool:bash`、跨域各 1 局的 `跨域主题`、无主题的 1 局） | **3 卷**（`mycf711/dsh-kifuin`、`src/rooms/link.mjs`、`yaml`）；4 局入卷、**2 局属 2 卷**（多对多）、1 局无卷；`df=N` 与跨域主题均不成卷 |
+| R06 | 5 局 / 2 个工作区 / 5 个主题（含 `df=N` 的 `tool:bash`、跨域各 1 局的 `跨域主题`、无主题的 1 局） | **3 卷**（`mycf711/dsh-gokifu-longmemory`、`src/rooms/link.mjs`、`yaml`）；4 局入卷、**2 局属 2 卷**（多对多）、1 局无卷；`df=N` 与跨域主题均不成卷 |
 | R08 | 2 局同 scope，同一 2 招成功线（`bash(command=npm test)` → `write(file_path=…/out/result.json)`，两局路径写法不同、content 不同） | **1 条候选**（2 招、`state:"candidate"`、`support` 2 局、**1 条 `shares-joseki` 边**）；单局 / 父子 / 跨 scope / 窗口内夹失败 / 缺 seq 或 quote 五种情形**各 0 候选**（`singleSupport`、`notIndependent`、`countered`、`noSource`、`noQuote` 分别计数）；3 连招夹具 → 1 条 3 招候选 + 2 个 2 招子窗口被剪 |
 | R09 | 4 局（3 同 scope + 1 跨 scope），错误 2 条同文本、约束同 1 句、1 条 ENOENT、1 条字面版本 | **5 条 claim**：`fact 2`（file / version）、`antipattern 2`（一 candidate 一 observed）、`preference 1`（跨工作区 ⇒ `u:owner`、candidate）；2 candidate / 3 observed；反例夹具（两局 ENOENT + 更晚写同一路径）⇒ 该 file 事实 `counter=1`、`state:"observed"` |
 
@@ -122,7 +122,7 @@ joseki = { id:"j-<hash8>", version:1, title,
 | 入卷局数 | 20 / 24（4 局无判别性主题，不成卷） |
 | 多对多 | **20 次**（一局属 ≥2 卷） |
 | 卷种类 | file 27 / tool 16 / dependency 14 / term 11 / error 7 / domain 4 / scaffold 3 / repo 2 |
-| 样本 | `@deepseek-ai/dsh`（3 局 3 条边）、`@deepseek-ai/schemastery`（3 局）、`192.168.1.6`（2 局）、`@deepseek-ai/cordis`（2 局） |
+| 样本 | `@deepseek-ai/dsh`（3 局 3 条边）、`@deepseek-ai/schemastery`（3 局）、`<lan-ip>`（2 局）、`@deepseek-ai/cordis`（2 局） |
 
 ### R08 joseki
 

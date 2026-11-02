@@ -11,7 +11,7 @@
 // 输入：
 //   signal = { kind:"root-message"|"activity"|"user-explicit", terms:[string],
 //              entities:[{kind?,key}], at?:epochms }                        （契约 §7.1）
-//            entities[].key 可以是主题 key（`MYCF711/dsh-kifuin`）或主题 id（`t:repo:xxxxxxxx`）。
+//            entities[].key 可以是主题 key（`MYCF711/dsh-gokifu-longmemory`）或主题 id（`t:repo:xxxxxxxx`）。
 //   store  = R15 createStore 的产物；本房间**只用 list()**（只读）。
 //            topics / links / episodes / claims 缺哪个就当空数组（不抛、不建目录、不写盘）。
 // 输出：

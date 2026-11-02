@@ -30,7 +30,7 @@ import { loadGraphAt } from '../src/rooms/graphread.mjs';
 
 const HOME = process.env.DSH_HOME ?? '';
 const CORPUS = HOME ? join(HOME, 'chess-context', 'sessions') : '';
-const SAMPLE_A = 'session-1286ce28-dba8-448b-9827-e6ccacdf9806';
+const SAMPLE_A = 'session-00000003-0000-4000-8000-000000000003';
 const SAMPLE_C = 'fa84bf69-0e4b-422c-aed9-85b8c2462359';
 const graphPath = (sid) => join(CORPUS, sid, 'graph.json');
 const hasSample = (sid) => Boolean(CORPUS) && existsSync(graphPath(sid));

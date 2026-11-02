@@ -65,7 +65,7 @@ node scripts/check.mjs                  # PASS
 
 | # | 断言 | 对应用户要求 |
 |---|---|---|
-| 1 | 信号 `dsh-kifuin` ⇒ 命中 ep1/ep2（含 `why=[repo key]`、`occurredAt=lastEventAt`、`kind=failure`、`text=l0`） | 命中 ep1/ep2 |
+| 1 | 信号 `dsh-gokifu-longmemory` ⇒ 命中 ep1/ep2（含 `why=[repo key]`、`occurredAt=lastEventAt`、`kind=failure`、`text=l0`） | 命中 ep1/ep2 |
 | 2 | `path` 里有 `ep-0002→ep-0003`（`why=[node --test]`、`link=link-0002`、`new=true`）；`ep-0001→ep-0002` 的 why（`new=false`）且不出现镜像方向 | ep1→ep2 一跳带 why |
 | 3 | `depth=99` 与 `depth=2` 等价、ep-0004（第 3 跳）永不出现；`depth=1` 无 depth2；`clampDepth(0)=1` | depth>2 不越界 |
 | 4 | folded-into 局不入（dropped.folded=1）、无时间戳局不入（dropped.noTime=2）、invalidated claim 不入 | 入网纪律 |
@@ -92,7 +92,7 @@ node scripts/check.mjs                  # PASS
 
 | 信号 | 命中主题 | hits | kinds | depth2 | tokens | omitted | path | 耗时 |
 |---|---|---|---|---|---|---|---|---|
-| `dsh-kifuin` | 3（`repo:mycf711/dsh-kifuin`、`term:kifu`、`term:dsh`） | 5 | failure×5（1 棋谱 + 4 claim） | 0 | 241 | 140 (limit) | 6 | ~331 ms |
+| `dsh-gokifu-longmemory` | 3（`repo:mycf711/dsh-gokifu-longmemory`、`term:kifu`、`term:dsh`） | 5 | failure×5（1 棋谱 + 4 claim） | 0 | 241 | 140 (limit) | 6 | ~331 ms |
 | `记忆` | 1（`file:docs/记忆的职责边界.md`） | 5 | failure×5 | 0 | 218 | 93 (limit) | — | — |
 | `棋谱` | 1（`file:…/20-棋谱与上下文压缩.md`） | 5 | failure×5 | **5** | 161 | 88 (limit) | — | — |
 | `压缩` | 4 | 3 | failure×3 | 0 | 380 | 138 (**budget**) | — | ~375 ms |
@@ -103,8 +103,8 @@ node scripts/check.mjs                  # PASS
 
 - **只读**：6 组信号 + 2 次 limit/budget 压测全部跑完后，`store.snapshot()` 的 1280 个文件 sha256、counts、bytes、journal 行数**完全一致**（`tmp/walk-probe.mjs` 输出 `只读校验… true`）。
 - **深度确有效但被夹住**：`棋谱` 信号 depth=1 ⇒ 1 hit，depth=2 ⇒ 5 hits（一跳多找回 4 条），`depth=99` 与 `depth=2` 结果 `JSON.stringify` 完全相同。
-- **默认预算下真实产出**：`dsh-kifuin` 默认 limit=5/budget=500 ⇒ 5 条指针共 **241 tokens**（单条 17–70），140 条按 limit 省略；`path` 6 跳，样例：
-  `signal → t:repo:28dd57a0 (why=mycf711/dsh-kifuin) → ep-8cc34e32 → c-90c164ef`。
+- **默认预算下真实产出**：`dsh-gokifu-longmemory` 默认 limit=5/budget=500 ⇒ 5 条指针共 **241 tokens**（单条 17–70），140 条按 limit 省略；`path` 6 跳，样例：
+  `signal → t:repo:28dd57a0 (why=mycf711/dsh-gokifu-longmemory) → <ep> → c-90c164ef`。
 - **R12/R13 需要的字段在真实数据上齐了**：`seq`（1742/2146/2132…）、`claim=c-90c164ef`、`claimKind=antipattern`、`claimState=observed`、`result.depth=2`。
 - **沉默是默认**：4 组无主题/无命中的信号 ⇒ `hits=[]`、`tokens=0`、`omitted.count=0`，不猜、不给一行废话。
 
@@ -128,7 +128,7 @@ node scripts/check.mjs                  # PASS
 |---|---|---|
 | 全表扫描：每次 walk 读 topics/episodes/links/claims 全量（92 局时 157–375 ms） | M3 影子模式每步调用会累计 | 影子模式按轮次采样；语料上千局时给 `store.list` 加 byKind 缓存或按 topic 反查索引（R11 内部不缓存，避免陈旧） |
 | 中文召回依赖 R04 主题表：真实语料里 `系统`/`时间戳` 根本没有主题 key（term 是 2-gram 且每局有上限） | 部分中文信号 ⇒ 零命中（沉默而非错命中） | 属 R04 的抽取上限问题，不在 R11 补"模型猜相关"；可在 R12 影子数据里统计"零命中率"作为 R04 的输入 |
-| 双向包含匹配（`term ⊂ key` 与 `key ⊂ term` 都算命中） | `dsh-kifuin` 会带出 `term:kifu`/`term:dsh`，命中面偏宽 | `maxTopics=8` + 稀有度排序约束；若影子数据显示噪声，只需收紧 `overlaps()` 一行（阈值/方向） |
+| 双向包含匹配（`term ⊂ key` 与 `key ⊂ term` 都算命中） | `dsh-gokifu-longmemory` 会带出 `term:kifu`/`term:dsh`，命中面偏宽 | `maxTopics=8` + 稀有度排序约束；若影子数据显示噪声，只需收紧 `overlaps()` 一行（阈值/方向） |
 | `claim` 文本命中主题 key 是机械词面匹配 | 可能误连"文本里顺带提到"的 claim | 该通路只在 claim 依附不到任何命中棋谱时启用（二选一），且 why 只记命中的主题 key，可审计 |
 | 未接入 `package.json` exports / `src/index.mjs` / `check.mjs` 房间清单 / CHANGELOG | R11 目前只能按路径 import | 按 Lead 的写入范围留给统一提交；一行改动即可 |
 | `omitted.reason` 只有 `limit`/`budget`（前缀式截断只会触发其一） | 调用方若想区分"总候选数"需读 `omitted.count + hits.length` | 契约如此；`matched.truncated` 另行给出主题截断数 |
@@ -137,7 +137,7 @@ node scripts/check.mjs                  # PASS
 
 已按其消息**加法式**落地（不破坏 §7.2 契约字段）：
 
-- `hit.seq`（数字，可缺省）：claim 取 `support.seq`；棋谱取该主题在棋谱里的首个 `mention.seq`（真实数据上 ep-8cc34e32 给出 1742/2146/2132…）。
+- `hit.seq`（数字，可缺省）：claim 取 `support.seq`；棋谱取该主题在棋谱里的首个 `mention.seq`（真实数据上 <ep> 给出 1742/2146/2132…）。
 - `hit.claim` = claim id 字符串；`hit.claimKind`（`antipattern`/`preference`/`fact`…）、`hit.claimState`（`observed`/`candidate`/`stale`…）同时给出；`hit.text` = claim 原文或棋谱 `l0` —— 逐字渲染不需要再回溯查 `claims/*.json`。
 - `result.depth` = `result.maxDepth` 的别名（恒 ≤2），R13 闸 6b 可直接读。
 - `hits[].why` 恒非空；`hits[].occurredAt` 恒为有限 epoch ms；这两条有专门的测试断言（第 1/3/10 例的 `assertInvariants`）。
@@ -220,7 +220,7 @@ before = HEAD(103edea) 的 walk，after = 本刀 + `scope`）：
 
 | 信号 | 修复前 hits（越界） | 修复后 hits（越界） | 修复后 crossScope | 修复后 tokens |
 |---|---|---|---|---|
-| `dsh-kifuin` | 5（0） | 5（0），全同域 | 31 | 206 |
+| `dsh-gokifu-longmemory` | 5（0） | 5（0），全同域 | 31 | 206 |
 | `记忆` | 5（0） | 5（0），全同域 | 9 | 218 |
 | `棋谱` | 5（**5**） | **0**（沉默：该主题只挂在别的工作区） | 1 | 0 |
 | `压缩` | 3（**3**） | 1（0），`u:owner` | 5 | 29 |
