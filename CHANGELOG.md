@@ -2,6 +2,15 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.39.0（2026-11-02）
+
+### 新增 `scripts/install-doctor.mjs`（安装后自检）
+- 五项只读检查：注册（含 `disabled:true` 识别）/ 设置接口 / 库 verify / 证据目录 / host-sim 抽测（failed 必须 0）。
+- 本机实跑 PASS；**发现插件在 `cordis.patch.yml` 里注册了两条且都 `disabled: true`**（历史改名残留）。
+
+### 验证
+369 条测试（365 pass / 0 fail / 4 skip）；证据 `evidence/M7-install-doctor.md`。
+
 ## 0.38.0（2026-11-02）
 
 ### 真实 store 下的宿主仿真（A3 simulated 证据刷新）
