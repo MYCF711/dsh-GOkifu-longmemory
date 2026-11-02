@@ -183,7 +183,7 @@ export async function measureA1({ storeRoot, workspace, now, signals, crossScope
 //      看卡片是否真的指向**当年那条**（provenance 命中 prior episodes）。这是唯一衡量"记忆有没有用"的口径。
 // ---------------------------------------------------------------------------
 
-export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } = {}) {
+export function measureA2b({ store, report, splitAt, cache = null, limit = 30, frozen = null } = {}) {
   const rows = Array.isArray(report?.primary?.rows) ? report.primary.rows : [];
   const priorEpisodes = new Map(); // signature -> Set(episode)
   const eligible = [];
@@ -207,7 +207,12 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } 
     if (priorList.some((id) => scopeOf.get(id) === item.scopeKey)) sameScopeEligible += 1;
   }
   if (eligible.length === 0) return { n: 0, hits: 0, recall: null, sameScopeEligible: 0, recallSameScope: null, sampled: [] };
-  const use = eligible.slice(0, limit);
+  // 冻结集合（2026-11-02）：调用方给一份固定的评估集，分母不再随语料漂移。
+  const frozenItems = Array.isArray(frozen?.items) && frozen.items.length > 0 ? frozen.items : null;
+  if (frozenItems) {
+    for (const item of frozenItems) priorEpisodes.set(item.sig, new Set(item.prior ?? []));
+  }
+  const use = frozenItems ? frozenItems.slice(0, limit) : eligible.slice(0, limit);
   let hits = 0;
   let specificHits = 0;
   const sampled = [];
@@ -248,7 +253,8 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } 
     }
     if (hit) hits += 1;
     if (specific) specificHits += 1;
-    sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, specific, sameScope: [...prior].some((id) => scopeOf.get(id) === scope) });
+    const isSameScope = item.sameScope !== undefined ? Boolean(item.sameScope) : [...prior].some((id) => scopeOf.get(id) === scope);
+    sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, specific, sameScope: isSameScope });
   }
   const sameScopeSampled = sampled.filter((x) => x.sameScope).length;
   const sameScopeHits = sampled.filter((x) => x.sameScope && x.hit).length;
@@ -288,7 +294,12 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
     try {
       const store = createStore({ root: storeRoot });
       const cache = createWalkCache(store);
-      injectionRecall = measureA2b({ store, report, splitAt: SPLIT_AT, cache, limit: 30 });
+      let frozen = null;
+      try {
+        const setFile = path.join(REPO_ROOT, 'evidence', 'a2b-set.json');
+        if (fs.existsSync(setFile)) frozen = JSON.parse(fs.readFileSync(setFile, 'utf8'));
+      } catch { frozen = null; }
+      injectionRecall = measureA2b({ store, report, splitAt: SPLIT_AT, cache, limit: 60, frozen });
     } catch (error) {
       injectionRecall = { error: String(error?.message ?? error) };
     }

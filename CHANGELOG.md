@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.43.0（2026-11-02）
+
+### A2b 冻结评估集（`evidence/a2b-set.json`）
+- `scripts/a2b-set.mjs --freeze` 固化「切点后 + 有当年先例」的失败签名（当前 19 条，同域 9）；
+  `m5-report` 与 `metrics-guard` 自动使用快照，**分母不再随语料漂移**。
+- 纪律：不得为了让数字好看而重冻；重冻须在 PR 写明理由，两套都报。
+
+### 验证
+375 条测试（371 pass / 0 fail / 4 skip）；`metrics-guard PASS`（A2b 严格 0.6316，n=19 固定）。
+
 ## 0.42.0（2026-11-02）
 
 ### `scripts/re-enable.mjs` 加固：精准摘除
