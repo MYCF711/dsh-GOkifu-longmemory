@@ -286,3 +286,22 @@ test('N10: L4 人纠错回填到目标 claim；非 L4 / 非 correct 不动', asy
   applyAdjudications({ claims, adjudications });
   assert.equal(claims.find((c) => c.id === 'c-1').counter.length, 1);
 });
+
+// 2026-11-02：类级章节自愈 —— 多局支撑但缺类级 claim 时补一条；幂等
+test('ensureClassClaims: 补出缺失的类级章节，且重复调用不再加', async () => {
+  const { ensureClassClaims } = await import('../src/rooms/claim.mjs');
+  const claims = [
+    { id: 'c-m1', kind: 'antipattern', text: "Error: Cannot find module './a.json'", scopeKey: 'w:d:/x', state: 'observed', support: [{ episode: 'ep-a', seq: 1, quote: "Error: Cannot find module './a.json'", occurredAt: 10 }], counter: [] },
+    { id: 'c-m2', kind: 'antipattern', text: "Error: Cannot find module './b.json'", scopeKey: 'w:d:/x', state: 'observed', support: [{ episode: 'ep-b', seq: 2, quote: "Error: Cannot find module './b.json'", occurredAt: 20 }], counter: [] },
+    { id: 'c-ok', kind: 'antipattern', text: 'class:fs-read-before-write · file has not been read', scopeKey: 'w:d:/x', state: 'candidate', support: [{ episode: 'ep-c', seq: 3, quote: 'x', occurredAt: 30 }], counter: [] },
+  ];
+  const first = ensureClassClaims({ claims });
+  assert.equal(first.added.length, 1, 'module-missing 缺类级章节 ⇒ 补 1 条');
+  assert.match(first.added[0].text, /^class:module-missing · /);
+  assert.equal(first.added[0].support.length, 2, '支撑来自两局');
+  assert.equal(first.added[0].scopeKey, 'w:d:/x');
+
+  const withAdded = [...claims, ...first.added];
+  const second = ensureClassClaims({ claims: withAdded });
+  assert.equal(second.added.length, 0, '已有类级章节 ⇒ 幂等，不再加');
+});

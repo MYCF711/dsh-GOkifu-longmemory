@@ -1188,5 +1188,67 @@ export function applyAdjudications({ claims = [], adjudications = [], now = null
 
 
 
-export default { promoteClaim, applyAdjudications, errorKeyOf, errorLineOf, isGenericErrorText, extractPaths, extractVersionLiterals, isIndependentEpisode, hasIndependentPair, DEFAULT_CLAIM_OPTIONS };
+/**
+ * 类级章节自愈（2026-11-02）：给「有多局支撑、却缺类级 claim」的错误类补一条类级 claim。
+ * 只增不改：不删、不改写已有 claim；同输入同输出（id 由类名 + 作用域决定，重复归档幂等）。
+ */
+export function ensureClassClaims({ claims = [], minSupport = 2, maxQuote = 200 } = {}) {
+  const list = (Array.isArray(claims) ? claims : []).filter((c) => c && typeof c.id === 'string');
+  const byClass = new Map();
+  for (const claim of list) {
+    const text = String(claim.text ?? '');
+    if (text.startsWith('class:')) continue;
+    const key = errorKeyOf(text);
+    if (!String(key).startsWith('class:')) continue;
+    const name = key.slice('class:'.length);
+    const group = byClass.get(name) ?? { name, claims: [], episodes: new Set(), scopes: new Map(), supports: [] };
+    group.claims.push(claim);
+    for (const s of Array.isArray(claim.support) ? claim.support : []) {
+      if (!s?.episode) continue;
+      group.episodes.add(String(s.episode));
+      group.supports.push({ claim, support: s });
+      group.scopes.set(String(claim.scopeKey ?? ''), (group.scopes.get(String(claim.scopeKey ?? '')) ?? 0) + 1);
+    }
+    byClass.set(name, group);
+  }
+  const existing = new Set(list.filter((c) => String(c.text ?? '').startsWith('class:')).map((c) => `${c.scopeKey ?? ''}${String(c.text).split(' · ')[0]}`));
+  const added = [];
+  for (const group of byClass.values()) {
+    if (group.episodes.size < minSupport) continue;
+    const scopeKey = [...group.scopes.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? 'u:owner';
+    const headline = `class:${group.name}`;
+    if (existing.has(`${scopeKey}${headline}`)) continue;
+    const ordered = [...group.supports].sort((a, b) => (a.support?.occurredAt ?? Infinity) - (b.support?.occurredAt ?? Infinity));
+    const representative = ordered[0];
+    const support = [];
+    const seen = new Set();
+    for (const item of ordered) {
+      const s = item.support;
+      const key = [s.episode, s.seq, s.quote].join('');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      support.push({ episode: s.episode, threadId: s.threadId ?? null, nodeId: s.nodeId ?? null, edgeId: s.edgeId ?? null, seq: Number.isFinite(s.seq) ? s.seq : null, quote: clip(String(s.quote ?? ''), maxQuote), occurredAt: Number.isFinite(s.occurredAt) ? s.occurredAt : null });
+    }
+    const times = support.map((s) => s.occurredAt).filter((t) => Number.isFinite(t));
+    added.push({
+      id: `c-${hash8(`class-merge${group.name}${scopeKey}`)}`,
+      kind: 'antipattern',
+      text: `${headline} · ${clip(errorLineOf(representative?.claim?.text ?? ''), maxQuote)}`,
+      scopeKey,
+      threadIds: [],
+      state: support.length >= minSupport ? 'candidate' : 'observed',
+      support,
+      counter: [],
+      validity: { type: 'none', value: null },
+      preconditions: [{ check: 'scope', value: scopeKey, why: '类级章节：证据只覆盖该作用域（排版口径同其他 claim）' }],
+      occurredAt: times.length ? Math.min(...times) : null,
+      recordedAt: null,
+      supersedes: null,
+      counters: { support: support.length, counter: 0, injections: 0, lastInjectedAt: null },
+    });
+  }
+  return { claims, added };
+}
+
+export default { promoteClaim, applyAdjudications, ensureClassClaims, errorKeyOf, errorLineOf, isGenericErrorText, extractPaths, extractVersionLiterals, isIndependentEpisode, hasIndependentPair, DEFAULT_CLAIM_OPTIONS };
 
