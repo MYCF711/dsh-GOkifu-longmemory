@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.28.0（2026-11-02）
+
+### 新增 `cli audit`（只读健康检查）
+- 统计 claim 总数/状态、**被遮蔽**（过期 validityOk=false / invalidated / 无支撑）、卷数与类级主卷 Top5。
+- 存在无支撑 claim ⇒ 退出码 1（可接 CI）。
+- 本机：282 claim（过期 22、无支撑 0）、138 卷、4 个类级主卷。
+
+### 验证
+359 条测试（355 pass / 0 fail / 4 skip）；证据 `evidence/M7-audit-cli.md`。
+
 ## 0.27.0（2026-11-02）
 
 ### 新增 `cli volumes`（棋书视图）
