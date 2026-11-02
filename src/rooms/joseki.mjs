@@ -480,3 +480,102 @@ export function promoteJoseki({ episodes = [], signals = null, now = null, optio
 }
 
 export default { promoteJoseki, stepSignature, normalizeActionText, isIndependentEpisode, hasIndependentPair, DEFAULT_JOSEKI_OPTIONS };
+
+// ---------------------------------------------------------------------------
+// 参考层（Q17-C，2026-11-02 自裁）：把命令成功按 `tool + 操作类` 泛化成候选。
+// 约束：**不进 V1 验收**（entersV1:false）、只作 candidate、≥3 局独立支撑、必须带
+// preconditions（原文命令），防止把一次偶然成功当通用招法（S12 的过拟合防线）。
+// ---------------------------------------------------------------------------
+
+const REFERENCE_BINS = new Set(['node', 'npm', 'pnpm', 'yarn', 'git', 'python', 'python3', 'bash', 'sh', 'pwsh', 'powershell', 'cargo', 'go', 'docker', 'gh', 'tsc', 'vitest', 'jest']);
+const REFERENCE_VERBS = /^(test|check|lint|build|install|i|commit|push|merge|release|deploy|start|run|add|status|diff|log)$/i;
+
+/** 把一条命令原文泛化成 `cmd:<bin> <verb>`；不像命令就返回 null（不猜）。 */
+export function generalizeCommand(quote, { tool = null } = {}) {
+  const raw = String(quote ?? '').replace(/\s+/g, ' ').trim();
+  if (!raw) return null;
+  // 非命令工具：参数是 JSON ⇒ 用「工具 + 第一个参数键/路径类别」泛化（github: commits / contents / issues）
+  if (raw.startsWith('{')) {
+    try {
+      const args = JSON.parse(raw);
+      const name = typeof tool === 'string' && tool ? tool.toLowerCase() : 'tool';
+      if (typeof args?.path === 'string') {
+        const cls = /\/(commits|contents|issues|pulls|readme|search|branches|tags|releases)(\/|\?|$)/i.exec(args.path);
+        const bucket = cls ? cls[1].toLowerCase() : 'path';
+        return `tool:${name} ${bucket}`;
+      }
+      const firstKey = Object.keys(args ?? {})[0];
+      return firstKey ? `tool:${name} ${String(firstKey).toLowerCase()}` : `tool:${name}`;
+    } catch {
+      return null;
+    }
+  }
+  const tokens = raw.split(' ').filter(Boolean);
+  if (tokens.length === 0) return null;
+  const bin = tokens[0].toLowerCase();
+  if (!REFERENCE_BINS.has(bin)) return null;
+  const second = (tokens[1] ?? '').toLowerCase().replace(/[^a-z0-9:_-]/g, '').replace(/^-+/, '');
+  const verb = REFERENCE_VERBS.test(second) ? second : (second || '');
+  return `cmd:${bin}${verb ? ` ${verb}` : ''}`;
+}
+
+/** 参考层候选：泛化签名 ≥3 局支撑、无反例、每招带 source。 */
+export function promoteReferenceJoseki({ episodes = [], signals = null, now = null, minEpisodes = 3, maxSteps = 5 } = {}) {
+  const eps = (Array.isArray(episodes) ? episodes : []).filter((e) => e && typeof e.id === 'string');
+  const byId = new Map(eps.map((e) => [e.id, e]));
+  const groups = new Map();
+  const source = signals && typeof signals === 'object' ? signals : {};
+  const entries = [];
+  for (const [episodeId, sig] of Object.entries(source)) {
+    const list = [
+      ...(Array.isArray(sig?.successes) ? sig.successes : []),
+      ...(Array.isArray(sig?.commandSuccesses) ? sig.commandSuccesses : []),
+    ];
+    for (const entry of list) {
+      if (!entry || !Number.isFinite(entry.seq)) continue;
+      const quote = String(entry.quote ?? '').trim();
+      if (!quote) continue;
+      const key = generalizeCommand(quote, { tool: entry.tool });
+      if (!key) continue;
+      entries.push({ episodeId, key, seq: entry.seq, quote, occurredAt: Number.isFinite(entry.occurredAt) ? entry.occurredAt : null });
+    }
+  }
+  for (const entry of entries) {
+    if (!groups.has(entry.key)) groups.set(entry.key, []);
+    groups.get(entry.key).push(entry);
+  }
+  const out = [];
+  let index = 0;
+  for (const [key, list] of [...groups.entries()].sort((a, b) => (b[1].length - a[1].length) || a[0].localeCompare(b[0], 'en'))) {
+    const episodeIds = [...new Set(list.map((x) => x.episodeId))].filter((id) => byId.has(id));
+    if (episodeIds.length < Math.max(2, minEpisodes)) continue;
+    index += 1;
+    const steps = [...list]
+      .sort((a, b) => (a.seq - b.seq) || a.episodeId.localeCompare(b.episodeId, 'en'))
+      .slice(0, Math.max(2, maxSteps))
+      .map((x, i) => ({
+        n: i + 1,
+        action: key,
+        expect: 'success(exit-code)',
+        source: { episode: x.episodeId, nodeId: null, edgeId: null, seq: x.seq, quote: clip(x.quote, 200) },
+        occurredAt: x.occurredAt,
+      }));
+    out.push({
+      id: `j-ref-${index}`,
+      version: 1,
+      layer: 'reference',
+      entersV1: false,
+      title: `${key}（参考层：${episodeIds.length} 局）`,
+      steps,
+      preconditions: [{ check: 'step-range', value: clip(steps[0].source.quote, 120), why: '泛化签名只作参考：原命令参数/目录不保证复现' }],
+      assumptions: ['命令成功由退出码判定，不代表产物正确'],
+      support: episodeIds,
+      counter: [],
+      state: 'candidate',
+      supersedes: null,
+      recordedAt: Number.isFinite(now) ? now : Date.now(),
+      updatedAt: Number.isFinite(now) ? now : Date.now(),
+    });
+  }
+  return out;
+}

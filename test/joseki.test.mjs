@@ -223,3 +223,35 @@ test('R08: 确定性 + 不改写入参 + now 落 recordedAt', () => {
 
   assert.throws(() => promoteJoseki({ episodes: null }), JosekiError);
 });
+
+// ---------------------------------------------------------------------------
+// Q17-C 参考层（泛化签名；只作 candidate，不进 V1）
+// ---------------------------------------------------------------------------
+test('Q17-C: generalizeCommand 把命令与 JSON 参数泛化成「工具+操作类」', async () => {
+  const { generalizeCommand } = await import('../src/rooms/joseki.mjs');
+  assert.equal(generalizeCommand('node --test'), 'cmd:node test');
+  assert.equal(generalizeCommand('git status'), 'cmd:git status');
+  assert.equal(generalizeCommand('{"path":"repos/o/r/commits?per_page=5"}', { tool: 'github' }), 'tool:github commits');
+  assert.equal(generalizeCommand('{"command":"ls"}'), 'tool:tool command');
+  assert.equal(generalizeCommand('随便一句中文'), null);
+  assert.equal(generalizeCommand(''), null);
+});
+
+test('Q17-C: 参考层候选要求 ≥3 局支撑，且不进 V1、必须带 preconditions', async () => {
+  const { promoteReferenceJoseki } = await import('../src/rooms/joseki.mjs');
+  const episodes = [{ id: 'ep-1' }, { id: 'ep-2' }, { id: 'ep-3' }];
+  const sig = (seq, quote) => ({ successes: [], commandSuccesses: [{ seq, quote, tool: 'bash', occurredAt: seq }] });
+  const two = { 'ep-1': sig(1, 'node --test'), 'ep-2': sig(2, 'node --test --watch') };
+  assert.equal(promoteReferenceJoseki({ episodes, signals: two, now: 1 }).length, 0, '2 局不足以进参考层');
+  const three = { ...two, 'ep-3': sig(3, 'node --test') };
+  const list = promoteReferenceJoseki({ episodes, signals: three, now: 1 });
+  assert.equal(list.length, 1);
+  const j = list[0];
+  assert.equal(j.id, 'j-ref-1');
+  assert.equal(j.layer, 'reference');
+  assert.equal(j.entersV1, false);
+  assert.equal(j.state, 'candidate');
+  assert.equal(j.support.length, 3);
+  assert.ok(j.preconditions.length >= 1, '必须带 preconditions');
+  for (const step of j.steps) assert.ok(step.source.episode && step.source.seq && step.source.quote);
+});
