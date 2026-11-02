@@ -252,6 +252,9 @@ export function buildLinks({ episodes = [], topics = null, options = {} } = {}) 
         if (view.kind !== 'error') continue;
         // 「exit code 1」这类合成标记只说明命令失败，不构成「同一报错原文」
         if (isGenericErrorKey(view.key)) continue;
+        // 类级主题（class:*）只用于「跨会话共享同类坑」的 shared-topic 边；
+        // 它不能冒充「同一报错原文」，否则同一对棋谱会出现两条 same-error（2026-11-02 实测）。
+        if (String(view.key).startsWith('class:')) continue;
         const occ = firstOccurrence(view);
         if (!occ) continue;
         errorIds.push({ id: view.id, key: view.key, occ });

@@ -2,6 +2,20 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.24.0（2026-11-02）
+
+### 错误类表 5 → 8 类
+新增 `module-missing`（Cannot find module / ERR_MODULE_NOT_FOUND）、`permission-denied`（EACCES/EPERM）、`timeout`（timed out/ETIMEDOUT）。
+
+### 修：class 主题不再冒充 same-error
+`class:*` 主题只建 shared-topic 边；否则同一对棋谱会出现两条 same-error（R05 实测 2 !== 1）。
+
+### 回退：N2 多词兜底
+该分支从未执行（S10 单条词兜底先命中），已删；A2 当时的 +0.36pp 属语料刷新噪声，见 `evidence/M7-N2-rejected.md`。
+
+### 实测
+A2 **23.61% → 24.32%**（+0.71pp，n=148）；A1 0.00%；A4 p50 2.30ms；A5 0.00%；A6 100%。
+
 ## 0.23.0（2026-11-02）
 
 ### 首条消息的类级错误信号（D2 类主题的消费方）

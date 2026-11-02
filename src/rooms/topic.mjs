@@ -232,6 +232,9 @@ const ERROR_CLASS_RULES = [
   ['policy-human-turn', /requires a direct human turn/i],
   ['sandbox-limit', /team member limit|tool call aborted|timed out after/i],
   ['web-search-empty', /web_search_tool_result blocks/i],
+  ['module-missing', /cannot find module|err_module_not_found/i],
+  ['permission-denied', /EACCES|EPERM|permission denied/i],
+  ['timeout', /timed out|timeout|ETIMEDOUT/i],
 ];
 
 /** 类级错误 key；没有匹配返回 null（只连已知协议类，避免把一次性报错并进来）。 */
