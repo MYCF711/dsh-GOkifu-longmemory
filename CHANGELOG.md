@@ -2,6 +2,20 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.34.0（2026-11-02）
+
+### 修：claim 的类表与 topic 的类表不一致
+- `claim.mjs` 的 `ERROR_CLASSES` 只有 5 类，而 `topic.mjs` 有 8 类 ⇒ `module-missing` / `permission-denied` /
+  `timeout` 在**卷**里能成主卷，却从不合并成类级 claim（实测 `class:module-missing` 有 7 局，但无对应 claim）。
+- 现已对齐到 8 类。注意：历史 claim 是只增不改的，旧库里的逐条 claim 不会回溯合并，**只对后续归档生效**。
+
+### 尝试并回退
+- 为 5 条不可召回样本试加 `path-not-found` / `edit-anchor-missing` / `network-blocked` 三类：
+  A2b 严格 **无变化（12/17）**，已回退，不进代码。
+
+### 验证
+360 条测试全绿；A2b 严格仍 70.59%；知识库新增 `docs/调研/12-LangMem`。
+
 ## 0.33.0（2026-11-02）
 
 ### A2b 严格口径 47.06% → 70.59%
