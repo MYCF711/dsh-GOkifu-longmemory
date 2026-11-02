@@ -237,12 +237,12 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
       const covered = Array.isArray(record?.support) ? record.support.some((x) => prior.has(String(x?.episode ?? ''))) : false;
       if (covered) {
         hit = true;
-        // 严格口径：claim 文本也要和该签名有 ≥2 个判别词重合（否则只是"大类覆盖"，不保证说的是这件事）
+        // 严格口径：只要**任一**覆盖该签名的 claim 文本与其有 ≥2 个判别词重合就算命中
+        // （早期实现取第一条覆盖 claim 就 break，会把"类级章节也在卡里"的情况误判为失分）
         const text = String(record?.text ?? '').toLowerCase();
         const tokens = String(item.sig).toLowerCase().split(/[^a-z0-9一-鿿]+/).filter((t) => t.length >= 4 && t !== 'path');
         const overlap = tokens.filter((t) => text.includes(t)).length;
         if (overlap >= 2) specific = true;
-        break;
       }
     }
     if (!hit) {
