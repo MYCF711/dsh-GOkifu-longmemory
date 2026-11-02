@@ -208,6 +208,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } 
   if (eligible.length === 0) return { n: 0, hits: 0, recall: null, sameScopeEligible: 0, recallSameScope: null, sampled: [] };
   const use = eligible.slice(0, limit);
   let hits = 0;
+  let specificHits = 0;
   const sampled = [];
   for (const item of use) {
     const scope = item.scopeKey ?? null;
@@ -218,11 +219,32 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } 
     const section = String(card?.section ?? '');
     const prior = priorEpisodes.get(item.sig) ?? new Set();
     let hit = false;
-    for (const line of section.split(String.fromCharCode(10))) {
-      const m = PROVENANCE_LINE_RE.exec(line);
-      if (m && prior.has(m[3])) { hit = true; break; }
+    let specific = false;
+    // 主判据：卡片里的 **claim** 是否覆盖当年那条（support 命中 prior episodes）——
+    // 这才是「教训被召回了」；只认展示行会漏掉"claim 只显示一个代表局"的情况。
+    for (const row of Array.isArray(card?.claims) ? card.claims : []) {
+      const id = typeof row?.claimId === 'string' ? row.claimId : null;
+      if (!id) continue;
+      const record = store.get('claims', id);
+      const covered = Array.isArray(record?.support) ? record.support.some((x) => prior.has(String(x?.episode ?? ''))) : false;
+      if (covered) {
+        hit = true;
+        // 严格口径：claim 文本也要和该签名有 ≥2 个判别词重合（否则只是"大类覆盖"，不保证说的是这件事）
+        const text = String(record?.text ?? '').toLowerCase();
+        const tokens = String(item.sig).toLowerCase().split(/[^a-z0-9一-鿿]+/).filter((t) => t.length >= 4 && t !== 'path');
+        const overlap = tokens.filter((t) => text.includes(t)).length;
+        if (overlap >= 2) specific = true;
+        break;
+      }
+    }
+    if (!hit) {
+      for (const line of section.split(String.fromCharCode(10))) {
+        const m = PROVENANCE_LINE_RE.exec(line);
+        if (m && prior.has(m[3])) { hit = true; break; }
+      }
     }
     if (hit) hits += 1;
+    if (specific) specificHits += 1;
     sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, sameScope: [...prior].some((id) => scopeOf.get(id) === scope) });
   }
   const sameScopeSampled = sampled.filter((x) => x.sameScope).length;
@@ -230,7 +252,9 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } 
   return {
     n: use.length,
     hits,
+    specificHits,
     recall: use.length ? hits / use.length : null,
+    recallSpecific: use.length ? specificHits / use.length : null,
     sameScopeEligible,
     sameScopeSampled,
     sameScopeHits,
@@ -277,7 +301,7 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
       n,
       status: measured ? 'measured' : 'not-consumed',
       caveat: measured
-        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout** rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}）；**注入召回 A2b** recall=${injectionRecall && Number.isFinite(injectionRecall.recall) ? pct(injectionRecall.recall) : 'n/a'}（${injectionRecall?.hits ?? '?'}/${injectionRecall?.n ?? '?'}；其中同域可达 ${injectionRecall?.sameScopeHits ?? '?'}/${injectionRecall?.sameScopeSampled ?? '?'}）`
+        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout** rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}）；**注入召回 A2b** 覆盖=${injectionRecall && Number.isFinite(injectionRecall.recall) ? pct(injectionRecall.recall) : 'n/a'}（${injectionRecall?.hits ?? '?'}/${injectionRecall?.n ?? '?'}）· **严格**=${injectionRecall && Number.isFinite(injectionRecall.recallSpecific) ? pct(injectionRecall.recallSpecific) : 'n/a'}（${injectionRecall?.specificHits ?? '?'}/${injectionRecall?.n ?? '?'}，claim 文本与该错误 ≥2 词重合）`
         : 'LOO 分母为 0（没有可评测的失败签名）⇒ 不写 0',
       detail: {
         holdout,
