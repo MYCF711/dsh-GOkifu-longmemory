@@ -57,6 +57,7 @@ export function compare(ledger, actual) {
   if (has(ledger.threads) && has(actual.threads) && ledger.threads !== actual.threads) bad.push(`卷：台账 ${ledger.threads} vs 实测 ${actual.threads}`);
   if (has(ledger.episodes) && has(actual.episodes) && ledger.episodes !== actual.episodes) bad.push(`局数：台账 ${ledger.episodes} vs 实测 ${actual.episodes}`);
   // 波动量给容差（同一命令两次测量：A4 p50 抖 ±0.5ms，A2 随语料微动 ±0.5pp）
+  // A2 在 26.5–26.8% 之间随 pipeline 时间窗微动（2026-11-02 实测抖动 ±0.15pp）⇒ 容差 0.5pp
   if (has(ledger.a2) && has(actual.a2) && Math.abs(ledger.a2 - actual.a2) > 0.5) bad.push(`A2：台账 ${ledger.a2}% vs 实测 ${actual.a2}%（容差 0.5pp）`);
   // A4 单次抖动可达 ±2ms（GC/冷热），台账写的是 3 次中位数 ⇒ 容差 3ms（已在台账注明）
   if (has(ledger.a4) && has(actual.a4) && Math.abs(ledger.a4 - actual.a4) > 3) bad.push(`A4 p50：台账 ${ledger.a4}ms vs 实测 ${actual.a4}ms（容差 3ms，单次抖动）`);
@@ -119,6 +120,12 @@ if (invoked) {
     actual.a2 = Number.isFinite(a2) ? Number((a2 * 100).toFixed(2)) : null;
     actual.a4 = Number.isFinite(a4) ? Number(a4.toFixed(2)) : null;
   } catch { actual.a2 = null; actual.a4 = null; }
+  // 安装指南不得写死版本号/测试条数（2026-11-02 audit-04：这正是「按它安装」最先读到的文件）
+  try {
+    const guide = read('docs/安装指南.md');
+    if (/\d+\.\d+\.\d+/.test(guide)) bad.push('docs/安装指南.md：不要写死版本号（指向 MAINTENANCE）');
+    if (/\d+\s*条/.test(guide)) bad.push('docs/安装指南.md：不要写死测试条数（指向 MAINTENANCE）');
+  } catch { /* 没这文件就不管 */ }
   // AGENTS §7 指针 + 不含测试条数
   const agents = read('AGENTS.md');
   const sec7 = agents.slice(agents.indexOf('## 7 ·'), agents.indexOf('## 8 ·'));
