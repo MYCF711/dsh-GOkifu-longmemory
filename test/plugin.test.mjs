@@ -698,3 +698,34 @@ test('D5: 同类失败第二次出现才触发，且每会话只补一次', asyn
   assert.equal(third.messages.some((m) => String(m.content?.[0]?.text ?? '').startsWith('CARD:')), false, '每会话最多补一次');
   assert.equal(injectedCount, 1);
 });
+
+// D5（2026-11-02 补）：闸不过时 D5 也不许强塞——它必须和首轮走同一套十道闸
+test('D5: 闸不通过 ⇒ 不补卡（不绕过十道闸）', async () => {
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const root = mkdtempSync(path.join(tmpdir(), 'kifu-d5-gate-'));
+  const { ctx, hooks } = makeCtx();
+  const res = apply(ctx, baseConfig({
+    storeRoot: root,
+    repeatHint: true,
+    repeatHintAfter: 2,
+    repeatHintMax: 1,
+    createUserMessage: (m) => ({ role: 'user', content: [{ type: 'text', text: `CARD:${m.content[0].text}` }] }),
+    deps: {
+      createStore: () => ({ list: () => [], get: () => null }),
+      walk: () => ({ hits: [{ episode: 'ep-x', seq: 1, occurredAt: 1, kind: 'failure', text: 'boom', why: ['x'] }], dropped: {} }),
+      buildMemoryCard: () => ({ section: '- [antipattern] boom', tokens: 12 }),
+      runGates: () => ({ ok: false, errors: ['imperative'] }),
+      createWalkCache: () => ({}),
+    },
+  }));
+  assert.equal(res.registered, true);
+  const session = { id: 's-d5-gate' };
+  const step = (texts) => hooks['agent/pre-step'](
+    { agent: { session }, messages: texts.map((t) => ({ role: 'user', content: [{ type: 'text', text: t }] })) },
+    async () => ({ kind: 'enter', messages: [{ role: 'assistant', content: [] }] }),
+  );
+  await step(['hello', 'Error: file has not been read — read the file, then retry']);
+  const second = await step(['hello', 'Error: file has not been read — read the file, then retry', 'step', 'Error: file changed since it was read — re-read the file, then retry']);
+  assert.equal(second.messages.some((m) => String(m.content?.[0]?.text ?? '').startsWith('CARD:')), false, '闸不过不得补卡');
+});
