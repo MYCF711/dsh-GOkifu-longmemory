@@ -258,3 +258,31 @@ test('D2: 同类「读-改协议」错误归一到同一 key，跨局合并成�
   assert.equal(errorKeyOf('Error: this goal operation requires a direct human turn on a top-level agent'), 'class:policy-human-turn');
   assert.equal(errorKeyOf('SyntaxError: missing ) after argument list').includes('class:'), false, '语法错误保留具体原文');
 });
+
+// N10（2026-11-02）：人纠错（L4）回填 —— 只加 counter + state=disputed，不改原文
+test('N10: L4 人纠错回填到目标 claim；非 L4 / 非 correct 不动', async () => {
+  const { applyAdjudications } = await import('../src/rooms/claim.mjs');
+  const claims = [
+    { id: 'c-1', kind: 'antipattern', text: '原文不许改', state: 'observed', support: [{ episode: 'ep-a', seq: 1, quote: 'q' }], counter: [] },
+    { id: 'c-2', kind: 'fact', text: 'other', state: 'observed', support: [], counter: [] },
+  ];
+  const adjudications = [
+    { id: 'ad-l4', target: 'c-1', level: 'L4-human-correction', decision: 'correct', at: 123, votes: [{ member: 'human:owner', human: true, verdict: 'oppose', evidence: [{ quote: '这条已经过时' }] }] },
+    { id: 'ad-l2', target: 'c-2', level: 'L2-multi-member', decision: 'correct', at: 124, votes: [] },
+    { id: 'ad-hold', target: 'c-2', level: 'L4-human-correction', decision: 'hold-disputed', at: 125, votes: [] },
+  ];
+  const out = applyAdjudications({ claims, adjudications });
+  assert.deepEqual(out.applied, ['c-1']);
+  const c1 = claims.find((c) => c.id === 'c-1');
+  assert.equal(c1.text, '原文不许改', '原文绝不改写');
+  assert.equal(c1.state, 'disputed');
+  assert.equal(c1.counter.length, 1);
+  assert.equal(c1.counter[0].episode, 'human:owner');
+  assert.equal(c1.counter[0].quote, '这条已经过时');
+  assert.equal(c1.correctedAt, 123);
+  assert.equal(claims.find((c) => c.id === 'c-2').state, 'observed', 'L2 / hold 不动 claim');
+
+  // 幂等：同一纠错重放两次不重复加 counter
+  applyAdjudications({ claims, adjudications });
+  assert.equal(claims.find((c) => c.id === 'c-1').counter.length, 1);
+});

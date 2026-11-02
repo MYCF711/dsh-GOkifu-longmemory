@@ -2,6 +2,20 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.29.0（2026-11-02）
+
+### N10 · 人纠错（L4）机械回填
+- 归档时读取 `adjudications/`：只认 `L4-human-correction + decision=correct`。
+- 给目标 claim 追加 counter（episode=`human:owner`、quote=纠错原文）、state 标 `disputed`；
+  **原文/support/条目都不改不删**，幂等重放不重复计数。
+- L2 裁决与 `hold-disputed` 不动 claim。
+
+### 说明
+本机当前 0 条 adjudication ⇒ 没有线上可回填样本；本轮 A2 显示 24.67% 属语料刷新，不计入 N10 收益。
+
+### 验证
+360 条测试（356 pass / 0 fail / 4 skip）；证据 `evidence/M7-N10-adjudications.md`。
+
 ## 0.28.0（2026-11-02）
 
 ### 新增 `cli audit`（只读健康检查）
