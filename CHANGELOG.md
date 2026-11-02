@@ -2,6 +2,19 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.35.0（2026-11-02）
+
+### 类级章节自愈
+- `claim.mjs`：`ensureClassClaims()` —— 有 ≥2 局支撑却缺类级 claim 的错误类，补一条 `class:<name> · <代表错误>`；
+  support 取各单条支撑的并集，id 由「类名 + 作用域」决定 ⇒ 幂等；**不删、不改写旧条目**。
+- 本机效果：有类级章节的类 **4/6 → 6/6**（补 module-missing、policy-human-turn）；claim 291 → 293。
+
+### 新增 `scripts/class-audit.mjs`（只读）
+- 每类：单条 claim 数 / 覆盖局数 / 是否已有类级章节 / 若受控重算可折叠多少条。
+
+### 验证
+361 条测试（357 pass / 0 fail / 4 skip）；A1/A5/A6 不变；证据 `evidence/M7-class-self-healing.md`。
+
 ## 0.34.0（2026-11-02）
 
 ### 修：claim 的类表与 topic 的类表不一致

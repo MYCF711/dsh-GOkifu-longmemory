@@ -468,6 +468,17 @@ export async function runArchive(opts = {}) {
     claims: claims.filter((r) => r && typeof r.id === 'string'),
   };
 
+  // 类级章节自愈（2026-11-02）：有 ≥2 局支撑、却缺类级 claim 的错误类，补一条（只增不改、幂等）。
+  try {
+    const healed = rooms.claim.ensureClassClaims({ claims: authoritative.claims });
+    if (healed.added.length > 0) {
+      authoritative.claims.push(...healed.added);
+      skipped.push(`classMerge: 补 ${healed.added.length} 条类级章节`);
+    }
+  } catch (err) {
+    skipped.push(`classMerge: 失败（${String(err?.message ?? err)}）`);
+  }
+
   // N10（2026-11-02）：人纠错（L4）回填 —— 只加 counter + 标 disputed，不改原文。
   try {
     const adjudicationDir = path.join(storeRoot, 'adjudications');
