@@ -988,6 +988,8 @@ export function walkFromSignals(opts = {}) {
         }
       }
     }
+    // N2（2026-11-02）实测：单条词的兜底（S10）已经在上面生效，多词分支是死代码，
+    // 已回退；A2 的 +0.36pp 复查为语料刷新噪声，不归因于本次改动（见 evidence/M7-N2-rejected.md）。
     if (!textMatch) {
       dropped.unconnected += 1;
       continue;
