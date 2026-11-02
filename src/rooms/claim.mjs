@@ -205,6 +205,9 @@ const ERROR_CLASSES = [
   ['sandbox-limit', /team member limit|tool call aborted|timed out after/i],
 
   ['web-search-empty', /web_search_tool_result blocks/i],
+  ['module-missing', /cannot find module|err_module_not_found/i],
+  ['permission-denied', /EACCES|EPERM|permission denied/i],
+  ['timeout', /timed out|timeout|ETIMEDOUT/i],
 
 ];
 
