@@ -2,6 +2,19 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.77.0（2026-11-03）
+
+### 一页状态摘要 `scripts/status-digest.mjs`
+- 一条命令汇总：版本/git → **三道质量门**（check / ledger-check / metrics-guard）→ 六轴 → 安装状态（install-doctor）
+  → **真实会话回放**（注入/沉默/跨作用域/p50·p95）→ 待决问题。
+- `--write <path>` 可直接落盘（如 `evidence/status-digest.md`）；`--json` 供脚本消费。
+- 工具会**复原 metrics-guard 的副作用**（`git checkout -- evidence/metrics-guard.json`），不污染工作树。
+- 用途：以后巡检不用手工拼状态；也方便主人一眼看到"现在到底怎么样"。
+
+### 验证
+`node scripts/status-digest.mjs` 实跑：check/ledger/guard 全 PASS、六轴在、回放 12 局注入 12、跨作用域 0；
+402 条测试全绿；`ledger-check --full PASS`。
+
 ## 0.76.1（2026-11-03）
 
 ### 调研索引 `docs/调研/00-索引与机制对照.md`
