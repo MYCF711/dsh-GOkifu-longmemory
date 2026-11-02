@@ -35,3 +35,11 @@ node --test                   → 388 条（384 pass / 0 fail / 4 skip）
 node scripts/metrics-guard.mjs → PASS · A1=0（空转：validity 覆盖 0） A5=0 A6=1 A2b严格=0.842(n=19) p50≈2ms
 node scripts/cli.mjs audit    → claim 322 / 卷 143 / 有效期已止 25 / 无支撑 0
 ```
+
+## audit-02 复核后的追加修正（2026-11-02 21:35）
+
+- **口径纠正**：26 条 `validFrom=null` 的 claim **都有 `occurredAt`**；它们是 0.58 之前由旧代码写入、且未被本次派生集覆盖的历史记录。此前写成"无 occurredAt"是错的，已改 `CHANGELOG`/`数据契约`/`MAINTENANCE`。
+- **披露**：归档会**重写派生 claim 记录**（同 id 覆盖）；审计观察到的 295 条重建即此行为，不是"回溯改写原件"，但此前未在证据里写明。
+- **P1-3 修复是真死断言**：`check.mjs` 里模板字符串 `\s` 退化成 `s`，正则永不命中。已改为**区间扫描**（§7 内出现"条测试"即红），并做过正反模拟验证。
+- **P1-4 补强**：仅 legacy protection 不足以"需 PR"（`required_pull_request_reviews=null`）。已新增 **ruleset**：pull_request（0 审批，单机可自合）+ required_status_checks(`rules`, strict) + deletion/non_fast_forward 阻断。
+- **P2**：删除 claim 测试里恒真的 `/^(class:...)?/` 断言；给 `metrics-guard` 的 `a1Vacuous` 补单测；台账 `0/23` → `0/26`。

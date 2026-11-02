@@ -80,7 +80,10 @@ test('R09: 失败边 → antipattern（support≥2 独立局 ⇒ candidate，tex
   assert.equal(c.state, 'candidate', '2 局独立支撑 ⇒ candidate');
   // 2026-11-02 审计 P1-2：类级映射的 claim 文本必须带 `class:<name> · ` 前缀
   assert.ok(c.text.endsWith(YAML_ERROR), 'text 以最早支撑局的错误原文结尾（逐字）');
-  assert.match(c.text, /^(class:[a-z-]+ · )?/, 'class: 前缀可有（错误类命中时必有）');
+  {
+    const key = String(errorKeyOf(c.text));
+    if (key.startsWith('class:')) assert.ok(c.text.startsWith(key), `命中错误类时正文必须以 ${key} 开头`);
+  }
   assert.deepEqual(c.support.map((s) => s.episode), ['ep-aaaaaaaa', 'ep-bbbbbbbb']);
   assert.equal(c.counters.support, 2);
   assert.equal(c.counters.counter, 0);

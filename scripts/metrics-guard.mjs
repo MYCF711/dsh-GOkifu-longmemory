@@ -28,8 +28,13 @@ export function judge(report, limits = LIMITS) {
   const axes = report?.axes ?? report ?? {};
   const fails = [];
   const a1 = axes.A1?.value;
-  const a1Coverage = axes.A1?.detail?.validityCoverage ?? axes.A1?.validityCoverage ?? null;
-  const a1Vacuous = Number.isFinite(a1) && Number.isFinite(a1Coverage) ? a1Coverage === 0 : Boolean(axes.A1?.caveat && String(axes.A1.caveat).includes('空转'));
+  // m5-report 的 A1.detail.validityCoverage 是对象 {withValidity, rendered, ratio}；
+  // 也兼容直接给数字的旧形态。ratio===0 ⇒ 空转（2026-11-02 审计 P1-5）。
+  const covRaw = axes.A1?.detail?.validityCoverage ?? axes.A1?.validityCoverage ?? null;
+  const a1Coverage = Number.isFinite(covRaw) ? covRaw : (Number.isFinite(covRaw?.ratio) ? covRaw.ratio : null);
+  const a1Vacuous = Number.isFinite(a1) && (a1Coverage === null
+    ? Boolean(axes.A1?.caveat && String(axes.A1.caveat).includes('空转'))
+    : a1Coverage === 0);
   const a5 = axes.A5?.value;
   const a6 = axes.A6?.value;
   const a4 = axes.A4?.value;
