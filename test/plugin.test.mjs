@@ -615,3 +615,14 @@ test('R16: 零配置自动建库 —— 库不存在时后台调 buildStore 一�
   assert.equal(calls, 1, '后台应当只建一次');
   assert.ok(warns.some((w) => w.includes('记忆库不存在')), warns.join(' | '));
 });
+
+test('R16: 设置页 schema —— 暴露 storeRoot（记忆库地址）等字段，validate 归一化', async () => {
+  const { Config } = await import('../src/plugin.mjs');
+  const schema = Config.toJSON();
+  assert.equal(schema.type, 'object');
+  assert.ok(schema.dict.storeRoot, '必须暴露 storeRoot，GUI 才能选地址');
+  assert.match(schema.dict.storeRoot.meta.description, /memory-context/);
+  assert.equal(Config['~standard'].validate({ storeRoot: ' D:/mem ' }).value.storeRoot, 'D:/mem');
+  assert.equal(Config['~standard'].validate({}).value.enabled, true);
+  assert.equal(Config['~standard'].validate(null).value.shadow, false);
+});

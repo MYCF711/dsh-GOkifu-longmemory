@@ -473,6 +473,35 @@ function walkCacheFor(storeRoot, store, deps) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// 设置页 schema（2026-11-02）：让设置 UI 能展示/选择"记忆库地址"等配置。
+// 形状与 dsh-unlag 的 Config 一致：type/dict/meta + ~standard.validate（不引入 schemastery）。
+// ---------------------------------------------------------------------------
+export const Config = {
+  type: 'object',
+  dict: {
+    enabled: { type: 'boolean', meta: { default: true, description: '启用记忆注入（关掉 = 完全静默）' } },
+    shadow: { type: 'boolean', meta: { default: false, description: '影子模式：只记录本来会注入什么，不真注入' } },
+    storeRoot: { type: 'string', meta: { default: '', description: '记忆库地址；留空 = <DSH_HOME>/memory-context（推荐留空）' } },
+    autoBuild: { type: 'boolean', meta: { default: true, description: '库不存在时后台自动建库（本次沉默）' } },
+    budgetTokens: { type: 'number', meta: { default: 500, description: '每次注入的 token 预算' } },
+    limit: { type: 'number', meta: { default: 5, description: '每次最多注入几条' } },
+    oncePerSession: { type: 'boolean', meta: { default: true, description: '每会话只注入一次（首轮）' } },
+  },
+  meta: { default: {} },
+  toJSON() {
+    return { type: 'object', dict: this.dict, meta: this.meta };
+  },
+  '~standard': {
+    version: 1,
+    vendor: 'dsh-gokifu-longmemory',
+    validate(value) {
+      const source = value !== null && typeof value === 'object' ? value : {};
+      return { value: sanitizeConfig(source) };
+    },
+  },
+};
+
 export function apply(ctx, rawConfig = {}) {
   const config = sanitizeConfig(rawConfig);
   const injected = new WeakSet(); // 每会话只注入一次（对象身份；WeakSet 不留引用）
