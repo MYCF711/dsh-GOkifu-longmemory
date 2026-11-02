@@ -2,6 +2,19 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.42.0（2026-11-02）
+
+### `scripts/re-enable.mjs` 加固：精准摘除
+- 旧版会「从标记注释截到文件末尾」（可能删掉后续配置），且只处理一条禁用条目。
+- 新版 `stripDisableBlock()`：只删含包名且 `disabled: true` 的条目块 + 相关注释，其余原样保留；
+  本机 dry-run 显示将摘除 **3 条**（1 条注释 + 2 条 disabled 条目）。
+
+### 验收路径
+退出 DSH → `node scripts/re-enable.mjs` → 重开 → `node scripts/install-doctor.mjs`（应显示「未见 disabled」）→ `metrics-guard`。
+
+### 验证
+373 条测试（369 pass / 0 fail / 4 skip）；证据 `evidence/M7-re-enable-hardening.md`。
+
 ## 0.41.0（2026-11-02）
 
 ### N9 · 卷首摘要（机械拼接）
