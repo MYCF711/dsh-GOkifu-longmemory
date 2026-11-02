@@ -4,16 +4,22 @@ window.__ModuleLoader__.load({ id: 'dsh-gokifu-longmemory', factory: (require) =
   const react = require('react');
   const h = react.createElement;
   const CONFIG_ROUTE = '/kifu-longmemory/config';
+  // 与 dshmarket 相同：按 document.baseURI 解析，兼容反向代理前缀与桌面 dsh-app:// 页面。
+  function api(path) {
+    const relative = String(path || '').replace(/^\/+/, '');
+    if (typeof document === 'undefined' || !document.baseURI) return `/${relative}`;
+    return new URL(relative, document.baseURI).pathname;
+  }
   const NS = 'dsh-gokifu-longmemory';
 
   async function loadConfig() {
-    const res = await fetch(CONFIG_ROUTE, { headers: { accept: 'application/json' } });
+    const res = await fetch(api(CONFIG_ROUTE), { headers: { accept: 'application/json' } });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   }
 
   async function saveConfig(patch) {
-    const res = await fetch(CONFIG_ROUTE, {
+    const res = await fetch(api(CONFIG_ROUTE), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(patch),
