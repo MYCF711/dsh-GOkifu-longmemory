@@ -274,3 +274,28 @@ test('R14: 参数与扫描的单元口径', () => {
   assert.equal(ep.closure.seqTo, 5);
   assert.ok(ep.degraded.length > 0, '降级必须标注，不假装是 R00');
 });
+
+// R14 · volumes（棋书视图）：类级主卷优先，其余按局数降序
+test('volumes：列出卷数与类级主卷，class:* 排在最前', async () => {
+  const { createStore } = await import('../src/rooms/persist.mjs');
+  const root = mkdtempSync(path.join(tmpdir(), 'kifu-vol-'));
+  try {
+    const store = createStore({ root });
+    store.ensureDirs();
+    store.putMany('threads', [
+      { id: 'th-a', title: 'exit code 1', scopeKey: 'w:d:/x', topics: ['t:error:a'], kifus: [], kifuCount: 19, createdAt: 1, updatedAt: 2 },
+      { id: 'th-b', title: 'class:fs-read-before-write', scopeKey: 'w:d:/x', topics: ['t:error:b'], kifus: [], kifuCount: 6, createdAt: 1, updatedAt: 2 },
+      { id: 'th-c', title: 'class:web-search-empty', scopeKey: 'w:d:/x', topics: ['t:error:c'], kifus: [], kifuCount: 4, createdAt: 1, updatedAt: 2 },
+    ], { at: 1 });
+    const res = await runCli(['volumes', '--store', root, '--json']);
+    assert.equal(res.code, 0);
+    const data = JSON.parse(res.stdout);
+    assert.equal(data.total, 3);
+    assert.equal(data.classVolumes, 2);
+    assert.equal(data.volumes[0].id, 'th-b', '主卷按局数排最前');
+    assert.equal(data.volumes[1].id, 'th-c');
+    assert.equal(data.volumes[2].id, 'th-a', '普通卷排在主卷之后');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

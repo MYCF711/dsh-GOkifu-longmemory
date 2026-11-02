@@ -28,6 +28,8 @@ export const USAGE = `棋院 CLI（R14）
   node scripts/cli.mjs index [--root <dir>] [--json]     渲染 index.md（写到 stdout，不落盘）
   node scripts/cli.mjs verify [--store <dir>] [--json]   校验记忆库 manifest/checksums
   node scripts/cli.mjs rebuild [--store <dir>] [--json] 从权威条目重算派生索引
+  node scripts/cli.mjs volumes [--store <dir>] [--limit <n>] [--json]
+                                                        卷（棋书视图）：类级主卷优先，其余按局数排序
   node scripts/cli.mjs inject --shadow --signal "<文本>" [--store <dir>] [--shadow-dir <dir>] [--json]
                                                         记忆卡（M3 影子模式：只记录，不注入模型上下文）
 
@@ -692,6 +694,32 @@ export async function runCli(argv = [], io = {}) {
       });
       if (flags.json) json({ markdown: md, episodes: corpus.episodes.length, links: corpus.links.length });
       else write(md);
+      return { code: 0, stdout, stderr: '' };
+    }
+
+    if (cmd === 'volumes') {
+      // 卷（棋书）只读视图：类级主卷优先，其余按局数降序；用于人工核对「成册」是否合理。
+      const storeRoot = path.resolve(flags.store ?? path.join(root, 'memory-context'));
+      if (!fs.existsSync(storeRoot)) {
+        return { code: 2, stdout: '', stderr: `记忆库不存在：${storeRoot}（先跑 node scripts/archive.mjs）` };
+      }
+      const { createStore } = await import('./persist.mjs');
+      const store = createStore({ root: storeRoot });
+      const threads = store.list('threads').map((r) => r.record);
+      const isClass = (t) => String(t?.title ?? '').startsWith('class:');
+      const top = [...threads]
+        .sort((a, b) => (isClass(b) ? 1 : 0) - (isClass(a) ? 1 : 0) || (b.kifuCount ?? 0) - (a.kifuCount ?? 0) || String(a.id).localeCompare(String(b.id)));
+      const limit = Number.isFinite(flags.limit) ? flags.limit : 10;
+      const shown = top.slice(0, limit);
+      if (flags.json) json({ total: threads.length, classVolumes: threads.filter(isClass).length, volumes: shown });
+      else {
+        const lines = [];
+        lines.push(`卷（棋书视图，只读）：${threads.length} 个 · 类级主卷 ${threads.filter(isClass).length} 个`);
+        for (const t of shown) {
+          lines.push(`- ${t.title} · ${t.kifuCount ?? 0} 局 · ${String(t.id)}${isClass(t) ? ' · 主卷' : ''}`);
+        }
+        write(lines.join(String.fromCharCode(10)));
+      }
       return { code: 0, stdout, stderr: '' };
     }
 
