@@ -53,6 +53,7 @@ import {
   writeShadow,
 } from './rooms/inject.mjs';
 import { probeValidity, validityKeyOf, runGates } from './rooms/gates.mjs';
+import { classifyErrorClass } from './rooms/claim.mjs';
 import { createStore } from './rooms/persist.mjs';
 import { createWalkCache } from './rooms/walk.mjs';
 
@@ -84,6 +85,9 @@ export const DEFAULT_CONFIG = Object.freeze({
   autoBuild: true,
   autoArchive: true,
   autoArchiveMinutes: 30,
+  repeatHint: true,
+  repeatHintAfter: 2,
+  repeatHintMax: 1,
   deps: null,
 });
 
@@ -163,6 +167,9 @@ export function sanitizeConfig(raw = {}) {
     autoBuild: boolOf(src.autoBuild, true),
     autoArchive: boolOf(src.autoArchive, true),
     autoArchiveMinutes: positiveInt(src.autoArchiveMinutes, 30, 24 * 60),
+    repeatHint: boolOf(src.repeatHint, true),
+    repeatHintAfter: positiveInt(src.repeatHintAfter, 2, 20),
+    repeatHintMax: positiveInt(src.repeatHintMax, 1, 5),
     deps: src.deps && typeof src.deps === 'object' && !Array.isArray(src.deps) ? src.deps : null,
   };
 }
@@ -530,6 +537,8 @@ export const Config = {
     autoBuild: { type: 'boolean', meta: { default: true, description: '库不存在时后台自动建库（本次沉默）' } },
     autoArchive: { type: 'boolean', meta: { default: true, description: '轮次收尾时按时间阈值自动刷新记忆库' } },
     autoArchiveMinutes: { type: 'number', meta: { default: 30, description: '自动刷新间隔（分钟）' } },
+    repeatHint: { type: 'boolean', meta: { default: true, description: '同一会话同类失败 ≥N 次时补一次事实卡（D5）' } },
+    repeatHintAfter: { type: 'number', meta: { default: 2, description: '同类失败达到几次才补卡' } },
     budgetTokens: { type: 'number', meta: { default: 500, description: '每次注入的 token 预算' } },
     limit: { type: 'number', meta: { default: 5, description: '每次最多注入几条' } },
     oncePerSession: { type: 'boolean', meta: { default: true, description: '每会话只注入一次（首轮）' } },
@@ -547,6 +556,56 @@ export const Config = {
     },
   },
 };
+
+
+// ---------------------------------------------------------------------------
+// D5（2026-11-02，主人批准）：同一会话里同类失败反复出现 ⇒ 补一次事实卡。
+// 触发条件全机械：只看新增消息里的错误行，按 D2 的类归并；每会话最多 repeatHintMax 次。
+// 注入内容仍走 decidePreStep → 十道闸，因此仍是事实、带 provenance、无祈使句。
+// ---------------------------------------------------------------------------
+function repeatErrorLine(text) {
+  const lines = String(text ?? '').split(String.fromCharCode(10));
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === '') continue;
+    if (/^error[:：]/i.test(line)) return line;
+    if (/\[exit code: [1-9][0-9]*\]/.test(line)) return line;
+  }
+  return null;
+}
+
+export function collectRepeatTrigger(state, messages) {
+  if (!state || !Array.isArray(messages)) return null;
+  const fresh = messages.slice(state.seen ?? 0);
+  state.seen = messages.length;
+  let trigger = null;
+  for (const message of fresh) {
+    const text = messageText(message);
+    if (!text) continue;
+    const line = repeatErrorLine(text);
+    if (!line) continue;
+    const cls = classifyErrorClass(line);
+    if (!cls) continue;
+    const rec = state.counts.get(cls) ?? { count: 0, quote: line };
+    rec.count += 1;
+    rec.quote = line;
+    state.counts.set(cls, rec);
+    if (rec.count >= (state.after ?? 2)) trigger = { cls, quote: line, count: rec.count };
+  }
+  return trigger;
+}
+
+function repeatStateFor(map, session, after) {
+  const key = typeof session?.id === 'string' ? session.id : (typeof session === 'string' ? session : null);
+  if (!key) return null;
+  let state = map.get(key);
+  if (!state) {
+    state = { seen: 0, counts: new Map(), injected: 0, after };
+    map.set(key, state);
+  }
+  state.after = after;
+  return state;
+}
 
 export const CONFIG_ROUTE = '/kifu-longmemory/config';
 
@@ -607,6 +666,7 @@ export function handleConfigRoute({ method = 'GET', body = null, profileConfig =
 export function apply(ctx, rawConfig = {}) {
   const config = resolveConfig(rawConfig);
   const injected = new WeakSet(); // 每会话只注入一次（对象身份；WeakSet 不留引用）
+  const repeatStates = new Map(); // D5：每个会话的「同类失败计数」
 
   if (typeof ctx?.on !== 'function') {
     warn(ctx, 'ctx.on 不可用（插件未挂载，宿主行为不变）');
@@ -673,6 +733,33 @@ export function apply(ctx, rawConfig = {}) {
       if (!Array.isArray(decision.messages)) return decision;
 
       const session = payload?.agent?.session ?? payload?.session ?? null;
+
+      // D5：先看这一刀有没有"同类失败反复"。它不受 oncePerSession 限制，但每会话有上限。
+      if (config.repeatHint && config.enabled && !config.shadow) {
+        try {
+          const state = repeatStateFor(repeatStates, session, config.repeatHintAfter);
+          if (state && state.injected < config.repeatHintMax) {
+            const trigger = collectRepeatTrigger(state, payload?.messages);
+            if (trigger) {
+              const deps5 = await resolveDeps(config);
+              const inner = await decidePreStep({
+                ctx,
+                config,
+                deps: deps5,
+                payload: { ...payload, messages: [{ role: 'user', content: [{ type: 'text', text: trigger.quote }] }] },
+                decision,
+              });
+              if (inner?.action === 'inject') {
+                state.injected += 1;
+                return inner.decision;
+              }
+            }
+          }
+        } catch (error) {
+          warn(ctx, `D5 补卡失败（继续本轮）：${String(error?.message ?? error)}`);
+        }
+      }
+
       if (config.oncePerSession && session && injected.has(session)) return decision;
 
       const deps = await resolveDeps(config);
