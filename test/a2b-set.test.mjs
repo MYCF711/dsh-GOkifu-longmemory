@@ -30,3 +30,19 @@ test('a2b-set: 输出稳定排序（sig, episode）', () => {
   const set = setFromReport({ primary: { rows } }, SPLIT);
   assert.deepEqual(set.items.map((i) => i.sig), ['a-sig', 'b-sig']);
 });
+
+test('a2b-set: --cross 只保留「无同域先例」的样本', () => {
+  const rows = [
+    { episode: 'ep-old-a', startedAt: 1, scopeKey: 'w:a', repeatSignatures: [], novelSignatures: ['sig-same'] },
+    { episode: 'ep-old-b', startedAt: 2, scopeKey: 'w:b', repeatSignatures: [], novelSignatures: ['sig-cross'] },
+    { episode: 'ep-new-a', startedAt: 2000, scopeKey: 'w:a', repeatSignatures: ['sig-same'], novelSignatures: [] },
+    { episode: 'ep-new-c', startedAt: 2001, scopeKey: 'w:c', repeatSignatures: ['sig-cross'], novelSignatures: [] },
+  ];
+  const all = setFromReport({ primary: { rows } }, SPLIT);
+  assert.equal(all.count, 2);
+  const cross = setFromReport({ primary: { rows } }, SPLIT, { onlyCrossScope: true });
+  assert.equal(cross.count, 1);
+  assert.equal(cross.items[0].sig, 'sig-cross');
+  assert.equal(cross.items[0].sameScope, false);
+  assert.equal(cross.version, 2);
+});

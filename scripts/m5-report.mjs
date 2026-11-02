@@ -183,7 +183,7 @@ export async function measureA1({ storeRoot, workspace, now, signals, crossScope
 //      看卡片是否真的指向**当年那条**（provenance 命中 prior episodes）。这是唯一衡量"记忆有没有用"的口径。
 // ---------------------------------------------------------------------------
 
-export function measureA2b({ store, report, splitAt, cache = null, limit = 30, frozen = null } = {}) {
+export function measureA2b({ store, report, splitAt, cache = null, limit = 30, frozen = null, walkOpts = {} } = {}) {
   const rows = Array.isArray(report?.primary?.rows) ? report.primary.rows : [];
   const priorEpisodes = new Map(); // signature -> Set(episode)
   const eligible = [];
@@ -215,6 +215,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
   const use = frozenItems ? frozenItems.slice(0, limit) : eligible.slice(0, limit);
   let hits = 0;
   let specificHits = 0;
+  let displayedHits = 0;
   const sampled = [];
   for (const item of use) {
     const scope = item.scopeKey ?? null;
@@ -222,12 +223,13 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     signal.scopeKey = scope;
     const cls = errorClassKeyOf(item.sig);
     if (cls) signal.entities.push({ kind: 'error', key: cls });
-    const walk = walkFromSignals({ signal, store, scope, cache, depth: 2, limit: 5, budgetTokens: 500 });
+    const walk = walkFromSignals({ signal, store, scope, cache, depth: 2, limit: 5, budgetTokens: 500, ...walkOpts });
     const card = buildMemoryCard({ signal, walkResult: walk, store, scope, limit: 5, budgetTokens: 500 });
     const section = String(card?.section ?? '');
     const prior = priorEpisodes.get(item.sig) ?? new Set();
     let hit = false;
     let specific = false;
+    let displayed = false;
     // 主判据：卡片里的 **claim** 是否覆盖当年那条（support 命中 prior episodes）——
     // 这才是「教训被召回了」；只认展示行会漏掉"claim 只显示一个代表局"的情况。
     for (const row of Array.isArray(card?.claims) ? card.claims : []) {
@@ -245,13 +247,12 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
         if (overlap >= 2) specific = true;
       }
     }
-    if (!hit) {
-      for (const line of section.split(String.fromCharCode(10))) {
-        const m = PROVENANCE_LINE_RE.exec(line);
-        if (m && prior.has(m[3])) { hit = true; break; }
-      }
+    for (const line of section.split(String.fromCharCode(10))) {
+      const m = PROVENANCE_LINE_RE.exec(line);
+      if (m && prior.has(m[3])) { displayed = true; hit = true; break; }
     }
     if (hit) hits += 1;
+    if (displayed) displayedHits += 1;
     if (specific) specificHits += 1;
     const isSameScope = item.sameScope !== undefined ? Boolean(item.sameScope) : [...prior].some((id) => scopeOf.get(id) === scope);
     sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, specific, sameScope: isSameScope });
@@ -262,6 +263,8 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     n: use.length,
     hits,
     specificHits,
+    displayedHits,
+    recallDisplayed: use.length ? displayedHits / use.length : null,
     recall: use.length ? hits / use.length : null,
     recallSpecific: use.length ? specificHits / use.length : null,
     sameScopeEligible,
