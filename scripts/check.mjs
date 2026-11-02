@@ -54,6 +54,16 @@ try {
   fail.push(`脱敏扫描跑不起来：${String(error?.message ?? error)}`);
 }
 
+// 边界静态审计（2026-11-02）：模型可见字面量里不得出现指令式/治理痕迹
+try {
+  const { auditRepo } = await import('./boundary-audit.mjs');
+  const hits = auditRepo();
+  if (hits.length) fail.push(`边界：${hits.length} 处（${hits.slice(0, 2).map((h) => `${h.file}:${h.line}[${h.word}]`).join(' ')}…）`);
+  else ok.push('boundary-audit 0 处');
+} catch (error) {
+  fail.push(`边界审计跑不起来：${String(error?.message ?? error)}`);
+}
+
 // 工作树干净检查只在 release.mjs 做，这里只报分支
 try { const br = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim(); ok.push(`branch=${br}`); } catch { fail.push('不是 git 仓库'); }
 
