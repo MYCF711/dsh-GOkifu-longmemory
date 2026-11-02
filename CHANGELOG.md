@@ -2,6 +2,24 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.18.0（2026-11-02）
+
+按当天真实样本（22 局 / 164 失败边 / 12 条跨局重复）落地 D2 + D3。
+
+### D2 · 同类协议错误合并
+- `errorKeyOf` 增加类映射：`fs-read-before-write` / `tool-unavailable` / `sandbox-limit` / `policy-human-turn` / `web-search-empty`。
+- 只合并环境/协议类；`SyntaxError`、`Cannot find module` 等保留具体原文。
+- 实测：读-改协议 10 条散 claim → **1 条 15 局支撑**；team limit → 9 局；goal-human-turn → 5 局。
+
+### D3 · 跨局重复优先
+- `compareHits` 顺序改为：档位 → depth → **repeat 降序** → weight → 时间。
+- 失败命中与 claim 用「路径归一后的错误原文」互相包含匹配，把 claim.support 的局数带到 hit 上。
+- 公开 hit 增加 `repeat` 字段（>1 = 反复踩过的坑）。
+
+### 验证
+- 352 条测试全绿（含 D2/D3 新测试）；`check PASS`。
+- 证据：`evidence/M6-D2D3.md`。
+
 ## 0.17.3（2026-11-02）
 
 新增 `scripts/re-enable.mjs`：一条命令恢复被临时禁用的插件。
