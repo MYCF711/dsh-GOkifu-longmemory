@@ -2,6 +2,17 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.51.0（2026-11-02）
+
+### 新增 `scripts/first-live.mjs`（首次上线复盘）
+- 一条命令把「注册状态 / 热路径抽测 / 六轴门槛 / 影子本来会注入什么 / D5 触发几次」合成
+  `evidence/first-live.md`，并给出 `liveReady` 判定（注册无禁用 + 门槛通过）。
+- 缺影子或遥测时明确写「不存在/没有遥测」，不编数字。
+- 本机当前输出：`liveReady=false（disabled=4，guard=PASS）` —— 如实反映"还没执行 re-enable"。
+
+### 验证
+383 条测试（379 pass / 0 fail / 4 skip）；`metrics-guard PASS`。
+
 ## 0.50.0（2026-11-02）
 
 ### 安装指南改成单页版
