@@ -453,7 +453,7 @@ function entryFromEpisode(hit, view) {
  * hits → 候选条目。缺 (episode, seq, occurredAt) 的条目**直接丢**（无源不入、无时不入），
  * 只计数进省略；这样记忆卡本身不会出现「有行没出处」的形态。
  */
-function collectEntries({ hits, view }) {
+function collectEntries({ hits, view, scope = null }) {
   const entries = [];
   let droppedNoProvenance = 0;
   let droppedNoText = 0;
@@ -464,6 +464,11 @@ function collectEntries({ hits, view }) {
     if (!hit || typeof hit !== 'object') continue;
     const claim = pickClaim(hit, view);
     const entry = claim ? entryFromClaim(hit, claim) : entryFromEpisode(hit, view);
+    if (entry && scope) {
+      const rec = view.episodesById.get(String(hit?.episode ?? ''));
+      const epScope = rec && typeof rec.scopeKey === 'string' ? rec.scopeKey : null;
+      if (epScope && epScope !== scope) entry.crossScope = true;
+    }
     if (!entry) {
       if (claim && !clipLine(claim.text)) droppedNoText += 1;
       else droppedNoProvenance += 1;
@@ -502,7 +507,8 @@ export function displayPath(p) {
 
 function renderEntryLine(entry, clip) {
   const body = clipLine(entry.rawText, clip);
-  return `- [${entry.marker}] ${body} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})`;
+  const flag = entry.crossScope ? ' [跨项目]' : '';
+  return `- [${entry.marker}] ${body}${flag} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})`;
 }
 
 function renderSection({ entries, beyond, droppedProvenance, limit, budgetTokens, clip, withMarkers = true, droppedCrossScope = 0, droppedUnknownScope = 0, scopeKey = null }) {
@@ -601,7 +607,7 @@ export function buildMemoryCard({
     };
   }
 
-  const { entries, dropped } = collectEntries({ hits, view });
+  const { entries, dropped } = collectEntries({ hits, view, scope: scopeKey });
   const sorted = entries.slice().sort(compareEntries);
   const droppedProvenance = dropped.noProvenance + dropped.noText;
 

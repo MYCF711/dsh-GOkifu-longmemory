@@ -86,6 +86,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   autoBuild: true,
   autoArchive: true,
   autoArchiveMinutes: 30,
+  crossScopeClass: false,
   repeatHint: true,
   repeatHintAfter: 2,
   repeatHintMax: 1,
@@ -168,6 +169,7 @@ export function sanitizeConfig(raw = {}) {
     autoBuild: boolOf(src.autoBuild, true),
     autoArchive: boolOf(src.autoArchive, true),
     autoArchiveMinutes: positiveInt(src.autoArchiveMinutes, 30, 24 * 60),
+    crossScopeClass: boolOf(src.crossScopeClass, false),
     repeatHint: boolOf(src.repeatHint, true),
     repeatHintAfter: positiveInt(src.repeatHintAfter, 2, 20),
     repeatHintMax: positiveInt(src.repeatHintMax, 1, 5),
@@ -408,7 +410,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   const cache = deps.walk ? walkCacheFor(storeRoot, store, deps) : null;
   let walk = null;
   if (deps.walk) {
-    walk = deps.walk({ signal, store, scope, cache, depth: 2, limit: config.limit, budgetTokens: config.budgetTokens }) ?? null;
+    walk = deps.walk({ signal, store, scope, cache, depth: 2, limit: config.limit, budgetTokens: config.budgetTokens, allowCrossScopeClass: config.crossScopeClass === true }) ?? null;
   }
   if (!walk) {
     const { degradedWalk } = await import('./rooms/inject.mjs');
@@ -547,6 +549,7 @@ export const Config = {
     autoBuild: { type: 'boolean', meta: { default: true, description: '库不存在时后台自动建库（本次沉默）' } },
     autoArchive: { type: 'boolean', meta: { default: true, description: '轮次收尾时按时间阈值自动刷新记忆库' } },
     autoArchiveMinutes: { type: 'number', meta: { default: 30, description: '自动刷新间隔（分钟）' } },
+    crossScopeClass: { type: 'boolean', meta: { default: false, description: '类级章节允许跨工作区先例（卡片标 [跨项目]；Q18 裁定前默认关）' } },
     repeatHint: { type: 'boolean', meta: { default: true, description: '同一会话同类失败 ≥N 次时补一次事实卡（D5）' } },
     repeatHintAfter: { type: 'number', meta: { default: 2, description: '同类失败达到几次才补卡' } },
     budgetTokens: { type: 'number', meta: { default: 500, description: '每次注入的 token 预算' } },

@@ -501,6 +501,7 @@ export function measureA5({ pipeline, cards, episodes }) {
   let lines = 0;
   let leakLines = 0;
   let cardCrossScope = 0;
+  let crossMarkedLines = 0;
   const leaks = [];
   const currentScope = pipeline.scope;
   for (const item of use) {
@@ -527,6 +528,7 @@ export function measureA5({ pipeline, cards, episodes }) {
     value: measured ? rate : null,
     unit: 'rate',
     n: lines,
+    crossMarkedLines,
     status: measured ? 'measured' : 'not-consumed',
     caveat: measured
       ? `卡片 ${use.length} 张 / 渲染行 ${lines}；walk 拒掉跨域 ${pipeline.walkCrossScope} 条、缺域 ${pipeline.walkScopeMissing} 条；卡内跨域计数 ${cardCrossScope}；独立复核越界行 ${leakLines}（应为 0）`

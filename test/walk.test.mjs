@@ -847,3 +847,44 @@ test('error-class signal: 类级实体按 exact 命中 class 主题（score=1）
   assert.equal(matches[0].score, 1);
   assert.equal(matches[0].matchedBy, 'entity');
 });
+
+// Q18 预留（2026-11-02）：类级章节跨域证据 —— 默认关闭；打开后行尾带 [跨项目]
+test('Q18: allowCrossScopeClass 关闭时类级 claim 不用跨域证据；打开时才挂并标 [跨项目]', async () => {
+  const { walkFromSignals } = await import('../src/rooms/walk.mjs');
+  const { buildMemoryCard } = await import('../src/rooms/inject.mjs');
+  const { createStore } = await import('../src/rooms/persist.mjs');
+  const { mkdtempSync } = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const root = mkdtempSync(path.join(os.tmpdir(), 'kifu-q18-'));
+  const OTHER = 'w:e:/other-project';
+  try {
+    const store = createStore({ root, now: T0 });
+    store.ensureDirs();
+    store.putMany('episodes', [
+      { id: 'ep-here', scopeKey: SCOPE, sessionId: 's1', startedAt: T0, endedAt: T0 + 10, firstEventAt: T0, lastEventAt: T0 + 10, recordedAt: T0 },
+      { id: 'ep-away', scopeKey: OTHER, sessionId: 's2', startedAt: T0 + 20, endedAt: T0 + 30, firstEventAt: T0 + 20, lastEventAt: T0 + 30, recordedAt: T0 + 20 },
+    ], { at: T0 });
+    store.putMany('topics', [{ id: 't:error:fs', kind: 'error', key: 'class:fs-read-before-write', df: 2, firstSeenAt: T0, lastSeenAt: T0 }], { at: T0 });
+    store.putMany('links', [{
+      id: 'link-q18', a: { episode: 'ep-here' }, b: { episode: 'ep-away' },
+      kind: 'shared-topic', topics: ['t:error:fs'], why: 'class:fs-read-before-write', weight: 1, occurredAt: T0 + 21,
+    }], { at: T0 });
+    store.putMany('claims', [{
+      id: 'c-class', kind: 'antipattern', text: 'class:fs-read-before-write · file has not been read', state: 'candidate',
+      scopeKey: SCOPE, support: [{ episode: 'ep-away', seq: 3, quote: 'file has not been read', occurredAt: T0 + 20 }],
+      counter: [], occurredAt: T0 + 20, recordedAt: T0 + 20,
+    }], { at: T0 });
+
+    const signal = { kind: 'root-message', terms: [], entities: [{ kind: 'error', key: 'class:fs-read-before-write' }], at: T0 + 40 };
+    const off = walkFromSignals({ signal, store, scope: SCOPE, limit: 5, budgetTokens: 500 });
+    assert.equal((off.hits ?? []).some((h) => h.claim === 'c-class'), false, '默认不允许跨域证据');
+
+    const on = walkFromSignals({ signal, store, scope: SCOPE, limit: 5, budgetTokens: 500, allowCrossScopeClass: true });
+    assert.ok((on.hits ?? []).some((h) => h.claim === 'c-class'), '开关打开后应挂上类级 claim');
+    const card = buildMemoryCard({ signal, walkResult: on, store, scope: SCOPE, limit: 5, budgetTokens: 500 });
+    assert.match(String(card.section ?? ''), /\[跨项目\]/, '卡内跨域行必须带 [跨项目] 标记');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

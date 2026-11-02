@@ -927,11 +927,26 @@ export function walkFromSignals(opts = {}) {
       // 直接挂在跨域棋谱上会让卡片出现越界行（A5 独立复核 = 9 行，2026-11-02）。
       const evidenceEpisode = episodeById.get(entry.episode);
       // 当前无作用域（只放用户层）时不做这条检查：u: 层本来就是全局可见。
-      if (currentScope !== null && evidenceEpisode && !allowRecord(evidenceEpisode, `episodes:${entry.episode}`)) continue;
+      // 2026-11-02（Q18 预留，默认关）：开关打开时，**类级章节**允许用跨工作区先例承载证据，
+      // 由 inject 在行尾标 `[跨项目]`，A5 统计时单独分桶。
+      const crossClassAllowed = opts.allowCrossScopeClass === true && String(claim?.text ?? '').startsWith('class:');
+      if (currentScope !== null && evidenceEpisode && !crossClassAllowed && !allowRecord(evidenceEpisode, `episodes:${entry.episode}`)) continue;
       attached = hit;
       attachedDepth = hit.depth;
       attachedNodeId = typeof entry.nodeId === 'string' && entry.nodeId !== '' ? entry.nodeId : null;
       attachedSeq = finiteNumber(entry.seq) ? entry.seq : null;
+    }
+
+    // Q18（2026-11-02，默认关）：类级章节允许**直接**用跨工作区的支撑局做证据，
+    // 不要求该局本身在本次命中里（跨域棋谱会被作用域闸挡掉，否则永远挂不上）。
+    if (!attached && opts.allowCrossScopeClass === true && String(claim?.text ?? '').startsWith('class:')) {
+      const entry = support.find((x) => episodeById.has(String(x?.episode ?? '')));
+      if (entry) {
+        attached = { episode: String(entry.episode), depth: 1, why: ['class:cross-scope'], via: [], weight: 0.5 };
+        attachedDepth = 1;
+        attachedNodeId = typeof entry.nodeId === 'string' && entry.nodeId !== '' ? entry.nodeId : null;
+        attachedSeq = finiteNumber(entry.seq) ? entry.seq : null;
+      }
     }
 
     const occurredAt = claimTime(claim, attached);
