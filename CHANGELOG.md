@@ -2,6 +2,15 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.74.1（2026-11-03）
+
+### 调研清单漂移修复 + 守卫
+- `MAINTENANCE.md` 知识库清单只列到 `19-HippoRAG`，实际已有 **24 篇**（20-RAPTOR/21-CRAG/22-LongMemEval/23-Self-RAG/24-MemoRAG 漏列）。
+- `check.mjs` 新增守卫：**docs/调研 下每个编号都必须在 MAINTENANCE 或 AGENTS 里被提到**，缺一个就红（防止"写了调研却没进台账"）。
+
+### 验证
+检查器输出 `调研清单 24 篇`；401 条测试全绿；`ledger-check --full PASS`。
+
 ## 0.74.0（2026-11-03）
 
 ### N6 否决：机械查询扩展赢不过安慰剂

@@ -10,27 +10,27 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-gokifu-longmemory`（**公开**；main 由 ruleset 保护：必须经 PR + required check `rules`，禁 force push/删除；单机单人，不强制审批） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
-| 当前版本 | `0.74.0` |
+| 当前版本 | `0.74.1` |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
 ## 二、当前状态（2026-11-02 20:40 · 整点巡检）
 
 ```
-分支         main = 0.74.0；功能分支 → PR → CI → 合并 → release（--require-ci）
+分支         main = 0.74.1；功能分支 → PR → CI → 合并 → release（--require-ci）
 里程碑       M6 记忆质量收口：D1/D2/D3/D5/N10 已发布；A1/A5 回归已修；类级主卷 + volumes/audit 已上线
 插件         `cordis.patch.yml` 里两条 `disabled: true`；新版 `scripts/re-enable.mjs` 先 `--dry-run` 看「摘除 3 条」，再退出 DSH 执行，重开后 `install-doctor` 应显示「未见 disabled」（该行需重启才能实测；未重启时可先看 `re-enable --dry-run` 的「摘除 3 条」）
 ```
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | **401 条**（397 pass / 0 fail / 4 skip）[本] 2026-11-03 01:40 |
-| 六轴 | A1 **0.00%** · A2 **25.73%** · A3 not-live · A4 p50 **2.11ms（3 次中位数，单次抖动 ±2ms）** · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-03 01:40 · node scripts/m5-report.mjs` |
-| 语料 | 117 局 / **143 卷** / **claim 322**（有效期已止 25；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-03 01:40 · node scripts/cli.mjs audit + store` |
+| 测试 | **401 条**（397 pass / 0 fail / 4 skip）[本] 2026-11-03 01:51 |
+| 六轴 | A1 **0.00%** · A2 **25.84%** · A3 not-live · A4 p50 **2.14ms（3 次中位数，单次抖动 ±2ms）** · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-03 01:51 · node scripts/m5-report.mjs` |
+| 语料 | 117 局 / **143 卷** / **claim 322**（有效期已止 25；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-03 01:51 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
-| 已发布 | 0.15.0 零配置默认开 → 0.15.1 改名脱敏 → 0.15.2 脱敏补漏 → 0.16 配置 schema → 0.17.0 设置页 → 0.17.1/0.17.2/0.17.3 设置页修 → 0.18 D2/D3 → 0.19 D1 → 0.19.1 D4 否决 → 0.20 A1/A5 修复 → 0.21 D5 → 0.22 类级主题 → 0.23 类级信号 → 0.24 类表 8 类 → 0.25 设置页库状态 → 0.26 类级主卷 → 0.27 cli volumes → 0.28 cli audit → 0.29 N10 人纠错回填 → 0.30 A2 holdout → 0.31 A2b → 0.32 A2b 两口径 → 0.33 A2b 严格 70.59% → 0.34 claim 类表对齐 → 0.35 类级章节自愈 → 0.36 指标护栏 → 0.37 N1 双时态 → 0.38 宿主仿真 → 0.39 install-doctor → 0.40 方案 §8.2c/8.2d → 0.41 N9 卷首摘要 → 0.42 re-enable 精准摘除 → 0.43 A2b 冻结评估集 → 0.44 A2b 严格判据修正 → 0.45 D5 遥测 → 0.46 调研 15 Graphiti → 0.47 cli facts --at → 0.48 A2b 跨项目分桶 → 0.49 Q18 预留开关 → 0.50 安装指南单页版 → 0.51 first-live → 0.52 调研 16 → 0.53 数据契约补齐 → 0.54 Q18 预演 → 0.55 调研 17 Hindsight → 0.56 调研 18 → 0.57 D5 影子遥测 → 0.58 audit-01 修复 → 0.59 audit-02 修复 + 调研 19 → 0.60 台账自证 ledger-check → 0.61 ledger-sync + --full 闭环 → 0.62 audit-04 修复 → 0.63 audit-05 → 0.64 audit-06 → 0.65 boundary-audit（P2-8 清）→ 0.65.1 样本改名 + 调研 21 → 0.66 调研 22 → 0.67 安装彩排 → 0.68 D5 收口 → 0.69 A1 口径修正 → 0.69.1 调研 23 → 0.70 真实会话回放 → 0.71 A4 真实口径 → 0.72 偏好噪声测量 → 0.73 Q19-B 开关 → 0.73.1 调研 24 → 0.74 N6 否决（安慰剂对照） |
+| 已发布 | 0.15.0 零配置默认开 → 0.15.1 改名脱敏 → 0.15.2 脱敏补漏 → 0.16 配置 schema → 0.17.0 设置页 → 0.17.1/0.17.2/0.17.3 设置页修 → 0.18 D2/D3 → 0.19 D1 → 0.19.1 D4 否决 → 0.20 A1/A5 修复 → 0.21 D5 → 0.22 类级主题 → 0.23 类级信号 → 0.24 类表 8 类 → 0.25 设置页库状态 → 0.26 类级主卷 → 0.27 cli volumes → 0.28 cli audit → 0.29 N10 人纠错回填 → 0.30 A2 holdout → 0.31 A2b → 0.32 A2b 两口径 → 0.33 A2b 严格 70.59% → 0.34 claim 类表对齐 → 0.35 类级章节自愈 → 0.36 指标护栏 → 0.37 N1 双时态 → 0.38 宿主仿真 → 0.39 install-doctor → 0.40 方案 §8.2c/8.2d → 0.41 N9 卷首摘要 → 0.42 re-enable 精准摘除 → 0.43 A2b 冻结评估集 → 0.44 A2b 严格判据修正 → 0.45 D5 遥测 → 0.46 调研 15 Graphiti → 0.47 cli facts --at → 0.48 A2b 跨项目分桶 → 0.49 Q18 预留开关 → 0.50 安装指南单页版 → 0.51 first-live → 0.52 调研 16 → 0.53 数据契约补齐 → 0.54 Q18 预演 → 0.55 调研 17 Hindsight → 0.56 调研 18 → 0.57 D5 影子遥测 → 0.58 audit-01 修复 → 0.59 audit-02 修复 + 调研 19 → 0.60 台账自证 ledger-check → 0.61 ledger-sync + --full 闭环 → 0.62 audit-04 修复 → 0.63 audit-05 → 0.64 audit-06 → 0.65 boundary-audit（P2-8 清）→ 0.65.1 样本改名 + 调研 21 → 0.66 调研 22 → 0.67 安装彩排 → 0.68 D5 收口 → 0.69 A1 口径修正 → 0.69.1 调研 23 → 0.70 真实会话回放 → 0.71 A4 真实口径 → 0.72 偏好噪声测量 → 0.73 Q19-B 开关 → 0.73.1 调研 24 → 0.74 N6 否决 → 0.74.1 调研清单补 20–24 + 守卫 |
 | 证据 | `M6-acceptance.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
-| 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG` |
+| 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG`、`20-RAPTOR`、`21-CRAG`、`22-LongMemEval`、`23-Self-RAG`、`24-MemoRAG` |
 
 ## 三、下一步（2026-11-02 23:40 修订）
 
