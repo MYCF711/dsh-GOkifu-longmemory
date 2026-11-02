@@ -2,6 +2,17 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.50.0（2026-11-02）
+
+### 安装指南改成单页版
+- 重写 `docs/安装指南.md`：三步启用（dry-run → 退出 DSH 执行 re-enable → 重开后 install-doctor/metrics-guard）、
+  零配置默认值表、三项验证、四种回滚、已知限制与排障表。
+- 纠正过时内容：默认已不是 `enabled:false/shadow:true`（0.15 起为零配置）；`install-doctor`、`cli audit`、
+  `cli facts --at`、`repeat-report` 全部纳入指南。
+
+### 验证
+379 条测试全绿；`metrics-guard PASS`。
+
 ## 0.49.0（2026-11-02）
 
 ### Q18 预留实现：`crossScopeClass` 开关（**默认关，行为不变**）
