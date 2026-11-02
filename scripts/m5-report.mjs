@@ -282,7 +282,7 @@ export function measureA3({ repoRoot = REPO_ROOT, liveAttempts = 0 } = {}) {
     unit: 'rate',
     n: facts.unitTests,
     status: 'not-live',
-    caveat: `真注入默认关（enabled=${facts.enabledDefault}，shadow=${facts.shadowDefault}）；0 失败率来自 ${facts.unitTests} 条单测覆盖，不是线上样本；本机从未在宿主里真跑过一次注入（liveAttempts=${liveAttempts}）⇒ 不能当可靠性证据`,
+    caveat: `零配置默认开（enabled=${facts.enabledDefault}，shadow=${facts.shadowDefault}，autoBuild=${facts.autoBuildDefault ?? 'n/a'}）；0 失败率来自 ${facts.unitTests} 条单测覆盖，不是线上样本；本机从未在宿主里真跑过一次注入（liveAttempts=${liveAttempts}）⇒ 不能当可靠性证据`,
     detail: { ...facts, liveAttempts },
   });
 }

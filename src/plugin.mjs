@@ -69,8 +69,10 @@ export const HOOK = 'agent/pre-step';
 export const LLM_PACKAGE = '@deepseek-ai/dsh-llm';
 
 export const DEFAULT_CONFIG = Object.freeze({
-  enabled: false,
-  shadow: true,
+  // 零配置（2026-11-02 主人裁定）：装完即用；库不存在时自动建库、本次沉默。
+  enabled: true,
+  shadow: false,
+  autoBuild: true,
   storeRoot: null,
   shadowDir: null,
   budgetTokens: 500,
@@ -79,6 +81,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   now: null,
   createUserMessage: null,
   probeValidity: true,
+  autoBuild: true,
   deps: null,
 });
 
@@ -115,6 +118,7 @@ export function sanitizeConfig(raw = {}) {
     now: Number.isFinite(src.now) ? Number(src.now) : (typeof src.now === 'function' ? src.now : null),
     createUserMessage: typeof src.createUserMessage === 'function' ? src.createUserMessage : null,
     probeValidity: boolOf(src.probeValidity, true),
+    autoBuild: boolOf(src.autoBuild, true),
     deps: src.deps && typeof src.deps === 'object' && !Array.isArray(src.deps) ? src.deps : null,
   };
 }
@@ -220,6 +224,7 @@ async function resolveDeps(config) {
     buildMemoryCard: typeof injected.buildMemoryCard === 'function' ? injected.buildMemoryCard : buildMemoryCard,
     runGates: typeof injected.runGates === 'function' ? injected.runGates : runGates,
     probeValidity: typeof injected.probeValidity === 'function' ? injected.probeValidity : probeValidity,
+    buildStore: typeof injected.buildStore === 'function' ? injected.buildStore : null,
     writeShadow: typeof injected.writeShadow === 'function' ? injected.writeShadow : writeShadow,
     walk,
     createUserMessage: typeof injected.createUserMessage === 'function' ? injected.createUserMessage : null,
@@ -327,7 +332,8 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   const storeRoot = resolveStoreRoot(config);
   if (!storeRoot) return { decision, action: 'skip', reason: 'no-store-root' };
   if (!fs.existsSync(storeRoot)) {
-    warn(ctx, `记忆库不存在：${storeRoot}（本轮不动）`);
+    warn(ctx, `记忆库不存在：${storeRoot}（本次沉默；${config.autoBuild ? '后台建库中' : '未开 autoBuild'}）`);
+    if (config.autoBuild) scheduleAutoBuild({ ctx, storeRoot, deps });
     return { decision, action: 'skip', reason: 'no-store' };
   }
 
@@ -425,6 +431,32 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
  * @returns {{name:string, hook:string, registered:boolean, config:object}}
  */
 const WALK_CACHES = new Map();
+
+const BUILDING = new Set();
+
+/** 零配置：库不存在时后台建一次（不阻塞本轮；失败只 warn，不重试风暴）。 */
+function scheduleAutoBuild({ ctx, storeRoot, deps = null }) {
+  if (!storeRoot || BUILDING.has(storeRoot)) return;
+  BUILDING.add(storeRoot);
+  const run = async () => {
+    try {
+      const dataRoot = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME ? process.env.DSH_HOME : null;
+      if (typeof deps?.buildStore === 'function') {
+        await deps.buildStore({ storeRoot, dataRoot });
+      } else {
+        const mod = await import('../scripts/archive.mjs');
+        if (typeof mod.runArchive !== 'function') throw new Error('archive.mjs 未导出 runArchive');
+        if (!dataRoot) throw new Error('没有 DSH_HOME，无法建库');
+        await mod.runArchive({ dataRoot, storeRoot, dryRun: false, user: 'owner' });
+      }
+      warn(ctx, `记忆库已建好：${storeRoot}（下一轮开始生效）`);
+    } catch (error) {
+      warn(ctx, `自动建库失败：${String(error?.message ?? error)}`);
+      BUILDING.delete(storeRoot); // 失败允许下次再试；成功不重试
+    }
+  };
+  setTimeout(() => { run(); }, 0);
+}
 
 function walkCacheFor(storeRoot, store, deps) {
   try {
