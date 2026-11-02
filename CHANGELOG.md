@@ -2,6 +2,27 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.78.0（2026-11-03）
+
+### 一键开启脚本 `开启长期记忆.cmd`
+- 双击即用：先提示「把 DSH 完全关掉」，再执行 `node scripts/re-enable.mjs`（自动备份 patch/package.json）。
+- 解决的真实问题：主人重启 DSH ≠ 启用插件——**只重启不会加载它**，必须先跑 re-enable。
+- `docs/runbook-装完之后.md` §1 增加懒人路径。
+
+### 验证
+脚本已随仓库提交；`re-enable --dry-run` 仍报「摘除 3 条 · patch 将改 true」。
+
+## 0.77.3（2026-11-03）
+
+### 归档幂等性实测（真实库，连续三次）
+- 第 1 次：`claims 322→533`、`episodes 117→167`——不是失真，而是**补齐了"当时没有 header"的会话**（审计子代理写完才有 header）。
+- 第 2 次：+24（两次运行之间新产生的会话）、8 个活跃 episode 变大。
+- 第 3 次：**0 新增**，仅 3 个活跃 episode 变大；claims/topics/links/threads/joseki 全同。
+- 判据写进 `AGENTS.md` §5 陷阱 15 + `evidence/M7-archive-idempotent.md`：已封存数据重跑零变化，活跃会话会继续长。
+
+### 验证
+402 条测试全绿；`check PASS`；`ledger-check --full PASS`（语料已按新库刷新）。
+
 ## 0.77.2（2026-11-03）
 
 ### Runbook：装完之后按这个顺序跑（`docs/runbook-装完之后.md`）
