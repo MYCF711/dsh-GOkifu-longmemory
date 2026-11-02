@@ -561,6 +561,27 @@ export async function runEval(opts = {}) {
     if (!logAbs && !graphAbs) skipped.push({ episode: episode.id, reason: 'source-missing（日志与棋谱都不在）' });
   }
 
+  // 时间切分 holdout（2026-11-02）：memory = splitAt 之前的局，test = 之后的局。
+  // 目的：语料每天增长会让全量 LOO 的 repeat 率自然上升，跨时点不可比；holdout 用固定切点冻结分母。
+  const evaluateHoldout = (list, splitAt) => {
+    const memorySet = new Set();
+    const test = [];
+    for (const record of list) {
+      if (record.startedAt <= splitAt) { for (const sig of record.signatures) memorySet.add(sig); }
+      else test.push(record);
+    }
+    let repeat = 0;
+    let novel = 0;
+    for (const record of test) {
+      const errorOnly = record.signatures.filter((sig) => ERROR_ONLY_RE.test(sig));
+      repeat += errorOnly.filter((sig) => memorySet.has(sig)).length;
+      novel += errorOnly.filter((sig) => !memorySet.has(sig)).length;
+    }
+    const n = repeat + novel;
+    return { splitAt, testEpisodes: test.length, repeat, novel, n, rate: n === 0 ? null : repeat / n };
+  };
+  const holdout = Number.isFinite(opts.splitAt) ? evaluateHoldout(records[source], opts.splitAt) : null;
+
   const variants = {
     both: evaluateLoo(records.both, { sourceLabel: 'both' }),
     edge: evaluateLoo(records.edge, { sourceLabel: 'edge' }),
@@ -603,6 +624,7 @@ export async function runEval(opts = {}) {
     },
     primary: {
       source,
+      holdout,
       totals: primary.totals,
       coverage: primary.coverage,
       rows: primary.rows,

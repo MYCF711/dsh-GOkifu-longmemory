@@ -191,11 +191,13 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
     });
   }
   try {
-    const report = await runEval({ dataRoot, storeRoot, source: 'both', now });
+    const SPLIT_AT = Date.parse('2026-11-02T00:00:00Z');
+    const report = await runEval({ dataRoot, storeRoot, source: 'both', now, splitAt: SPLIT_AT });
     const totals = report.primary.totals;
     // 主值用「只有像错误的签名」口径（A2 收紧，2026-11-02 审核指出原口径 35% 不是错误文本）；
     // 全量口径同时保留，便于对照；两者都给出样本量与 n。
     const rateErrorOnly = Number.isFinite(totals.rateErrorOnly) ? totals.rateErrorOnly : null;
+    const holdout = report.primary.holdout ?? null;
     const rateAll = totals.rate;
     const useErrorOnly = rateErrorOnly !== null && (totals.signaturesErrorOnly ?? 0) > 0;
     const rate = useErrorOnly ? rateErrorOnly : rateAll;
@@ -208,9 +210,10 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
       n,
       status: measured ? 'measured' : 'not-consumed',
       caveat: measured
-        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）`
+        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout**（≤2026-11-02T00:00Z 作记忆）rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}，test ${holdout?.testEpisodes ?? '?'} 局）`
         : 'LOO 分母为 0（没有可评测的失败签名）⇒ 不写 0',
       detail: {
+        holdout,
         repeat: totals.repeatError,
         novel: totals.novelError,
         sigma,
