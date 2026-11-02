@@ -21,7 +21,7 @@
 3. **面向模型，不面向人**：记忆卡/索引/线索是给模型读的，人不看懂无所谓；不做人可读知识页。
 4. **人不是审批者，是纠错者**：难判的事交多成员独立解析 + 机械共识；人指出错误是最高优先级证据，触发一次纠错反思。
 
-**运行模式（2026-11-02 起）**：**superagent + Team Lead**——私有仓库 `MYCF711/dsh-kifuin`；按 `magpie-plugin-scaffold` 的维护准则（分支→PR→必需检查→合并→release）；**每个功能实现都发版本并写 CHANGELOG；不发 npm**（只发 annotated tag + GitHub Release）。
+**运行模式（2026-11-02 起）**：**superagent + Team Lead**——私有仓库 `MYCF711/dsh-kifu`；按 `magpie-plugin-scaffold` 的维护准则（分支→PR→必需检查→合并→release）；**每个功能实现都发版本并写 CHANGELOG；不发 npm**（只发 annotated tag + GitHub Release）。
 **最小交付房间**：按"可独立验收的行为"切房间（R00–R15，见 §11），每个房间有 tombstone test；M1 最小集 = R00/R01/R02/R03/R04/R05/R07/R14。
 **粉色大象规则**：规则、提示与任务书写**正向做法**（做什么）；禁止项只写进边界成文法且写成"归谁做"。点名"不要想 X"会把注意力钉在 X 上。
 
@@ -96,7 +96,7 @@
 
 ## 3 · 怎么跑
 
-**当前阶段：M5 收口（0.14.0）。** 命令：`node scripts/check.mjs`、`node --test`、`node scripts/cli.mjs stats|dump|walk|verify|rebuild|inject --shadow`、`node scripts/archive.mjs --dry-run`、`node scripts/m5-report.mjs`、`node scripts/redteam.mjs`、`node scripts/host-sim.mjs`、`node scripts/stage-check.mjs docs/staging/shadow.json`、`node scripts/shadow-report.mjs`、`node scripts/release.mjs --dry-run`。
+**当前阶段：M5 收口（0.15.0）。** 命令：`node scripts/check.mjs`、`node --test`、`node scripts/cli.mjs stats|dump|walk|verify|rebuild|inject --shadow`、`node scripts/archive.mjs --dry-run`、`node scripts/m5-report.mjs`、`node scripts/redteam.mjs`、`node scripts/host-sim.mjs`、`node scripts/stage-check.mjs docs/staging/shadow.json`、`node scripts/shadow-report.mjs`、`node scripts/release.mjs --dry-run`。
 
 当前可用的**只读侦查命令**（均已实测，2026-11-02）：
 
@@ -272,19 +272,19 @@ AGENTS.md  本文件
 
 ---
 
-## 7 · 当前状态快照（2026-11-02 · v0.14.0）
+## 7 · 当前状态快照（2026-11-02 · v0.15.0）
 
 | 项 | 状态 |
 |---|---|
-| 阶段 | **M5 收口**（0.14.0）：宿主入口默认关；六轴/仿真/演练已跑；真注入待安装 |
+| 阶段 | **M5 收口**（0.15.0）：宿主入口默认关；六轴/仿真/演练已跑；真注入待安装 |
 | 方案 | `方案.md` v0.9；Q1–Q7、Q13 已裁定；Q8–Q12/Q14 自裁；Q16 已由主人拍板"直接开跑" |
-| 仓库 | `MYCF711/dsh-kifuin`（私有）；版本 0.14.0；不发 npm |
+| 仓库 | `MYCF711/dsh-kifu`（公开）；版本 0.15.0；不发 npm |
 | 模式 | superagent + Team Lead；每日 09:00 巡检 |
 | 边界 | `docs/记忆的职责边界.md` v0.1（判据 + 红线 + 审计 + 接口 + 定式/裁决边界） |
 | 对标 | `docs/对标-Hindsight.md`（六轴判据 + 本机基线实测 + 擂台协议） |
 | 调研 | `docs/调研/01`（495 行）、`02`（599 行）、`03`（318 行，带 URL） |
 | 本机语料 | **92 局棋谱 / 780 主题 / 199 边 / 83 卷 / 125 claim**（store manifest 实测）`[本] 2026-11-02 05:20` |
-| 校验 | `node scripts/check.mjs` PASS；`node --test` 345 条全绿；六轴：A2 19.18%（error-only） / A4 p50 1.23ms / A3 simulated 0/40 / A6 100%；redteam 坏样本 10/10 + 控制 1/1 |
+| 校验 | `node scripts/check.mjs` PASS；`node --test` 346 条全绿；六轴：A2 19.18%（error-only） / A4 p50 1.23ms / A3 simulated 0/40 / A6 100%；redteam 坏样本 10/10 + 控制 1/1 |
 | 上游 | 压缩仓 `dsh-GOkifu-compact` 1.17.0（未发布）；只读；**工作树可能被另一会话修改，引用行号前先 `git status`** |
 
 > **本节是快照，不是实时状态。** 实时状态看 `计划表.md`（M1 建）。
