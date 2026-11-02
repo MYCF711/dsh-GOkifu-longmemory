@@ -406,6 +406,18 @@ export async function runArchive(opts = {}) {
   const archivedViews = archived.map((e) => ({ ...e }));
 
   let joseki = [];
+  let josekiReference = [];
+  if (typeof rooms.joseki?.promoteReferenceJoseki === 'function') {
+    try {
+      josekiReference = asRecordList(
+        await rooms.joseki.promoteReferenceJoseki({ episodes: archivedViews, signals: Object.fromEntries(signalsByEpisode), now }),
+        ['joseki', 'josekis'],
+      );
+    } catch (err) {
+      skipped.push(`joseki-reference: 抛错（${String(err?.message ?? err)}）`);
+      josekiReference = [];
+    }
+  }
   if (rooms.joseki?.promoteJoseki) {
     try {
       joseki = asRecordList(
@@ -437,7 +449,7 @@ export async function runArchive(opts = {}) {
 
   const authoritative = {
     episodes,
-    joseki: joseki.filter((r) => r && typeof r.id === 'string'),
+    joseki: [...joseki, ...josekiReference].filter((r) => r && typeof r.id === 'string'),
     claims: claims.filter((r) => r && typeof r.id === 'string'),
   };
 

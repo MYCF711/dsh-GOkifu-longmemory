@@ -96,7 +96,7 @@
 
 ## 3 · 怎么跑
 
-**当前阶段：M5 收口（0.12.0）。** 命令：`node scripts/check.mjs`、`node --test`、`node scripts/cli.mjs stats|dump|walk|verify|rebuild|inject --shadow`、`node scripts/archive.mjs --dry-run`、`node scripts/m5-report.mjs`、`node scripts/redteam.mjs`、`node scripts/host-sim.mjs`、`node scripts/stage-check.mjs docs/staging/shadow.json`、`node scripts/release.mjs --dry-run`。
+**当前阶段：M5 收口（0.13.0）。** 命令：`node scripts/check.mjs`、`node --test`、`node scripts/cli.mjs stats|dump|walk|verify|rebuild|inject --shadow`、`node scripts/archive.mjs --dry-run`、`node scripts/m5-report.mjs`、`node scripts/redteam.mjs`、`node scripts/host-sim.mjs`、`node scripts/stage-check.mjs docs/staging/shadow.json`、`node scripts/release.mjs --dry-run`。
 
 当前可用的**只读侦查命令**（均已实测，2026-11-02）：
 
@@ -272,19 +272,19 @@ AGENTS.md  本文件
 
 ---
 
-## 7 · 当前状态快照（2026-11-02 · v0.12.0）
+## 7 · 当前状态快照（2026-11-02 · v0.13.0）
 
 | 项 | 状态 |
 |---|---|
-| 阶段 | **M5 收口**（0.12.0）：宿主入口默认关；六轴/仿真/演练已跑；真注入待安装 |
+| 阶段 | **M5 收口**（0.13.0）：宿主入口默认关；六轴/仿真/演练已跑；真注入待安装 |
 | 方案 | `方案.md` v0.9；Q1–Q7、Q13 已裁定；Q8–Q12/Q14 自裁；Q16 已由主人拍板"直接开跑" |
-| 仓库 | `MYCF711/dsh-kifuin`（私有）；版本 0.12.0；不发 npm |
+| 仓库 | `MYCF711/dsh-kifuin`（私有）；版本 0.13.0；不发 npm |
 | 模式 | superagent + Team Lead；每日 09:00 巡检 |
 | 边界 | `docs/记忆的职责边界.md` v0.1（判据 + 红线 + 审计 + 接口 + 定式/裁决边界） |
 | 对标 | `docs/对标-Hindsight.md`（六轴判据 + 本机基线实测 + 擂台协议） |
 | 调研 | `docs/调研/01`（495 行）、`02`（599 行）、`03`（318 行，带 URL） |
 | 本机语料 | **92 局棋谱 / 780 主题 / 199 边 / 83 卷 / 125 claim**（store manifest 实测）`[本] 2026-11-02 05:20` |
-| 校验 | `node scripts/check.mjs` PASS；`node --test` 341 条全绿；六轴：A2 19.18%（error-only） / A4 p50 1.23ms / A3 simulated 0/40 / A6 100%；redteam 坏样本 10/10 + 控制 1/1 |
+| 校验 | `node scripts/check.mjs` PASS；`node --test` 343 条全绿；六轴：A2 19.18%（error-only） / A4 p50 1.23ms / A3 simulated 0/40 / A6 100%；redteam 坏样本 10/10 + 控制 1/1 |
 | 上游 | 压缩仓 `dsh-GOkifu-compact` 1.17.0（未发布）；只读；**工作树可能被另一会话修改，引用行号前先 `git status`** |
 
 > **本节是快照，不是实时状态。** 实时状态看 `计划表.md`（M1 建）。
