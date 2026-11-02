@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.17.3（2026-11-02）
+
+新增 `scripts/re-enable.mjs`：一条命令恢复被临时禁用的插件。
+
+```bash
+# 先完全退出 DSH
+node scripts/re-enable.mjs          # 加 --dry-run 只看会改什么
+# 再打开 DSH
+```
+
+它做三件事（改前都备份）：删 `cordis.patch.yml` 末尾的临时禁用块、把 `link:` 依赖与 bundle 条目加回 profile、跑一次 `pnpm install`。
+
 ## 0.17.2（2026-11-02）
 
 **修启动卡死**：web boot 卡在 `dsh-gokifu-longmemory: pending`，等 `@deepseek-ai/dsh-client-ui-settings`。
