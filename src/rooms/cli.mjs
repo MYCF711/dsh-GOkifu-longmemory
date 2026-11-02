@@ -739,10 +739,11 @@ export async function runCli(argv = [], io = {}) {
       const stale = claims.filter((c) => c.validityOk === false);
       const invalidated = claims.filter((c) => String(c.state ?? '') === 'invalidated');
       const noSupport = claims.filter((c) => !Array.isArray(c.support) || c.support.length === 0);
+      const expired = claims.filter((c) => Number.isFinite(c.validTo));
       const classVolumes = threads.filter((t) => String(t.title ?? '').startsWith('class:'));
       const report = {
         root: storeRoot,
-        claims: { total: claims.length, byState, stale: stale.length, invalidated: invalidated.length, noSupport: noSupport.length },
+        claims: { total: claims.length, byState, stale: stale.length, invalidated: invalidated.length, noSupport: noSupport.length, expired: expired.length },
         threads: { total: threads.length, classVolumes: classVolumes.length, topClass: classVolumes.slice(0, 5).map((t) => ({ title: t.title, kifus: t.kifuCount ?? 0 })) },
       };
       if (flags.json) json(report);
@@ -750,7 +751,7 @@ export async function runCli(argv = [], io = {}) {
         const lines = [];
         lines.push(`记忆健康检查（只读）：${storeRoot}`);
         lines.push(`claim ${claims.length} 条 · 状态 ${Object.entries(byState).map(([k, v]) => `${k}=${v}`).join(' · ')}`);
-        lines.push(`被遮蔽：过期(validityOk=false) ${stale.length} · invalidated ${invalidated.length} · 无支撑 ${noSupport.length}`);
+        lines.push(`被遮蔽：过期(validityOk=false) ${stale.length} · invalidated ${invalidated.length} · 无支撑 ${noSupport.length} · 有效期已止 ${expired.length}`);
         lines.push(`卷 ${threads.length} 个 · 类级主卷 ${classVolumes.length} 个`);
         for (const t of report.threads.topClass) lines.push(`- ${t.title} · ${t.kifus} 局`);
         if (noSupport.length > 0) lines.push('! 存在无支撑 claim（违反「无源不入」）');
