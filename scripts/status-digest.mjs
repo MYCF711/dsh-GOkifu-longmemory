@@ -31,6 +31,8 @@ const head = run('git', ['log', '-1', '--oneline']).out;
 const branch = run('git', ['branch', '--show-current']).out;
 const dirty = run('git', ['status', '--porcelain']).out;
 
+const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || process.env.HOME || '.', 'DeepSeek Harness', 'home');
+const hasStore = fs.existsSync(path.join(HOME, 'memory-context'));
 const check = run(node, ['scripts/check.mjs']);
 const ledger = run(node, ['scripts/ledger-check.mjs', '--full']);
 const guard = run(node, ['scripts/metrics-guard.mjs']);
@@ -51,9 +53,11 @@ const digest = {
   version: pkg.version,
   gates: {
     check: check.ok ? 'PASS' : 'FAIL',
-    ledger: ledger.ok ? 'PASS' : 'FAIL',
-    metricsGuard: guard.ok ? 'PASS' : 'FAIL',
+    // 无 store 时"台账/六轴"类检查不适用：标 N/A，不要误报 FAIL（2026-11-03 冷启动演练发现）
+    ledger: ledger.ok ? 'PASS' : (hasStore ? 'FAIL' : 'N/A（无 store）'),
+    metricsGuard: guard.ok ? 'PASS' : (hasStore ? 'FAIL' : 'N/A（无 store）'),
   },
+  hasStore,
   metrics: guard.out.split('\n').filter((l) => l.includes('metrics-guard PASS')).pop() ?? null,
   sixAxis: axes ? Object.fromEntries(Object.entries(axes).map(([k, v]) => [k, v?.value ?? null])) : null,
   install: doctor.out.split('\n').filter((l) => l.startsWith('ok') || l.startsWith('ERR')).slice(0, 6),

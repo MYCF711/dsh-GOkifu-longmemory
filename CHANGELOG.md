@@ -2,6 +2,17 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.77.1（2026-11-03）
+
+### 冷启动演练 + 两处误报修正
+- `status-digest`：无 store 时把 `ledger`/`guard` 标为 **N/A（无 store）**（此前误报 FAIL）。
+- `install-doctor`：热路径抽测在"库不存在"时注明 `warn 为预期（插件沉默）`（此前 warn=5 看起来像故障）。
+- 演练：空 home 上跑 digest/doctor **不崩**、不误报；"插件注册/记忆库内容"两项 FAIL 属于安装前的正常状态。
+- 证据 `evidence/M7-cold-start.md`。
+
+### 验证
+402 条测试全绿；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.77.0（2026-11-03）
 
 ### 一页状态摘要 `scripts/status-digest.mjs`
