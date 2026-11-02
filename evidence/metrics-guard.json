@@ -1,5 +1,5 @@
 {
-  "at": "2026-11-02T12:56:56.676Z",
+  "at": "2026-11-02T13:14:51.876Z",
   "root": "D:\\DeepSeek Harness\\home",
   "limits": {
     "a1Max": 0.05,
@@ -13,9 +13,15 @@
   "fails": [],
   "values": {
     "a1": 0,
+    "a1Vacuous": true,
+    "a1Coverage": {
+      "withValidity": 26,
+      "rendered": 0,
+      "ratio": 0
+    },
     "a5": 0,
     "a6": 1,
-    "p50": 1.96,
+    "p50": 2.04,
     "a2bStrict": 0.8421052631578947,
     "a2bCover": 1,
     "a2bN": 19

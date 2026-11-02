@@ -2,6 +2,22 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.58.0（2026-11-02）
+
+### 独立审计 audit-01 的修复（有条件通过 → 处理 P1 全部 5 项）
+- **P1-1** `validFrom` 真正落地（= `occurredAt`）；N1 空壳测试改成真断言。本机 322 条 claim 中 296 条有 `validFrom`，26 条历史条目（无 `occurredAt`）按只增不改保留。
+- **P1-2** 新增 `representativeTextFor()`：建组与"更早支撑"共用，`class:` 前缀不再随输入顺序丢失；新增乱序一致性测试。
+- **P1-3** `AGENTS.md` §7 的状态快照删除，改为「去哪看」指针；`check.mjs` 断言指针存在。
+- **P1-4** 仓库口径统一为**公开**，并实际开启 `main` 分支保护（require PR + required check `rules`）。
+- **P1-5** `metrics-guard` 增 `a1Vacuous/a1Coverage`：A1=0 但 validity 覆盖 0 时显式标「空转」。
+
+### P2 顺手修
+- 巩固只吃 `kind=antipattern`；契约 §9 标注 `repeat` 派生、`threadIds`/`supersedes` 保留；台账数字带时间戳；
+  门槛证据同步 0.55；删除 `DEFAULT_CONFIG` 重复键。
+
+### 验证
+388 条测试（384 pass / 0 fail / 4 skip）；`check: PASS`；`metrics-guard PASS`；审计报告入库 `reports/audit-01.md`。
+
 ## 0.57.0（2026-11-02）
 
 ### D5 影子遥测（开注入前就能观察）
