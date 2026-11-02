@@ -57,7 +57,7 @@
 
 | # | 原文（≤80 字） | 文件:行 | 验证命令 | 输出摘要 | 判定 |
 |---|---|---|---|---|---|
-| 1 | `node scripts/cli.mjs dump <sid> [--root <dir>]` | `scripts/cli.mjs:5` | `node scripts/cli.mjs dump session-00b50089-b7a1-4a5a-8d3f-c5775a7329a0 --root "$DSH_HOME"` | exit **0**；输出 162,824 字节 episode JSON（`id=ep-00b50089`、`seqFrom/seqTo=0/24477`、`closure.logPath/graphPath` 齐全）；`ep-00b50089` 当 sid 传入则报「未找到会话」——注释写的就是 `<sid>`，一致 | **PASS** |
+| 1 | `node scripts/cli.mjs dump <sid> [--root <dir>]` | `scripts/cli.mjs:5` | `node scripts/cli.mjs dump session-<uuid> --root "$DSH_HOME"` | exit **0**；输出 162,824 字节 episode JSON（`id=ep-00b50089`、`seqFrom/seqTo=0/24477`、`closure.logPath/graphPath` 齐全）；`ep-00b50089` 当 sid 传入则报「未找到会话」——注释写的就是 `<sid>`，一致 | **PASS** |
 | 2 | \| `06-可引用数字表.md` \| 21 条可引用数字（[外]/[本] 分标） \| | `方案.md:846` | `grep -cE '^\|\s*[0-9]+\s*\|' "D:/主工作区/repos/dsh-GOkifu-compact/docs/research/06-可引用数字表.md"` | **21**（#1–#21 连续，分 5 段无跳号）；`[外]` 11 行、`[本]` 14 行（4 条两者兼有）；文件实存，非空 | **PASS** |
 | 3 | `graph.json.delta.jsonl`：每行一个 delta 帧；按行回放；坏尾 → 前缀 + `truncated:true` | `docs/数据契约.md:51` | 系统临时目录造「1 个好帧 + 1 个半写坏帧」，调 `loadGraphAt({basePath, deltaPath})` | `{"frames":1,"truncated":true,"reason":"checksum","probe":true,"nodesBefore":2467,"nodesAfter":2468}`：好帧已回放（2467→2468）、坏尾就地截断并 `truncated:true` | **PASS** |
 | 4 | 出问题先看 `MAINTENANCE.md` 的「给接手者的最短路径」，不要猜。 | `AGENTS.md:313` | `grep -n '给接手者的最短路径' MAINTENANCE.md` | `65:## 六、给接手者的最短路径`，下含 7 步（读本文件→git status→AGENTS §10/§11→干活→check+test→更新台账→PR） | **PASS** |
