@@ -90,8 +90,14 @@ if (invokedDirectly) {
   log(`依赖: ${spec}`);
   log(`bundle: ${bundles.includes(name) ? '已有' : '将补'}`);
   log(`禁用条目: 摘除 ${stripped.removed} 条${stripped.disabledLeft ? ` · 仍启用 ${stripped.disabledLeft} 条（不带 disabled）` : ''}`);
+  const noop = !patchChanged && !pkgChanged;
   if (dry) {
     log(`[dry-run] patch 将改: ${patchChanged} · package.json 将改: ${pkgChanged}`);
+    process.exit(0);
+  }
+  // 2026-11-03：已是启用状态就别再写 patch/package.json（避免无谓改动与备份噪音）。
+  if (noop) {
+    log('已是启用状态，无需改动。直接重新打开 DSH，然后跑 node scripts/install-doctor.mjs 验收。');
     process.exit(0);
   }
 

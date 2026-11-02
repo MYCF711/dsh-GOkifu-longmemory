@@ -89,7 +89,7 @@ const hooks = {};
 const ctx = { on: (name, fn) => { hooks[name] = fn; }, logger: { warn: (m) => warns.push(String(m)), debug: () => {} } };
 let seq = 0;
 apply(ctx, {
-  enabled: true,
+  enabled: true, liveStats: false,
   shadow: false,
   storeRoot,
   now: Date.now(),

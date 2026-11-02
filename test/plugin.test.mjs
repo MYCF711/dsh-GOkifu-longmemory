@@ -729,3 +729,36 @@ test('D5: 闸不通过 ⇒ 不补卡（不绕过十道闸）', async () => {
   const second = await step(['hello', 'Error: file has not been read — read the file, then retry', 'step', 'Error: file changed since it was read — re-read the file, then retry']);
   assert.equal(second.messages.some((m) => String(m.content?.[0]?.text ?? '').startsWith('CARD:')), false, '闸不过不得补卡');
 });
+
+// A3 心跳（2026-11-03）：default 开 ⇒ 每步一行 live-stats.jsonl；liveStats:false ⇒ 不写
+test('A3 心跳: liveStats 默认写 live-stats.jsonl，关掉则不写', async () => {
+  const { mkdtempSync, existsSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = (await import('node:path')).default;
+  const mk = async (liveStats) => {
+    const root = mkdtempSync(path.join(tmpdir(), 'kifu-live-'));
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({
+      storeRoot: root,
+      ...(liveStats === undefined ? {} : { liveStats }),
+      deps: {
+        createStore: () => ({ list: () => [], get: () => null }),
+        walk: () => ({ hits: [], dropped: {} }),
+        buildMemoryCard: () => ({ section: null, tokens: 0, claims: [] }),
+        runGates: () => ({ ok: true, errors: [] }),
+        createWalkCache: () => ({}),
+      },
+    }));
+    await hooks['agent/pre-step'](
+      { agent: { session: { id: `s-${Math.random()}` } }, messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }] },
+      async () => ({ kind: 'enter', messages: [{ role: 'assistant', content: [] }] }),
+    );
+    const file = path.join(root, 'live-stats.jsonl');
+    return { exists: existsSync(file), text: existsSync(file) ? readFileSync(file, 'utf8') : '' };
+  };
+  const on = await mk(undefined);
+  assert.equal(on.exists, true, '默认应写心跳');
+  assert.ok(on.text.split('\n').filter(Boolean).length >= 1);
+  const off = await mk(false);
+  assert.equal(off.exists, false, 'liveStats:false 不应写');
+});

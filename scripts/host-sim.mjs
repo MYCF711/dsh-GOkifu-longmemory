@@ -24,7 +24,7 @@ const hooks = {};
 const ctx = { on: (name, fn) => { hooks[name] = fn; }, logger: { warn: (m) => warns.push(String(m)), debug: () => {} } };
 const fakeCreateUserMessage = (input) => ({ id: `m${Math.random().toString(36).slice(2, 8)}`, role: 'user', ...input });
 const plugin = apply(ctx, {
-  enabled: true, shadow: false, storeRoot, now: Date.now(),
+  enabled: true, liveStats: false, shadow: false, storeRoot, now: Date.now(),
   createUserMessage: fakeCreateUserMessage,
   limit: 5, budgetTokens: 500, oncePerSession: true,
 });

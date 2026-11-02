@@ -88,6 +88,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   crossScopeClass: false,
   // Q19 预置（2026-11-03）：true = 只注入 hard 约束，丢弃 soft 偏好（理由句/闲聊）。默认关，等主人裁定。
   preferenceHardOnly: false,
+  liveStats: true, // A3 心跳：每步一行 live-stats.jsonl（默认开；关掉不影响功能）
   repeatHint: true,
   repeatHintAfter: 2,
   repeatHintMax: 1,
@@ -172,6 +173,7 @@ export function sanitizeConfig(raw = {}) {
     autoArchiveMinutes: positiveInt(src.autoArchiveMinutes, 30, 24 * 60),
     crossScopeClass: boolOf(src.crossScopeClass, false),
     preferenceHardOnly: boolOf(src.preferenceHardOnly, false),
+    liveStats: boolOf(src.liveStats, true),
     repeatHint: boolOf(src.repeatHint, true),
     repeatHintAfter: positiveInt(src.repeatHintAfter, 2, 20),
     repeatHintMax: positiveInt(src.repeatHintMax, 1, 5),
@@ -553,6 +555,7 @@ export const Config = {
     autoArchive: { type: 'boolean', meta: { default: true, description: '轮次收尾时按时间阈值自动刷新记忆库' } },
     autoArchiveMinutes: { type: 'number', meta: { default: 30, description: '自动刷新间隔（分钟）' } },
     crossScopeClass: { type: 'boolean', meta: { default: false, description: '类级章节允许跨工作区先例（卡片标 [跨项目]；Q18 裁定前默认关）' } },
+    liveStats: { type: 'boolean', meta: { default: true, description: 'A3 心跳：每步往 sidecar/live-stats.jsonl 追加一行（可关）' } },
     repeatHint: { type: 'boolean', meta: { default: true, description: '同一会话同类失败 ≥N 次时补一次事实卡（D5）' } },
     repeatHintAfter: { type: 'number', meta: { default: 2, description: '同类失败达到几次才补卡' } },
     budgetTokens: { type: 'number', meta: { default: 500, description: '每次注入的 token 预算' } },
@@ -627,6 +630,21 @@ function repeatStateFor(map, session, after) {
  * D5 遥测：每触发一次「同类失败补卡」记一行 JSONL。
  * 字段只放机械量：时间 / 类 / 本会话内同类失败次数 / 卡片 token / digest；不含会话内容与路径。
  */
+/**
+ * A3 线上心跳（2026-11-03）：每走完一次 pre-step 决策，就往 sidecar 追加一行。
+ * 用途：装了插件之后，`live-stats.jsonl` 里**出现行**本身就是"插件真的在宿主里跑过"的证据。
+ * 只写 storeRoot 内（sidecar），失败一律吞掉，绝不影响本轮注入。
+ */
+export function appendLiveStats(storeRoot, row) {
+  try {
+    if (!storeRoot) return;
+    // 不创建目录：库还不存在时（首次用之前）不写心跳，避免把"无库"变成"有库"。
+    if (!fs.existsSync(storeRoot)) return;
+    fs.appendFileSync(path.join(storeRoot, 'live-stats.jsonl'), `${JSON.stringify({ at: Date.now(), ...row })}
+`);
+  } catch { /* 心跳失败不影响决策 */ }
+}
+
 export function writeRepeatTelemetry({ config, trigger, card = null, digest = null, at = Date.now(), shadow = false } = {}) {
   const dir = resolveShadowDir(config);
   fs.mkdirSync(dir, { recursive: true });
@@ -834,6 +852,16 @@ export function apply(ctx, rawConfig = {}) {
 
       const deps = await resolveDeps(config);
       const result = await decidePreStep({ ctx, config, deps, payload, decision });
+      if (config.liveStats !== false) {
+        appendLiveStats(resolveStoreRoot(config), {
+          kind: 'pre-step',
+          action: result.action ?? 'skip',
+          reason: result.reason ?? null,
+          digest: result.digest ?? null,
+          tokens: result.card?.tokens ?? null,
+          shadow: config.shadow === true,
+        });
+      }
       // 真注入成功 / 影子记录写成 ⇒ 这个会话就别再来一遍
       if (result.action === 'inject' || result.action === 'shadow') {
         if (session) injected.add(session);
