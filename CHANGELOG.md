@@ -2,6 +2,22 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.17.2（2026-11-02）
+
+**修启动卡死**：web boot 卡在 `dsh-gokifu-longmemory: pending`，等 `@deepseek-ai/dsh-client-ui-settings`。
+
+### 根因
+- 浏览器半侧声明了 `inject: ['@deepseek-ai/dsh-client-ui-settings']`，该客户端模组在本机模块图里不会被解析 ⇒ 宿主永远 pending，界面打不开。
+- 我们没有真的需要它：卡片只用宿主自带的 `slots` 服务。
+
+### 修复
+- `inject` 改为空；`apply` 先检查 `ctx.slots.inject/register` 是否存在，缺失就安静返回（绝不阻塞启动）。
+- `dsh.client` 只留 `{ platform: 'web' }`。
+
+### 复现与验证
+- 实机：启动卡 pending（另一会话定位）；本版移除注入依赖后不再等待。
+- 350 条测试全绿；`check PASS`。
+
 ## 0.17.1（2026-11-02）
 
 设置卡片改用 `document.baseURI` 解析接口地址（与 dshmarket 一致）：反向代理前缀 / 桌面 `dsh-app://` 页面下也能读到配置。
