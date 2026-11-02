@@ -884,6 +884,12 @@ export function walkFromSignals(opts = {}) {
       dropped.invalidated += 1;
       continue;
     }
+    // 入馆时 validity 核验失败（validityOk=false）⇒ 不进卡片：过期条目要么改写、要么只留指针，
+    // 不能当当前事实注入（A1 负迁移 8.33% 的样本就是这类，2026-11-02）。
+    if (claim.validityOk === false) {
+      dropped.stale = (dropped.stale ?? 0) + 1;
+      continue;
+    }
     const text = typeof claim.text === 'string' ? claim.text.trim() : '';
     // D3（2026-11-02）：失败命中若与某条 claim 的错误原文互相包含，就把 claim 挂上去，
     // 并把「跨局重复次数」带到失败命中上——排序据此把反复出现的坑排到最前。
@@ -908,6 +914,11 @@ export function walkFromSignals(opts = {}) {
     for (const entry of support) {
       const hit = episodeHits.get(entry.episode);
       if (!hit || hit.depth >= attachedDepth) continue;
+      // 作用域闸也看**承载证据的棋谱**：u: 层 claim 可能由别的工作区支撑，
+      // 直接挂在跨域棋谱上会让卡片出现越界行（A5 独立复核 = 9 行，2026-11-02）。
+      const evidenceEpisode = episodeById.get(entry.episode);
+      // 当前无作用域（只放用户层）时不做这条检查：u: 层本来就是全局可见。
+      if (currentScope !== null && evidenceEpisode && !allowRecord(evidenceEpisode, `episodes:${entry.episode}`)) continue;
       attached = hit;
       attachedDepth = hit.depth;
       attachedNodeId = typeof entry.nodeId === 'string' && entry.nodeId !== '' ? entry.nodeId : null;
@@ -982,9 +993,19 @@ export function walkFromSignals(opts = {}) {
       continue;
     }
     if (!allowRecord(claim, `claims:${claim.id}`)) continue;
+    // 同一条规则：文本命中的 claim 也必须用**同作用域**的证据棋谱承载。
+    const visibleSupport = support.find((entry) => {
+      const ep = episodeById.get(entry.episode);
+      if (ep === undefined) return false;
+      return currentScope === null || allowRecord(ep, `episodes:${entry.episode}`);
+    });
+    if (!visibleSupport) {
+      dropped.crossScope += 1;
+      continue;
+    }
     const hit = makeHit({
-      episode: support[0]?.episode ?? null,
-      nodeId: typeof support[0]?.nodeId === 'string' && support[0].nodeId !== '' ? support[0].nodeId : null,
+      episode: visibleSupport.episode,
+      nodeId: typeof visibleSupport.nodeId === 'string' && visibleSupport.nodeId !== '' ? visibleSupport.nodeId : null,
       claim: claim.id,
       claimKind: typeof claim.kind === 'string' ? claim.kind : null,
       claimState: typeof claim.state === 'string' ? claim.state : null,
@@ -992,7 +1013,7 @@ export function walkFromSignals(opts = {}) {
       why: [textMatch.topic.key],
       weight: topicWeight(textMatch.topic),
       occurredAt,
-      seq: finiteNumber(support[0]?.seq) ? support[0].seq : null,
+      seq: finiteNumber(visibleSupport.seq) ? visibleSupport.seq : null,
       kind,
       depth: 1,
       text,
