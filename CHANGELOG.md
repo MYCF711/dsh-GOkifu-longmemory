@@ -2,6 +2,21 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.71.0（2026-11-03）
+
+### A4 的真实口径：注入路径 p50 18.3ms / p95 36.8ms（12 局真实会话）
+- `replay-live` 新增 `injectionLatencyMs`：只统计每局第一刀（真正走 walk→card→gates），
+  不再被 `oncePerSession` 短路稀释。
+- 对照：bench-inject 合成 ≈2ms；Hindsight 本机 p50 **4,715ms** / p90 8,329ms ⇒ 我们仍快 ≈258×。
+- 证据 `evidence/M7-latency-real.md`。
+
+### 一次被证否的优化（已回退）
+- 曾给 `persist` 加 mtime 解析缓存、给插件加 5s store 缓存；A/B 显示注入路径 p50 16.5→15.6ms（噪声内）、
+  p95 31.2→51.8ms（更差）。真实注入是按 key 定点查，不是全量 list ⇒ **两处缓存全部回退，代码净变化为零**。
+
+### 验证
+400 条测试（396 pass / 0 fail / 4 skip）；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.70.0（2026-11-03）
 
 ### 新增 `scripts/replay-live.mjs`：真实会话回放（A3 的「准线上」证据）
