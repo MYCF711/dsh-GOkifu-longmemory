@@ -282,6 +282,8 @@ function storeView(store, cache = null) {
         text: rec.text,
         occurredAt: Number.isFinite(rec.occurredAt) ? rec.occurredAt : null,
         support: Array.isArray(rec.support) ? rec.support.filter((s) => s && typeof s === 'object') : [],
+        // Q19-B 需要 hard/soft 区分；投影时别把 level 丢掉（2026-11-03 实测踩过）
+        level: typeof rec.level === 'string' ? rec.level : null,
       };
       view.claims.push(claim);
       if (claim.id) view.claimsById.set(claim.id, claim);
@@ -453,16 +455,22 @@ function entryFromEpisode(hit, view) {
  * hits → 候选条目。缺 (episode, seq, occurredAt) 的条目**直接丢**（无源不入、无时不入），
  * 只计数进省略；这样记忆卡本身不会出现「有行没出处」的形态。
  */
-function collectEntries({ hits, view, scope = null }) {
+function collectEntries({ hits, view, scope = null, preferenceHardOnly = false }) {
   const entries = [];
   let droppedNoProvenance = 0;
   let droppedNoText = 0;
+  let droppedSoftPreference = 0;
   const seen = new Set();
   const cap = Math.max(ENTRY_LIMIT * 8, 40);
 
   for (const hit of Array.isArray(hits) ? hits : []) {
     if (!hit || typeof hit !== 'object') continue;
     const claim = pickClaim(hit, view);
+    // Q19-B 预置（默认关）：只保留 hard 约束，丢弃 soft（理由句/闲聊/复述）
+    if (preferenceHardOnly && claim && claim.kind === 'preference' && claim.level !== 'hard') {
+      droppedSoftPreference += 1;
+      continue;
+    }
     const entry = claim ? entryFromClaim(hit, claim) : entryFromEpisode(hit, view);
     if (entry && scope) {
       const rec = view.episodesById.get(String(hit?.episode ?? ''));
@@ -481,7 +489,7 @@ function collectEntries({ hits, view, scope = null }) {
     if (entries.length >= cap) break;
   }
 
-  return { entries, dropped: { noProvenance: droppedNoProvenance, noText: droppedNoText } };
+  return { entries, dropped: { noProvenance: droppedNoProvenance, noText: droppedNoText, softPreference: droppedSoftPreference } };
 }
 
 function compareEntries(a, b) {
@@ -560,6 +568,7 @@ export function buildMemoryCard({
   droppedCrossScope = 0,
   droppedUnknownScope = 0,
   walkCrossScope = 0,
+  preferenceHardOnly = false,
 } = {}) {
   const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
   const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
@@ -607,7 +616,7 @@ export function buildMemoryCard({
     };
   }
 
-  const { entries, dropped } = collectEntries({ hits, view, scope: scopeKey });
+  const { entries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly });
   const sorted = entries.slice().sort(compareEntries);
   const droppedProvenance = dropped.noProvenance + dropped.noText;
 

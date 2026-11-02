@@ -66,10 +66,11 @@ const episode = (id, day, failures = 0) => ({
   state: 'archived',
 });
 
-const claim = ({ id, kind, text, day, state = 'candidate', support }) => ({
+const claim = ({ id, kind, text, day, state = 'candidate', support, level = null }) => ({
   id,
   kind,
   text,
+  ...(level ? { level } : {}),
   scopeKey: SCOPE,
   threadIds: [],
   state,
@@ -97,7 +98,8 @@ function makeFixture() {
   store.putMany('claims', [
     claim({ id: 'c-0000aa01', kind: 'pattern', text: '测试入口是 node test/run.mjs 而不是 npm test', day: 21, state: 'candidate', support: [{ episode: 'ep-aaaaaaa1', seq: 41 }] }),
     claim({ id: 'c-0000aa02', kind: 'antipattern', text: "Cannot find module 'yaml'（pnpm add yaml 之后仍在）", day: 22, state: 'observed', support: [{ episode: 'ep-aaaaaaa2', seq: 12 }, { episode: 'ep-aaaaaaa1', seq: 30 }] }),
-    claim({ id: 'c-0000aa03', kind: 'preference', text: '不要新增依赖', day: 23, state: 'candidate', support: [{ episode: 'ep-aaaaaaa3', seq: 5 }] }),
+    claim({ id: 'c-0000aa03', kind: 'preference', text: '不要新增依赖', level: 'hard', day: 23, state: 'candidate', support: [{ episode: 'ep-aaaaaaa3', seq: 5 }] }),
+    claim({ id: 'c-0000aa06', kind: 'preference', text: '理由：不写这句话就会为了省 token 省轮次，质量会下降', level: 'soft', day: 23, state: 'observed', support: [{ episode: 'ep-aaaaaaa3', seq: 6 }] }),
     claim({ id: 'c-0000aa04', kind: 'fact', text: 'package.json 的 engines.node 是 >=23.8', day: 23, state: 'observed', support: [{ episode: 'ep-aaaaaaa3', seq: 7 }] }),
     // 无源：没有 occurredAt、support 也只有 episode 没有 seq ⇒ 不许进卡
     {
@@ -722,4 +724,20 @@ test('R12: runInject 过滤跨作用域命中 ⇒ 零注入，省略里写明（
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// Q19-B 预置（2026-11-03）：偏好只保留 hard；默认关（行为不变）
+test('R12: preferenceHardOnly=true ⇒ soft 偏好不进卡；默认 false ⇒ 照旧', () => {
+  const { store } = fixture();
+  const hits = [
+    hit({ episodeId: 'ep-aaaaaaa3', seq: 5, claimId: 'c-0000aa03', day: 23 }),
+    hit({ episodeId: 'ep-aaaaaaa3', seq: 6, claimId: 'c-0000aa06', day: 23 }),
+  ];
+  const on = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24), preferenceHardOnly: true, budgetTokens: 2000, limit: 10 });
+  const onText = String(on.section ?? '');
+  assert.ok(onText.includes('不要新增依赖'), 'hard 偏好保留');
+  assert.ok(!onText.includes('理由：'), 'soft 偏好被丢弃');
+
+  const off = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24), budgetTokens: 2000, limit: 10 });
+  assert.ok(String(off.section ?? '').includes('理由：'), '默认关：soft 仍在');
 });
