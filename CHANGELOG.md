@@ -2,6 +2,17 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.65.0（2026-11-02）
+
+### 新增 `scripts/boundary-audit.mjs`（边界静态审计，补 P2-8）
+- 只扫**模型可见面**（`inject.mjs` 渲染 + `plugin.mjs` 消息构造）的字符串/模板字面量；
+  剥注释、排除检测清单自身；命中即 exit 1。
+- **接进 `check.mjs`**：PR 阶段就拦"往模板里写指令句"。
+- 与运行时闸（`gates.mjs`）分工：静态管源码字面量，运行时管动态拼接与数据。
+
+### 验证
+398 条测试（394 pass / 0 fail / 4 skip）；`check PASS`（含 boundary-audit 0 处）；证据 `evidence/M7-boundary-audit.md`。
+
 ## 0.64.0（2026-11-02）
 
 ### audit-06：活文档随机 10 条 **10/10**（口径：排除 reports/** 与 docs/调研/**）
