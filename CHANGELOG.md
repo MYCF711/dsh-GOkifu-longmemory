@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.75.0（2026-11-03）
+
+### A2b 回归线（防"慢慢烂掉"）
+- `metrics-guard` 除绝对下限 `0.55` 外，新增**相对冻结基线**的回归线：`strict < 0.8421 − 10pp` 即 FAIL，理由写明掉点。
+- 依据：19 条样本 1 条 = 5.3pp，10pp ≈ 2 条，低于此算波动。
+- 新增单测：持平 PASS、−8pp PASS、−14pp FAIL；证据 `evidence/M7-a2b-regression-guard.md`。
+
+### 验证
+402 条测试（398 pass / 0 fail / 4 skip）；`check PASS`；`metrics-guard PASS`；`ledger-check --full PASS`。
+
 ## 0.74.2（2026-11-03）
 
 ### 发版工具健壮性：`gh release create` 失败时的可诊断兜底
