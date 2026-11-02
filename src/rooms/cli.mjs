@@ -28,6 +28,7 @@ export const USAGE = `棋院 CLI（R14）
   node scripts/cli.mjs index [--root <dir>] [--json]     渲染 index.md（写到 stdout，不落盘）
   node scripts/cli.mjs verify [--store <dir>] [--json]   校验记忆库 manifest/checksums
   node scripts/cli.mjs rebuild [--store <dir>] [--json] 从权威条目重算派生索引
+  node scripts/cli.mjs audit [--store <dir>] [--json]   记忆健康检查：遮蔽/过期/无支撑/主卷
   node scripts/cli.mjs volumes [--store <dir>] [--limit <n>] [--json]
                                                         卷（棋书视图）：类级主卷优先，其余按局数排序
   node scripts/cli.mjs inject --shadow --signal "<文本>" [--store <dir>] [--shadow-dir <dir>] [--json]
@@ -721,6 +722,41 @@ export async function runCli(argv = [], io = {}) {
         write(lines.join(String.fromCharCode(10)));
       }
       return { code: 0, stdout, stderr: '' };
+    }
+
+    if (cmd === 'audit') {
+      // 记忆健康检查（只读）：有多少条被遮蔽、多少条过期、多少条没有支撑。
+      const storeRoot = path.resolve(flags.store ?? path.join(root, 'memory-context'));
+      if (!fs.existsSync(storeRoot)) {
+        return { code: 2, stdout: '', stderr: `记忆库不存在：${storeRoot}（先跑 node scripts/archive.mjs）` };
+      }
+      const { createStore } = await import('./persist.mjs');
+      const store = createStore({ root: storeRoot });
+      const claims = store.list('claims').map((r) => r.record);
+      const threads = store.list('threads').map((r) => r.record);
+      const byState = {};
+      for (const c of claims) byState[c.state ?? 'observed'] = (byState[c.state ?? 'observed'] ?? 0) + 1;
+      const stale = claims.filter((c) => c.validityOk === false);
+      const invalidated = claims.filter((c) => String(c.state ?? '') === 'invalidated');
+      const noSupport = claims.filter((c) => !Array.isArray(c.support) || c.support.length === 0);
+      const classVolumes = threads.filter((t) => String(t.title ?? '').startsWith('class:'));
+      const report = {
+        root: storeRoot,
+        claims: { total: claims.length, byState, stale: stale.length, invalidated: invalidated.length, noSupport: noSupport.length },
+        threads: { total: threads.length, classVolumes: classVolumes.length, topClass: classVolumes.slice(0, 5).map((t) => ({ title: t.title, kifus: t.kifuCount ?? 0 })) },
+      };
+      if (flags.json) json(report);
+      else {
+        const lines = [];
+        lines.push(`记忆健康检查（只读）：${storeRoot}`);
+        lines.push(`claim ${claims.length} 条 · 状态 ${Object.entries(byState).map(([k, v]) => `${k}=${v}`).join(' · ')}`);
+        lines.push(`被遮蔽：过期(validityOk=false) ${stale.length} · invalidated ${invalidated.length} · 无支撑 ${noSupport.length}`);
+        lines.push(`卷 ${threads.length} 个 · 类级主卷 ${classVolumes.length} 个`);
+        for (const t of report.threads.topClass) lines.push(`- ${t.title} · ${t.kifus} 局`);
+        if (noSupport.length > 0) lines.push('! 存在无支撑 claim（违反「无源不入」）');
+        write(lines.join(String.fromCharCode(10)));
+      }
+      return { code: report.claims.noSupport > 0 ? 1 : 0, stdout, stderr: '' };
     }
 
     if (cmd === 'inject') {

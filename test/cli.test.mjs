@@ -299,3 +299,33 @@ test('volumes：列出卷数与类级主卷，class:* 排在最前', async () =>
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// R14 · audit：记忆健康检查（遮蔽/过期/无支撑），无支撑时退出码 1
+test('audit：统计遮蔽与主卷；存在无支撑 claim ⇒ 退出码 1', async () => {
+  const { createStore } = await import('../src/rooms/persist.mjs');
+  const root = mkdtempSync(path.join(tmpdir(), 'kifu-audit-'));
+  try {
+    const store = createStore({ root });
+    store.ensureDirs();
+    store.putMany('claims', [
+      { id: 'c-ok', kind: 'fact', text: 'ok', state: 'observed', scopeKey: 'w:d:/x', support: [{ episode: 'ep-a', seq: 1, quote: 'q' }], counter: [], occurredAt: 1, recordedAt: 1 },
+      { id: 'c-stale', kind: 'fact', text: 'stale', state: 'observed', validityOk: false, scopeKey: 'w:d:/x', support: [{ episode: 'ep-a', seq: 2, quote: 'q' }], counter: [], occurredAt: 1, recordedAt: 1 },
+    ], { at: 1 });
+    store.putMany('threads', [{ id: 'th-c', title: 'class:fs-read-before-write', scopeKey: 'w:d:/x', topics: ['t:error:c'], kifus: [], kifuCount: 6, createdAt: 1, updatedAt: 2 }], { at: 1 });
+
+    const clean = await runCli(['audit', '--store', root, '--json']);
+    assert.equal(clean.code, 0);
+    const data = JSON.parse(clean.stdout);
+    assert.equal(data.claims.total, 2);
+    assert.equal(data.claims.stale, 1);
+    assert.equal(data.claims.noSupport, 0);
+    assert.equal(data.threads.classVolumes, 1);
+
+    store.putMany('claims', [{ id: 'c-nosup', kind: 'fact', text: 'no support', state: 'observed', scopeKey: 'w:d:/x', support: [], counter: [], occurredAt: 1, recordedAt: 1 }], { at: 2 });
+    const dirty = await runCli(['audit', '--store', root, '--json']);
+    assert.equal(dirty.code, 1, '无支撑 claim 必须让 audit 报红');
+    assert.equal(JSON.parse(dirty.stdout).claims.noSupport, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
