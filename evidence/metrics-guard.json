@@ -1,0 +1,22 @@
+{
+  "at": "2026-11-02T10:35:24.360Z",
+  "root": "D:\\DeepSeek Harness\\home",
+  "limits": {
+    "a1Max": 0.05,
+    "a5Max": 0,
+    "a6Min": 1,
+    "a4p50MaxMs": 50,
+    "a2bStrictMin": 0.6,
+    "a2bCoverMin": 1
+  },
+  "ok": true,
+  "fails": [],
+  "values": {
+    "a1": 0,
+    "a5": 0,
+    "a6": 1,
+    "p50": 2.07,
+    "a2bStrict": 0.6666666666666666,
+    "a2bCover": 1
+  }
+}
