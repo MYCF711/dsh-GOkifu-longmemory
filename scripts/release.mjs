@@ -70,14 +70,24 @@ if (dry) {
 
 run(`git tag -a ${tag} -m ${tag}`);
 run(`git push origin ${tag}`);
-try {
-  run(`gh release create ${tag} --title ${tag} --notes-file "${notesPath}"`);
-} catch (error) {
-  // 2026-11-03：0.74.1 首次发布时 gh release create 失败（tag 已推），这里给一次可诊断的兜底：
-  // ① 打印 stderr；② 用 --notes 直接传正文重试一次。
-  const stderr = String(error?.stderr ?? '');
-  console.error(`release: gh release create 失败：${stderr.trim() || String(error?.message ?? error)}`);
-  const inline = execSync(`python -c "import json,sys;print(json.dumps(open(r'${notesPath}',encoding='utf-8').read())[1:-1])"`, { encoding: 'utf8' }).trim();
-  run(`gh release create ${tag} --title ${tag} --notes "${inline}"`);
+// 2026-11-03：GitHub API 会间歇 502/503，发布步骤必须自带重试，且失败信息要可读。
+function createRelease(tag, notesPath) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      run(`gh release create ${tag} --title ${tag} --notes-file "${notesPath}"`);
+      return true;
+    } catch (error) {
+      const msg = String(error?.stderr ?? error?.message ?? error).split(String.fromCharCode(10)).filter(Boolean).slice(0, 2).join(' | ');
+      console.error(`release: 第 ${attempt} 次创建 Release 失败：${msg.slice(0, 240)}`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000 * attempt);
+    }
+  }
+  return false;
+}
+
+if (!createRelease(tag, notesPath)) {
+  console.error(`release: tag ${tag} 已推出，但 GitHub Release 未能创建（API 持续故障）。恢复后运行：`);
+  console.error(`  gh release create ${tag} --title ${tag} --notes-file "${notesPath}"`);
+  process.exit(0);
 }
 console.log(`released ${tag} (no npm publish)`);
