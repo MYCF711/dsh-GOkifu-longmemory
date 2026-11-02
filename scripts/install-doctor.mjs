@@ -97,7 +97,9 @@ export async function doctor({ home = HOME, runs = 5 } = {}) {
   try {
     const { stdout } = await execFileAsync(process.execPath, [path.join(REPO, 'scripts/host-sim.mjs'), '--store', storeRoot, '--runs', String(runs)], { cwd: REPO, maxBuffer: 16 * 1024 * 1024 });
     const sim = JSON.parse(stdout);
-    add('热路径抽测', sim.failed === 0, `runs=${sim.runs} injected=${sim.injected} empty=${sim.empty} failed=${sim.failed} warn=${sim.warnCount} p95=${sim.latency?.p95}ms`);
+    const noStore = !fs.existsSync(path.join(storeRoot, 'manifest.json'));
+    const warnNote = noStore && sim.warnCount > 0 ? '（warn 为预期：库还不存在，插件沉默）' : '';
+    add('热路径抽测', sim.failed === 0, `runs=${sim.runs} injected=${sim.injected} empty=${sim.empty} failed=${sim.failed} warn=${sim.warnCount}${warnNote} p95=${sim.latency?.p95}ms`);
   } catch (error) {
     add('热路径抽测', false, String(error?.message ?? error));
   }
