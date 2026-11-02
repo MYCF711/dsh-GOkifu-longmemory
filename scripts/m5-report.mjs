@@ -28,6 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runH1, runEval } from './eval.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
 import { walkFromSignals, createWalkCache, isScopeVisible, normalizeScopeKey } from '../src/rooms/walk.mjs';
+import { errorClassKeyOf } from '../src/rooms/topic.mjs';
 import { buildMemoryCard, signalFromText, scopeKeyFromPath, PROVENANCE_LINE_RE } from '../src/rooms/inject.mjs';
 import { runGates } from '../src/rooms/gates.mjs';
 
@@ -214,6 +215,8 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } 
     const scope = item.scopeKey ?? null;
     const signal = signalFromText(item.sig, { at: Date.now() });
     signal.scopeKey = scope;
+    const cls = errorClassKeyOf(item.sig);
+    if (cls) signal.entities.push({ kind: 'error', key: cls });
     const walk = walkFromSignals({ signal, store, scope, cache, depth: 2, limit: 5, budgetTokens: 500 });
     const card = buildMemoryCard({ signal, walkResult: walk, store, scope, limit: 5, budgetTokens: 500 });
     const section = String(card?.section ?? '');
@@ -245,7 +248,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30 } 
     }
     if (hit) hits += 1;
     if (specific) specificHits += 1;
-    sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, sameScope: [...prior].some((id) => scopeOf.get(id) === scope) });
+    sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, specific, sameScope: [...prior].some((id) => scopeOf.get(id) === scope) });
   }
   const sameScopeSampled = sampled.filter((x) => x.sameScope).length;
   const sameScopeHits = sampled.filter((x) => x.sameScope && x.hit).length;
