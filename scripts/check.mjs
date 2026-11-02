@@ -24,7 +24,8 @@ else {
   const from = agents.indexOf('## 7 ·');
   const to = agents.indexOf('## 8 ·');
   const sec7 = from >= 0 && to > from ? agents.slice(from, to) : '';
-  if (sec7.includes('条测试')) fail.push('AGENTS.md §7：不要把测试条数写回状态节（数字请进 MAINTENANCE.md）');
+  const wroteNumber = sec7.includes('条测试') || /[0-9]+\s*条/.test(sec7) || /[0-9]+\.[0-9]+\.[0-9]+/.test(sec7);
+  if (wroteNumber) fail.push('AGENTS.md §7：不要写回测试条数/版本号（数字请进 MAINTENANCE.md）');
   else ok.push('AGENTS §7 指针');
 }
 

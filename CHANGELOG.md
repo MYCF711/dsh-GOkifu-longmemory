@@ -2,6 +2,23 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.61.0（2026-11-02）
+
+### audit-03 复核修复：让「台账自证」真正闭环
+- 新增 `scripts/ledger-sync.mjs`：用现场实测**生成**台账的「测试 / 六轴 / 语料」三行（研究值 + 真实时点），
+  不再人工抄写（漂移之源）。
+- `ledger-check` 加严：纳入**局数 / A2 / A4**（容差 0.5pp / 0.5ms）、`--full` 缺测点/时点>20 分钟/
+  解析失败一律 FAIL（fail-closed）；测试计数从失败进程的 stdout 解析，不再当 n/a。
+- `release.mjs` 发版闸改为 `ledger-check --full`，**去掉 `--no-ledger` 逃生门**。
+- 修 `MAINTENANCE.md` §四仍写「私有仓库/不支持分支保护(403)」的陈旧段（与 public+ruleset 矛盾）。
+- 计划表修正：T22 不再把 0.34 的「claim 类表对齐」记在 0.22–0.24；T36 区间收窄为调研 15–16；
+  T38 改为「调研 17–18 + 三轮审计 + 台账自证」。已发布清单补 0.15.0/0.15.2/0.17.0–0.17.3。
+- `AGENTS.md` §7 兜底加严：任何「数字+条」或版本号写回都会红（此前只挡「条测试」子串）。
+- 删除 claim 测试里残留的 `if (sample)` 空转块。
+
+### 验证
+394 条测试（390 pass / 0 fail / 4 skip）；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.60.0（2026-11-02）
 
 ### 台账自证 `scripts/ledger-check.mjs`
