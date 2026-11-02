@@ -329,3 +329,39 @@ test('audit：统计遮蔽与主卷；存在无支撑 claim ⇒ 退出码 1', as
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// R14 · facts：双时态查询（某时点哪些 claim 为真）
+test('facts：validFrom/validTo 生效；--at 早于出生 ⇒ 不返回，晚于截止 ⇒ 不返回', async () => {
+  const { createStore } = await import('../src/rooms/persist.mjs');
+  const root = mkdtempSync(path.join(tmpdir(), 'kifu-facts-'));
+  const day = (n) => Date.parse(`2026-11-0${n}T00:00:00Z`);
+  try {
+    const store = createStore({ root });
+    store.ensureDirs();
+    store.putMany('claims', [
+      { id: 'c-live', kind: 'fact', text: '至今有效', state: 'observed', scopeKey: 'w:d:/x', support: [{ episode: 'ep-a', seq: 1, quote: 'q', occurredAt: day(1) }], counter: [], occurredAt: day(1), validFrom: day(1), validTo: null },
+      { id: 'c-ended', kind: 'fact', text: '已失效', state: 'observed', scopeKey: 'w:d:/x', support: [{ episode: 'ep-b', seq: 1, quote: 'q', occurredAt: day(2) }], counter: [], occurredAt: day(2), validFrom: day(2), validTo: day(4) },
+      { id: 'c-invalid', kind: 'fact', text: '被作废', state: 'invalidated', scopeKey: 'w:d:/x', support: [], counter: [], occurredAt: day(1), validFrom: day(1), validTo: null },
+    ], { at: 1 });
+
+    const at3 = await runCli(['facts', '--store', root, '--at', '2026-11-03T00:00:00Z', '--json']);
+    assert.equal(at3.code, 0);
+    const ids3 = JSON.parse(at3.stdout).rows.map((r) => r.id);
+    assert.ok(ids3.includes('c-live'));
+    assert.ok(ids3.includes('c-ended'), '截止日之前仍有效');
+    assert.ok(!ids3.includes('c-invalid'), 'invalidated 永不返回');
+
+    const at5 = JSON.parse((await runCli(['facts', '--store', root, '--at', '2026-11-05T00:00:00Z', '--json'])).stdout);
+    const ids5 = at5.rows.map((r) => r.id);
+    assert.ok(ids5.includes('c-live'));
+    assert.ok(!ids5.includes('c-ended'), '过了 validTo 就不再为真');
+
+    const at0 = JSON.parse((await runCli(['facts', '--store', root, '--at', '2020-01-01T00:00:00Z', '--json'])).stdout);
+    assert.equal(at0.rows.length, 0, '早于出生时间 ⇒ 空');
+
+    const bad = await runCli(['facts', '--store', root, '--at', '不是日期']);
+    assert.equal(bad.code, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
