@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 仓库自检：版本一致性 + 必备文件 + 私有/不发 npm + 房间清单存在
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 const fail = [];
@@ -62,6 +62,18 @@ try {
   else ok.push('boundary-audit 0 处');
 } catch (error) {
   fail.push(`边界审计跑不起来：${String(error?.message ?? error)}`);
+}
+
+// 调研清单完整性（2026-11-03）：MAINTENANCE 的知识库清单必须覆盖 docs/调研 下的全部编号
+try {
+  const dir = new URL('../docs/调研/', import.meta.url);
+  const nums = readdirSync(dir).map((f) => /^(\d{2})-/.exec(f)?.[1]).filter(Boolean);
+  const ledger = read('MAINTENANCE.md') + read('AGENTS.md');
+  const missing = nums.filter((n) => !new RegExp(`docs/调研/${n}|\`${n}-`).test(ledger));
+  if (missing.length) fail.push(`MAINTENANCE 知识库清单缺：${missing.join(', ')}`);
+  else ok.push(`调研清单 ${nums.length} 篇`);
+} catch (error) {
+  fail.push(`调研清单检查失败：${String(error?.message ?? error)}`);
 }
 
 // 工作树干净检查只在 release.mjs 做，这里只报分支
