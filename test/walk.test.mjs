@@ -832,3 +832,18 @@ test('D3: 反复出现的坑排在一次性高权重命中之前', async () => {
   const b = { ...base, repeat: 2, weight: 0.5, claim: 'c-b' };
   assert.ok(compareHits(a, b) < 0);
 });
+
+// D2 消费方（2026-11-02）：首条消息里的报错原文 → 类级错误实体 → 命中 class 主题
+test('error-class signal: 类级实体按 exact 命中 class 主题（score=1）', async () => {
+  const { matchTopics } = await import('../src/rooms/walk.mjs');
+  const topics = [
+    { id: 't:error:fs', key: 'class:fs-read-before-write', kind: 'error', df: 5 },
+    { id: 't:error:other', key: 'class:tool-unavailable', kind: 'error', df: 2 },
+  ];
+  const signal = { kind: 'root-message', terms: [], entities: [{ kind: 'error', key: 'class:fs-read-before-write' }], at: 1 };
+  const matches = matchTopics({ signal, topics });
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].topic.id, 't:error:fs');
+  assert.equal(matches[0].score, 1);
+  assert.equal(matches[0].matchedBy, 'entity');
+});

@@ -54,6 +54,7 @@ import {
 } from './rooms/inject.mjs';
 import { probeValidity, validityKeyOf, runGates } from './rooms/gates.mjs';
 import { classifyErrorClass } from './rooms/claim.mjs';
+import { errorClassKeyOf } from './rooms/topic.mjs';
 import { createStore } from './rooms/persist.mjs';
 import { createWalkCache } from './rooms/walk.mjs';
 
@@ -394,6 +395,15 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   const scope = scopeKeyFromPath(cwd);
   const signal = signalFromText(text, { at });
   signal.scopeKey = scope;
+  // 首条消息里若直接贴着报错原文（很常见："又报这个错"），把类级错误作为实体信号，
+  // 让「同一类坑」的历史棋谱能被直接命中（D2 类主题的消费方，2026-11-02）。
+  const errClass = errorClassKeyOf(text);
+  if (errClass) {
+    signal.entities = Array.isArray(signal.entities) ? signal.entities : [];
+    if (!signal.entities.some((e) => String(e?.key ?? '') === errClass)) {
+      signal.entities.push({ kind: 'error', key: errClass });
+    }
+  }
 
   const cache = deps.walk ? walkCacheFor(storeRoot, store, deps) : null;
   let walk = null;
