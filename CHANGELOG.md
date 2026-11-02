@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.16.0（2026-11-02）
+
+**设置页可见：记忆库地址（storeRoot）等配置有 GUI 字段了。**
+
+### 新增
+- `src/plugin.mjs` 导出 `Config`（设置表单 schema）：`enabled` / `shadow` / **`storeRoot`（记忆库地址）** / `autoBuild` / `budgetTokens` / `limit` / `oncePerSession`。
+- `storeRoot` 留空 = `<DSH_HOME>/memory-context`；填路径即生效（校验时自动去空白、空串回落默认）。
+- 设置 → 插件 → **dsh-gokifu-longmemory** 里即可看到并修改这些字段，不用手改 JSON。
+
+### 验证
+- 新增单测：schema 必须暴露 storeRoot、validate 归一化；347 条测试全绿。
+
 ## 0.15.2（2026-11-02）
 
 **可安装性修复：之前"设置里找不到插件"是因为包缺 bundle 清单。**
