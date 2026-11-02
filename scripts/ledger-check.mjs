@@ -72,7 +72,9 @@ export function fullCheck(ledger, bad, { now = Date.now() } = {}) {
   else {
     const t = Date.parse(`${ledger.stamp.replace(' ', 'T')}:00`);
     if (!Number.isFinite(t)) out.push(`台账时点不可解析：${ledger.stamp}`);
-    else if (now - t > 20 * 60 * 1000) out.push(`台账时点过旧：${ledger.stamp}（>20 分钟，先跑 ledger-sync）`);
+    // 2026-11-03：20 分钟改成 6 小时。真正的护栏是**数字一致性**（下面 compare 会逐项比），
+    // 时点只用来抓"改完大事忘了 sync"；窗口太短会被发版流程本身（PR/CI 排队）卡死。
+    else if (now - t > 6 * 60 * 60 * 1000) out.push(`台账时点过旧：${ledger.stamp}（>6 小时，先跑 ledger-sync）`);
   }
   if (ledger.a2 === null || ledger.a4 === null) out.push('台账缺 A2/A4 实测值');
   if (ledger.episodes === null) out.push('台账缺局数');
