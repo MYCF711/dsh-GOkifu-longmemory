@@ -518,7 +518,8 @@ function publicHit(hit) {
   }
   if (hit.text) out.text = hit.text;
   if (hit.scopeKey) out.scopeKey = hit.scopeKey;
-  if (finiteNumber(hit.repeat)) out.repeat = hit.repeat; // D3：跨局重复次数（>1 表示反复踩过的坑）
+  if (finiteNumber(hit.repeat)) out.repeat = hit.repeat;
+  if (hit.fix && typeof hit.fix === 'object' && typeof hit.fix.quote === 'string') out.fix = hit.fix; // D3：跨局重复次数（>1 表示反复踩过的坑）
   return out;
 }
 
