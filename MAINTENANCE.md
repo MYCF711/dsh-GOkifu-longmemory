@@ -10,27 +10,27 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-gokifu-longmemory`（**公开**；main 由 ruleset 保护：必须经 PR + required check `rules`，禁 force push/删除；单机单人，不强制审批） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
-| 当前版本 | `0.114.0` |
+| 当前版本 | `0.115.0` |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
 ## 二、当前状态（2026-11-02 20:40 · 整点巡检）
 
 ```
-分支         main = 0.114.0；功能分支 → PR → CI → 合并 → release（--require-ci）
+分支         main = 0.115.0；功能分支 → PR → CI → 合并 → release（--require-ci）
 里程碑       M6 记忆质量收口：D1/D2/D3/D5/N10 已发布；A1/A5 回归已修；类级主卷 + volumes/audit 已上线
 插件         `cordis.patch.yml` 里两条 `disabled: true`；新版 `scripts/re-enable.mjs` 先 `--dry-run` 看「摘除 3 条」，再退出 DSH 执行，重开后 `install-doctor` 应显示「未见 disabled」（该行需重启才能实测；未重启时可先看 `re-enable --dry-run` 的「摘除 3 条」）
 ```
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | **415 条**（411 pass / 0 fail / 4 skip）[本] 2026-11-04 06:14 |
-| 六轴 | A1 **0.00%** · A2 **22.98%** · A3 live · A4 p50 **10.17ms（3 次中位数，单次抖动 ±2ms）** · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-04 06:14 · node scripts/m5-report.mjs` |
-| 语料 | 362 局 / **351 卷** / **claim 982**（有效期已止 104；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-04 06:14 · node scripts/cli.mjs audit + store` |
+| 测试 | **415 条**（411 pass / 0 fail / 4 skip）[本] 2026-11-04 06:41 |
+| 六轴 | A1 **0.00%** · A2 **22.84%** · A3 live · A4 p50 **10.77ms（3 次中位数，单次抖动 ±2ms）** · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-04 06:41 · node scripts/m5-report.mjs` |
+| 语料 | 362 局 / **351 卷** / **claim 982**（有效期已止 104；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-04 06:41 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
-| 已发布 | **0.15.0 → 0.114.0 的 CHANGELOG 段齐全**；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。 |
+| 已发布 | **0.15.0 → 0.115.0 的 CHANGELOG 段齐全**；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。 |
 | 证据 | `M6-acceptance.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
-| 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG`、`20-RAPTOR`、`21-CRAG`、`22-LongMemEval`、`23-Self-RAG`、`24-MemoRAG`、`25-LLM-Agent-记忆综述`、`26-Reflexion`、`27-Zep-时序知识图`、`28-Mem0`、`29-MemGPT`、`30-GenerativeAgents`、`31-GraphRAG`、`00-索引与机制对照` |
+| 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG`、`20-RAPTOR`、`21-CRAG`、`22-LongMemEval`、`23-Self-RAG`、`24-MemoRAG`、`25-LLM-Agent-记忆综述`、`26-Reflexion`、`27-Zep-时序知识图`、`28-Mem0`、`29-MemGPT`、`30-GenerativeAgents`、`31-GraphRAG`、`32-A-MEM`、`00-索引与机制对照` |
 
 ## 三、下一步（2026-11-02 23:40 修订）
 
