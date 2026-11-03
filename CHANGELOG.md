@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.93.0（2026-11-03）
+
+### A2b 诊断字段 + 两条失分归因（度量假象，不是召回失败）
+- m5 的 A2b 采样新增 `hitByClaim / bestOverlap / bestText`，分桶也带 `hitByClaim`。
+- 19 条冻结卷：hit 19/19、hitByClaim 19/19、严格 17/19。两条失分的覆盖 claim 文本来自**同局另一类错误的代表行**，
+  判别词重合 1 和 0 —— 是"类级代表性文本"的度量假象。
+- 结论：**不要**为这两条改排序、也不该指望 Q18=B 来救；真修需要扩展 claim 变体文本 + 重建归档，列入待评估不做。
+- 证据 `evidence/M7-a2b-strict-artifact.md`。
+
+### 验证
+406 条测试（402 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.92.0（2026-11-03）
 
 ### A2b 分桶：失分全部在 openDomain（跨工作区）
