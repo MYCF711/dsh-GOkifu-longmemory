@@ -38,21 +38,63 @@ function walkFiles(dir, out = [], depth = 0) {
 }
 
 export function registrationHit(home = HOME) {
+  // 2026-11-03：只认"真正的注册位置"——profile 的 cordis.patch.yml / cordis.yml / package.json。
+  // 之前把 storages/schedule.json 也算命中（定时任务提示词里正好含包名），造成"已注册"的假阳性。
   const hits = [];
+  let enabled = 0;
   let disabled = 0;
-  for (const file of walkFiles(home)) {
-    let text = '';
-    try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
-    if (!text.includes(PACKAGE)) continue;
-    hits.push(file.replace(home, '$DSH_HOME'));
-    const lines = text.split(String.fromCharCode(10));
-    lines.forEach((line, i) => {
-      if (!line.includes(PACKAGE)) return;
-      const window = lines.slice(Math.max(0, i - 3), Math.min(lines.length, i + 4)).join(String.fromCharCode(10));
-      if (/disabled:\s*true/.test(window)) disabled += 1;
-    });
+  const profileDirs = [];
+  try {
+    const profilesRoot = path.join(home, 'profiles');
+    for (const e of fs.readdirSync(profilesRoot, { withFileTypes: true })) {
+      if (e.isDirectory()) profileDirs.push(path.join(profilesRoot, e.name));
+    }
+  } catch { /* 没有 profiles 目录 */ }
+
+  const readSafe = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch { return ''; } };
+
+  for (const dir of profileDirs) {
+    // package.json：dependencies 或 bundles 里有包名 = 已注册
+    const pkgFile = path.join(dir, 'package.json');
+    const pkgText = readSafe(pkgFile);
+    if (pkgText.includes(PACKAGE)) {
+      hits.push(pkgFile.replace(home, '$DSH_HOME'));
+      try {
+        const pkg = JSON.parse(pkgText);
+        const inDeps = Boolean(pkg?.dependencies?.[PACKAGE]);
+        const inBundles = Array.isArray(pkg?.dsh?.profile?.bundles) && pkg.dsh.profile.bundles.includes(PACKAGE);
+        if (inDeps || inBundles) enabled += 1;
+      } catch { /* 坏 JSON 不当作已启用 */ }
+    }
+
+    // patch/yml：按 "- id:" 顶格块切分，块内出现包名即算一处注册；块内有 disabled: true 算禁用
+    for (const name of ['cordis.patch.yml', 'cordis.yml']) {
+      const file = path.join(dir, name);
+      const text = readSafe(file);
+      if (!text.includes(PACKAGE)) continue;
+      hits.push(file.replace(home, '$DSH_HOME'));
+      const lines = text.split(String.fromCharCode(10));
+      let inBlock = false;
+      let block = [];
+      const flush = () => {
+        if (!block.length) return;
+        const body = block.join(String.fromCharCode(10));
+        if (body.includes(PACKAGE)) {
+          if (/disabled:\s*true/.test(body)) disabled += 1;
+          else enabled += 1;
+        }
+        block = [];
+      };
+      for (const line of lines) {
+        // 注释行是块边界：否则上一条的块会把注释里提到的包名吞进来（实测造成"启用 1 处"假阳性）。
+        if (/^#/.test(line)) { flush(); inBlock = false; continue; }
+        if (/^-\s/.test(line)) { flush(); inBlock = true; }
+        if (inBlock) block.push(line);
+      }
+      flush();
+    }
   }
-  return { hits, disabled };
+  return { hits, enabled, disabled };
 }
 
 export async function doctor({ home = HOME, runs = 5 } = {}) {
@@ -60,9 +102,10 @@ export async function doctor({ home = HOME, runs = 5 } = {}) {
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
 
   const reg = registrationHit(home);
-  add('插件注册（配置里出现包名）', reg.hits.length > 0, reg.hits.length
-    ? `${reg.hits.slice(0, 3).join(', ')}${reg.disabled > 0 ? ` · 其中 ${reg.disabled} 条 disabled:true（等 re-enable）` : ' · 未见 disabled'}`
-    : '未在 $DSH_HOME 的 yml/json 里找到（= 还没安装）');
+  const registered = reg.enabled > 0;
+  add('插件注册（启用，而非仅出现）', registered, reg.hits.length
+    ? `${reg.hits.slice(0, 3).join(', ')} · 启用 ${reg.enabled} 处 · 禁用 ${reg.disabled} 处${registered ? '' : '（只有禁用块 ⇒ 还没跑 re-enable）'}`
+    : '未在 profile 的 cordis.patch.yml / package.json 里找到（= 还没安装）');
 
   try {
     const res = handleConfigRoute({ method: 'GET', dshHome: home });
