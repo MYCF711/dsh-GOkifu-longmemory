@@ -43,7 +43,7 @@ export const AXIS_TITLES = Object.freeze({
   A6: '可回溯（provenance）',
 });
 /** 每条轴允许的状态；`measured` 才有真实数字，`not-live` = 能力在但没上线，`not-consumed` = 没数据。 */
-export const AXIS_STATUSES = Object.freeze(['measured', 'not-live', 'not-consumed']);
+export const AXIS_STATUSES = Object.freeze(['measured', 'not-live', 'not-consumed', 'live', 'live-idle']);
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -425,7 +425,28 @@ export function readPluginFacts(repoRoot = REPO_ROOT) {
   };
 }
 
-export function measureA3({ repoRoot = REPO_ROOT, liveAttempts = 0 } = {}) {
+/** A3 线上心跳（2026-11-03）：读 <store>/live-stats.jsonl，统计尝试与动作分布。 */
+export function readLiveStats(storeRoot) {
+  try {
+    const file = path.join(storeRoot, 'live-stats.jsonl');
+    if (!fs.existsSync(file)) return null;
+    const rows = fs.readFileSync(file, 'utf8').split(String.fromCharCode(10)).filter(Boolean).map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter(Boolean);
+    if (!rows.length) return null;
+    const actions = {};
+    const reasons = {};
+    for (const r of rows) {
+      actions[r.action ?? '?'] = (actions[r.action ?? '?'] ?? 0) + 1;
+      if (r.reason) reasons[r.reason] = (reasons[r.reason] ?? 0) + 1;
+    }
+    return { lines: rows.length, actions, reasons, firstAt: rows[0].at ?? null, lastAt: rows[rows.length - 1].at ?? null };
+  } catch {
+    return null;
+  }
+}
+
+export function measureA3({ repoRoot = REPO_ROOT, liveAttempts = 0, liveStats = null } = {}) {
   const facts = readPluginFacts(repoRoot);
   if (!facts.pluginPresent) {
     return axis({
@@ -434,6 +455,21 @@ export function measureA3({ repoRoot = REPO_ROOT, liveAttempts = 0 } = {}) {
       n: 0,
       status: 'not-consumed',
       caveat: '没有 src/plugin.mjs（宿主入口未落地）⇒ 注入失败率无口径',
+    });
+  }
+  if (liveStats && liveStats.lines > 0) {
+    const injects = liveStats.actions.inject ?? 0;
+    const failed = liveStats.actions.failed ?? liveStats.actions.error ?? 0;
+    return axis({
+      value: injects + failed > 0 ? failed / (injects + failed) : null,
+      unit: 'rate',
+      n: liveStats.lines,
+      status: injects + failed > 0 ? 'live' : 'live-idle',
+      caveat: `插件已在宿主里跑：${liveStats.lines} 次 pre-step 心跳（inject=${injects}，failed=${failed}，skip=${liveStats.actions.skip ?? 0}）；`
+        + (injects + failed > 0
+          ? '失败率按 inject+failed 计。'
+          : '还没有一次真正的注入尝试（当前会话信号都未命中）⇒ 注入可靠性仍未受检，不能把 null 当 0。'),
+      detail: { ...facts, liveAttempts, liveStats },
     });
   }
   return axis({
@@ -662,7 +698,7 @@ export async function runM5(opts = {}) {
       crossScopeLeakRate: a5.value,
     }),
     A2: await measureA2({ dataRoot, storeRoot, now }),
-    A3: measureA3({ repoRoot: opts.repoRoot ?? REPO_ROOT, liveAttempts: opts.liveAttempts ?? 0 }),
+    A3: measureA3({ repoRoot: opts.repoRoot ?? REPO_ROOT, liveAttempts: opts.liveAttempts ?? 0, liveStats: readLiveStats(storeRoot) }),
     A4: measureA4({ pipeline }),
     A5: a5,
     A6: a6,
