@@ -24,7 +24,7 @@ const readRows = () => {
 for (;;) {
   const rows = readRows();
   if (rows) {
-    const injects = rows.filter((r) => r.action === 'inject');
+    const injects = rows.filter((r) => r.action === 'inject' && String(r.src ?? '') === 'index.js');
     if (injects.length) {
       const first = injects[0];
       const lines = [

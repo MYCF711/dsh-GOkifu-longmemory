@@ -430,10 +430,13 @@ export function readLiveStats(storeRoot) {
   try {
     const file = path.join(storeRoot, 'live-stats.jsonl');
     if (!fs.existsSync(file)) return null;
-    const rows = fs.readFileSync(file, 'utf8').split(String.fromCharCode(10)).filter(Boolean).map((l) => {
+    let rows = fs.readFileSync(file, 'utf8').split(String.fromCharCode(10)).filter(Boolean).map((l) => {
       try { return JSON.parse(l); } catch { return null; }
     }).filter(Boolean);
-    if (!rows.length) return null;
+    // 2026-11-04：只认宿主写的行（src=index.js）。仿真/测试脚本写的行 src 是脚本名，不能当线上证据。
+    const hostRows = rows.filter((r) => String(r.src ?? '') === 'index.js');
+    if (!hostRows.length) return null;
+    rows = hostRows;
     const actions = {};
     const reasons = {};
     for (const r of rows) {

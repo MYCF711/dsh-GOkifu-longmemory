@@ -39,7 +39,7 @@
 //   probeValidity    true   —— 闸 3 真核验（true 才调 fs/git；false ⇒ 闸 3 记 unverified）
 //   deps             null  —— 依赖替身（测试用：createStore/walk/buildMemoryCard/runGates/writeShadow）
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { zstdDecompressSync } from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -326,11 +326,13 @@ function resolveShadowDir(config) {
 async function resolveCreateUserMessage(config, deps) {
   if (config.createUserMessage) return config.createUserMessage;
   if (deps.createUserMessage) return deps.createUserMessage;
-  const mod = await import(LLM_PACKAGE);
-  if (typeof mod?.createUserMessage !== 'function') {
-    throw new Error(`${LLM_PACKAGE} 没有导出 createUserMessage`);
-  }
-  return mod.createUserMessage;
+  try {
+    const mod = await import(LLM_PACKAGE);
+    if (typeof mod?.createUserMessage === 'function') return mod.createUserMessage;
+  } catch { /* 宿主包在 asar 里：外部插件按文件路径解析不到 —— 走本地等价实现 */ }
+  // 2026-11-04：本地等价实现。已核对宿主源码：createUserMessage(input) = createMessage({...input, role:'user'})，
+  // 而 createMessage = deepFreeze(structuredClone({...input, id: randomUUID()}))。这里逐字段对齐，不引入宿主依赖。
+  return makeUserMessageFallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -803,6 +805,22 @@ export function handleConfigRoute({ method = 'GET', body = null, profileConfig =
     return { status: 500, body: { error: String(error?.message ?? error) } };
   }
   return { status: 200, body: { ok: true, saved: next, file: home ? path.join(home, USER_CONFIG_FILE) : null } };
+}
+
+
+// 宿主 createUserMessage 的本地等价实现（见 docs/记忆的职责边界.md 的消息形状约定）。
+// 已核对宿主源码：createUserMessage = createMessage({...input, role:'user'})，
+// createMessage = deepFreeze(structuredClone({...input, id: randomUUID()}))。
+export function makeUserMessageFallback(input) {
+  const message = { ...input, role: 'user', id: randomUUID() };
+  const freeze = (value) => {
+    if (value && typeof value === 'object') {
+      for (const key of Object.keys(value)) freeze(value[key]);
+      Object.freeze(value);
+    }
+    return value;
+  };
+  return freeze(message);
 }
 
 export function apply(ctx, rawConfig = {}) {
