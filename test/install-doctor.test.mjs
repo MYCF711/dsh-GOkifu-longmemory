@@ -59,3 +59,10 @@ test('doctor: 没有注册 ⇒ enabled=0 且 hits 为空', () => {
   assert.deepEqual(r.hits, []);
   rmSync(home, { recursive: true, force: true });
 });
+
+test('doctor: kifu-loader 别名在依赖里 ⇒ 视为启用', () => {
+  const home = mk('', { dependencies: { 'kifu-loader': 'link:/x/packages/kifu-loader' } });
+  const r = registrationHit(home);
+  assert.equal(r.enabled, 1, '别名包应算启用');
+  rmSync(home, { recursive: true, force: true });
+});
