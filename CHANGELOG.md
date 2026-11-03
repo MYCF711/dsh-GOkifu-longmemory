@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.101.0（2026-11-03）
+
+### A3 状态：not-live → live-idle（插件已在宿主里跑）
+- `memory-context/live-stats.jsonl` 出现并持续增长：1484 行（20:09–20:40），src=index.js（宿主加载器）。
+- 动作全是 skip（no-signal 1428 · no-hit 56）：**还没有一次真正的注入尝试**。
+- 存储完整性：`cli verify` OK（5485 文件 / 0 错误）；store 267 局 / 761 claim（宿主内 autoArchive 已归档）。
+- `m5` 的 A3 改为消费心跳：有心跳 → `live-idle`（value=null）；出现 inject/failed 才 `live` 并计算失败率。
+- 证据 `evidence/M7-A3-live.md`。
+
+### 验证
+409 条测试（405 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.100.0（2026-11-03）
 
 ### 对标文档刷新到今天的实测
