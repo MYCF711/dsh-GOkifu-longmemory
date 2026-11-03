@@ -1,28 +1,26 @@
 @echo off
-title Kifu-in enable
+chcp 65001 >nul
+title Kifu-in enable (safe)
 echo ============================================
-echo  Please FULLY QUIT DSH first (quit/restart in app).
-echo  Do NOT continue while DSH is still running.
+echo  1) FULLY QUIT DSH first (quit the app, do not just close the window)
+echo  2) Then run this file
+echo  It refuses to touch anything while DSH is running.
 echo ============================================
 echo.
 pause
 cd /d "%~dp0."
-echo [1/2] checking node ...
 where node >nul 2>nul
 if errorlevel 1 (
   echo node.exe not found. Install Node.js first.
   pause
   exit /b 1
 )
-echo [2/2] running re-enable (backups patch + package.json) ...
 node "scripts/re-enable.mjs"
-if errorlevel 1 (
-  echo.
-  echo FAILED. Copy this window text to lead.
-  pause
-  exit /b 1
-)
+set RC=%ERRORLEVEL%
 echo.
-echo DONE. Reopen DSH, then run: node "scripts/install-doctor.mjs"
-echo Expect the disabled line to become: no disabled
+if "%RC%"=="0" echo OK: plugin enabled. You can reopen DSH now.
+if "%RC%"=="2" echo SKIPPED: DSH is still running. Nothing was changed. Quit DSH and run again.
+if "%RC%"=="1" echo FAILED: changes were rolled back. DSH config is unchanged and safe.
+echo.
 pause
+exit /b %RC%

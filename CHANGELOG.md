@@ -2,6 +2,42 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.89.0（2026-11-03）
+
+### 安装：别名包 `kifu-loader`（不改热重载开关就能启用）
+- 历史遗留的两个 `disabled: true` 块会压过 bundle 列表，导致同名包永不加载；改 patch 又必须 DSH 关闭。
+- 新增 `packages/kifu-loader`：只是把 `src/plugin.mjs` 原样再导出一次，profile 注册的是 `kifu-loader`（不在任何禁用名单里）。
+- profile 侧：依赖 + bundles 增加 `kifu-loader`，移除原来的 `dsh-gokifu-longmemory` bundle（依赖保留），`pnpm install` 完成。
+- 预检：导入成功、`apply` 注册 `agent/pre-step` + `agent/turn-stopping`、真实库无报错。
+
+### 对比方案
+- 直接改 patch：需 DSH 全程关闭 + 有热重载风险（本机事故历史）；
+- 别名包：只改 profile 的 `package.json`（非热重载开关），重启一次即生效，失败可整包移除回滚。
+
+### 验证
+405 条测试（401 pass / 0 fail / 4 skip）；`check PASS`。
+
+## 0.88.0（2026-11-03）
+
+### 安全版 re-enable：失败也炸不了 DSH
+- **运行中拒绝**：检测到 `DeepSeek Harness.exe` 在跑就退出（exit 2），一个字节都不写——这是唯一会炸 DSH 的路径。
+- **先算后写**：JSON 解析、patch 结构校验（块数按条目计、无残留禁用块、结尾换行）全部在写盘前完成；不过就中止。
+- **原子写 + 备份**：临时文件 + rename；写前备份 `*.bak-reenable-<ts>`。
+- **写后读回校验**；**pnpm 失败自动回滚**（patch 与 package.json 恢复原样），并打印"已回滚，DSH 不受影响"。
+- 依赖已就绪则跳过 pnpm（关掉到重开只需数秒）。
+- `开启长期记忆.cmd` 改为按退出码显示三态：成功 / DSH 仍在运行（未改动）/ 失败已回滚。
+
+### 实测（假 home）
+| 场景 | 结果 |
+|---|---|
+| DSH 运行中（真实 home） | 拒绝，未写任何文件 |
+| 正常（假 home，--force） | 摘除 2 块 + 1 注释，其它块原样，依赖/bundle 补上 |
+| package.json 坏 JSON | 写前中止，patch md5 不变 |
+| pnpm 强制失败 | 回滚成功：patch 恢复 6 条禁用、依赖回到未装 |
+
+### 验证
+405 条测试（401 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.87.0（2026-11-03）
 
 ### 零命令行启用：关掉 DSH 就自动装好

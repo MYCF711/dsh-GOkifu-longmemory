@@ -1,45 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stripDisableBlock } from '../scripts/re-enable.mjs';
+import { stripDisableBlock, validatePatch } from '../scripts/re-enable.mjs';
 
-const NAME = 'dsh-gokifu-longmemory';
+const PATCH = `- id: other
+  name: "@x/theme"
+  config:
+    a: 1
 
-test('re-enable: 精准删掉禁用条目，保留其它条目与注释', () => {
-  const yml = [
-    'services:',
-    '  - id: keep-me',
-    '    name: other-plugin',
-    '    config:',
-    '      a: 1',
-    '# === 临时禁用：dsh-gokifu-longmemory（cap: 卡死 web boot）===',
-    '  - id: kifu-longmemory',
-    `    name: ${NAME}`,
-    '    disabled: true',
-    '  - id: dsh-gokifu-longmemory',
-    `    name: ${NAME}`,
-    '    disabled: true',
-    '  - id: after',
-    '    name: tail-plugin',
-  ].join('\n');
-  const out = stripDisableBlock(yml, NAME);
-  assert.equal(out.removed, 3, '注释 1 + 条目 2');
-  assert.match(out.text, /id: keep-me/);
-  assert.match(out.text, /id: after/, '后续条目必须保留');
-  assert.doesNotMatch(out.text, /disabled: true/);
-  assert.doesNotMatch(out.text, /临时禁用/);
+# === 临时禁用：dsh-gokifu-longmemory ===
+- id: kifu
+  name: dsh-gokifu-longmemory
+  disabled: true
+- id: dsh-gokifu-longmemory
+  name: dsh-gokifu-longmemory
+  disabled: true
+- id: keep
+  name: "@x/others"
+`;
+
+test('stripDisableBlock: 只摘本插件块与注释，别的块原样保留', () => {
+  const r = stripDisableBlock(PATCH);
+  assert.equal(r.removedEntries, 2);
+  assert.equal(r.removedComments, 1);
+  assert.ok(!r.text.includes('dsh-gokifu-longmemory'));
+  assert.ok(r.text.includes('@x/theme'));
+  assert.ok(r.text.includes('@x/others'));
 });
 
-test('re-enable: 没有禁用块时幂等（不改内容）', () => {
-  const yml = 'services:\n  - id: a\n    name: keep\n';
-  const out = stripDisableBlock(yml, NAME);
-  assert.equal(out.removed, 0);
-  assert.equal(out.text, yml);
+test('stripDisableBlock: 没有本插件时原样返回', () => {
+  const text = '- id: a\n  name: "@x/a"\n';
+  const r = stripDisableBlock(text);
+  assert.equal(r.removed, 0);
+  assert.equal(r.text, text);
 });
 
-test('re-enable: 已启用（无 disabled）的条目保留并计数', () => {
-  const yml = `services:\n  - id: x\n    name: ${NAME}\n`;
-  const out = stripDisableBlock(yml, NAME);
-  assert.equal(out.removed, 0);
-  assert.equal(out.disabledLeft, 1);
-  assert.match(out.text, new RegExp(NAME));
+test('validatePatch: 块数按"仅条目"计（注释不算块）', () => {
+  const r = stripDisableBlock(PATCH);
+  const errs = validatePatch(PATCH, r.text, r.removedEntries);
+  assert.deepEqual(errs, [], errs.join('；'));
+});
+
+test('validatePatch: 块数不对要报（防误删别人的条目）', () => {
+  const r = stripDisableBlock(PATCH);
+  const wrong = validatePatch(PATCH, r.text, 5);
+  assert.ok(wrong.some((e) => e.includes('块数不对')));
 });
