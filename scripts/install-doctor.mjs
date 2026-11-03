@@ -22,6 +22,8 @@ const execFileAsync = promisify(execFile);
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || process.env.HOME || '.', 'DeepSeek Harness', 'home');
 const PACKAGE = 'dsh-gokifu-longmemory';
+// 2026-11-03：别名包。历史 disabled 块会让 PACKAGE 永不加载，profile 里改用 kifu-loader 挂载。
+const ALIASES = ['kifu-loader'];
 
 function walkFiles(dir, out = [], depth = 0) {
   if (depth > 4) return out;
@@ -57,12 +59,13 @@ export function registrationHit(home = HOME) {
     // package.json：dependencies 或 bundles 里有包名 = 已注册
     const pkgFile = path.join(dir, 'package.json');
     const pkgText = readSafe(pkgFile);
-    if (pkgText.includes(PACKAGE)) {
+    if (pkgText.includes(PACKAGE) || ALIASES.some((a) => pkgText.includes(a))) {
       hits.push(pkgFile.replace(home, '$DSH_HOME'));
       try {
         const pkg = JSON.parse(pkgText);
-        const inDeps = Boolean(pkg?.dependencies?.[PACKAGE]);
-        const inBundles = Array.isArray(pkg?.dsh?.profile?.bundles) && pkg.dsh.profile.bundles.includes(PACKAGE);
+        const names = [PACKAGE, ...ALIASES];
+        const inDeps = names.some((n) => Boolean(pkg?.dependencies?.[n]));
+        const inBundles = Array.isArray(pkg?.dsh?.profile?.bundles) && names.some((n) => pkg.dsh.profile.bundles.includes(n));
         if (inDeps || inBundles) enabled += 1;
       } catch { /* 坏 JSON 不当作已启用 */ }
     }
@@ -71,7 +74,7 @@ export function registrationHit(home = HOME) {
     for (const name of ['cordis.patch.yml', 'cordis.yml']) {
       const file = path.join(dir, name);
       const text = readSafe(file);
-      if (!text.includes(PACKAGE)) continue;
+      if (!text.includes(PACKAGE) && !ALIASES.some((a) => text.includes(a))) continue;
       hits.push(file.replace(home, '$DSH_HOME'));
       const lines = text.split(String.fromCharCode(10));
       let inBlock = false;
@@ -79,7 +82,7 @@ export function registrationHit(home = HOME) {
       const flush = () => {
         if (!block.length) return;
         const body = block.join(String.fromCharCode(10));
-        if (body.includes(PACKAGE)) {
+        if (body.includes(PACKAGE) || ALIASES.some((a) => body.includes(a))) {
           if (/disabled:\s*true/.test(body)) disabled += 1;
           else enabled += 1;
         }
@@ -106,6 +109,9 @@ export async function doctor({ home = HOME, runs = 5 } = {}) {
   add('插件注册（启用，而非仅出现）', registered, reg.hits.length
     ? `${reg.hits.slice(0, 3).join(', ')} · 启用 ${reg.enabled} 处 · 禁用 ${reg.disabled} 处${registered ? '' : '（只有禁用块 ⇒ 还没跑 re-enable）'}`
     : '未在 profile 的 cordis.patch.yml / package.json 里找到（= 还没安装）');
+  if (registered && reg.disabled > 0) {
+    add('历史禁用块（不影响别名包）', true, `${reg.disabled} 处 disabled:true 仍指向原包名；当前通过 kifu-loader 别名挂载，可忽略`);
+  }
 
   try {
     const res = handleConfigRoute({ method: 'GET', dshHome: home });
