@@ -29,3 +29,10 @@ A6（可回溯）没错（引用确实存在），错在 **A5（按工作区隔�
 - 新增单测 `R12/A5: u:owner 类级 claim 只选同作用域 support`：构造 a/b 两作用域的 claim，断言卡里不出现 `ep-scope0002`；
 - 线上口径：`scripts/audit-card-samples.mjs` 的 `crossScopeRefs` 应为 **0**（下次宿主加载本版后重新抽样核对）；
 - 离线 `m5` 的 A5 门槛不变（0 越界）。
+
+## 指标连带变化（必须如实记）
+补闸后 `m5`：A2b 严格 **89.5% → 84.2%（16/19）**、A5 仍 0、A3 live。
+掉的是原本由 `u:owner` 跨作用域 claim 命中的 1–2 条 —— 那是越界命中，不该算分。旧读数作废。
+
+Q18 开关（walk 的 `allowCrossScopeClass`）保持不变：打开时 walk 会给 hit 打 `class:cross-scope`，
+注入层据此放行并在行首标 `[跨项目]`；默认关闭，所以线上仍是 84.2%。
