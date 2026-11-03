@@ -468,7 +468,9 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   if (!config.enabled) return { decision, action: 'skip', reason: 'disabled', card, gates, digest };
   if (!gates?.ok) {
     warn(ctx, `闸门未通过（本轮不注入）：${(gates?.errors ?? []).map((e) => e.code).slice(0, 5).join(', ')}`);
-    return { decision, action: 'skip', reason: 'gates-failed', card, gates, digest };
+    // 2026-11-04：记下是哪几道闸拦的（只写闸 id，不写卡内容，避免把记忆写进心跳）。
+    const failedIds = Array.isArray(gates?.failed) ? gates.failed.map((g) => (typeof g === 'string' ? g : g?.id)).filter(Boolean) : [];
+    return { decision, action: 'skip', reason: 'gates-failed', card, gates, digest, gateIds: failedIds };
   }
   if (!card?.section || !text2) return { decision, action: 'skip', reason: 'no-hit', card, gates, digest };
 
@@ -925,6 +927,7 @@ export function apply(ctx, rawConfig = {}) {
           scope: lastResolvedScope(session?.id)?.scope ?? null,
           scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
           action: result.action ?? 'skip',
+          gateIds: Array.isArray(result.gateIds) && result.gateIds.length ? result.gateIds : null,
           reason: result.reason ?? null,
           digest: result.digest ?? null,
           tokens: result.card?.tokens ?? null,
