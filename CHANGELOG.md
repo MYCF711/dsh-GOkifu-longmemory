@@ -2,6 +2,32 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.98.0（2026-11-03）
+
+### 安装真相：bundle 必须自己声明 `dsh.bundle.patch`（否则宿主不读它的 patch）
+- 从 DSH 实现里确认：`dsh.profile.bundles` 的每一项，宿主只读它在 package.json 里**声明**的 patch
+  （`"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`），不是"包里有文件就会读"。
+- 因此 0.89 的别名包只进 bundles 没有声明 → 宿主什么都没插；profile 里两块 disabled 依旧生效。
+- 修：`packages/kifu-loader` ① 自带 `cordis.patch.yml`（insert id `kifu-memory`、name `kifu-loader`）；
+  ② package.json 声明 `dsh.bundle.patch`；③ 导出 `./cordis.patch.yml`。
+- 生效判据不变：重启后 `live-stats.jsonl` 出现行。
+
+### 验证
+409 条测试（405 pass / 0 fail / 4 skip）；`check PASS`。
+
+## 0.97.0（2026-11-03）
+
+### N9 接线：按签名追回历史失败原文（只追加、受 A5 约束）
+- `buildMemoryCard` 命中签名时追加索引条目（原文 + episode/seq/occurredAt），每信号 ≤2 条，不替换既有 claim。
+- 归档成功后自动重建签名索引（失败只记一行，不影响归档）。
+- 作用域对齐时实测：卡片第一行就是那条真实失败（`ep-8cc34e32, seq 7148`）。
+- 现行 A5 下六轴不变：hit 19/19 · 严格 17/19 · 可读 17/19 · A1=0 · A5=0 · A4 4.5ms。
+- **结论：A2b 89.5% 的天花板来自 A5（同作用域）而非检索**；Q18=B 才会看到提升。
+- 证据 `evidence/M7-N9-verified.md`。
+
+### 验证
+409 条测试（405 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.96.0（2026-11-03）
 
 ### N9 第一步：签名索引（历史失败原文可检索）

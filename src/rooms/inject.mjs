@@ -15,6 +15,8 @@
 //   排序      失败教训 → 约束/偏好 → 事实 → 定式候选（同档按 occurredAt 新→旧）
 
 import fs from 'node:fs';
+import { extractErrorKey } from './topic.mjs';
+import { loadSignatureIndex, lookupSignature } from './sigindex.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -455,7 +457,7 @@ function entryFromEpisode(hit, view) {
  * hits → 候选条目。缺 (episode, seq, occurredAt) 的条目**直接丢**（无源不入、无时不入），
  * 只计数进省略；这样记忆卡本身不会出现「有行没出处」的形态。
  */
-function collectEntries({ hits, view, scope = null, preferenceHardOnly = false }) {
+function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, signal = null, sigIndex = null }) {
   const entries = [];
   let droppedNoProvenance = 0;
   let droppedNoText = 0;
@@ -489,7 +491,38 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false }
     if (entries.length >= cap) break;
   }
 
-  return { entries, dropped: { noProvenance: droppedNoProvenance, noText: droppedNoText, softPreference: droppedSoftPreference } };
+  // N9（2026-11-03）：按签名补"这条失败在本局/历史局里真实出现过的原文"。
+  // 只**追加**、不替换既有 claim（N8 教训）；每信号最多 2 条；作用域必须一致（A5）。
+  let sigAdded = 0;
+  const sigKey = signal && typeof signal.text === 'string' ? extractErrorKey(signal.text) : null;
+  for (const item of lookupSignature(sigIndex, sigKey, { limit: 2 })) {
+    if (!item || !item.episode) continue;
+    const rec = view.episodesById.get(String(item.episode));
+    if (scope) {
+      const epScope = rec && typeof rec.scopeKey === 'string' ? rec.scopeKey : null;
+      if (!epScope || epScope !== scope) continue;
+    }
+    const text = String(item.snippet ?? '').trim();
+    if (!text) continue;
+    const dedupe = `${item.episode}\u0000${item.seq ?? ''}\u0000${text}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    const entry = buildEntry({
+      episode: String(item.episode),
+      seq: Number.isFinite(item.seq) ? item.seq : null,
+      occurredAt: Number.isFinite(item.occurredAt) ? item.occurredAt : null,
+      marker: 'observed',
+      state: 'observed',
+      text,
+      kind: 'failure',
+    });
+    if (!entry) continue;
+    entries.push(entry);
+    sigAdded += 1;
+    if (entries.length >= cap) break;
+  }
+
+  return { entries, sigAdded, dropped: { noProvenance: droppedNoProvenance, noText: droppedNoText, softPreference: droppedSoftPreference } };
 }
 
 function compareEntries(a, b) {
@@ -575,6 +608,7 @@ export function buildMemoryCard({
   // walk 在遍历时拒掉的条数（R11 自己按作用域过滤的统计）：只作审计字段，不算"卡里少了几条"。
   const crossScopeWalk = Number.isFinite(walkCrossScope) && walkCrossScope > 0 ? walkCrossScope : 0;
   const view = storeView(store, cache);
+  const sigIndex = store && typeof store.root === 'string' ? loadSignatureIndex(store.root) : null;
   const hits = Array.isArray(walkResult?.hits) ? walkResult.hits : [];
   const idxPath = indexPath ?? view.indexPath ?? 'memory-context/index.md';
   const episodes = Number.isFinite(episodeCount) ? episodeCount : view.episodeCount;
@@ -616,7 +650,7 @@ export function buildMemoryCard({
     };
   }
 
-  const { entries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly });
+  const { entries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex });
   const sorted = entries.slice().sort(compareEntries);
   const droppedProvenance = dropped.noProvenance + dropped.noText;
 
