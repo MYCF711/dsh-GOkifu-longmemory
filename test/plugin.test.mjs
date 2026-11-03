@@ -11,7 +11,7 @@
 //   8. decision.kind !== "enter" ⇒ 原样返回
 //   9. **不写会话事件**：session.append 一次都没被调用；原数组不被原地改
 //  10. 插入位置 = 最后一条 claimed 消息之后（与压缩插件同一语义，互不代管）
-//  11. 宿主没有 @deepseek-ai/dsh-llm 且没给替身 ⇒ 安静跳过 + warn（这里真的没有那个包）
+//  11. 宿主包解析不到 ⇒ 用本地等价工厂注入（形状与宿主 createUserMessage 对齐）
 //  12. 纯函数：messageText / lastUserText / digestOf / insertAfterClaimed / cardText / sanitizeConfig
 
 import test from 'node:test';
@@ -440,16 +440,19 @@ test('R16: 注入位置 = 最后一条 claimed 消息之后（后面的非 claim
   }
 });
 
-test('R16: 宿主没有 @deepseek-ai/dsh-llm 且没给替身 ⇒ 安静跳过 + warn（本机确实没这个包）', async () => {
+test('R16: 宿主包解析不到时用本地等价工厂注入（2026-11-04 起不再依赖 asar 内包）', async () => {
   const { workspace, storeRoot, cleanup } = makeWorkspace();
   try {
-    const { ctx, hooks, warns } = makeCtx();
+    const { ctx, hooks } = makeCtx();
     const { session } = makeSession(workspace);
     apply(ctx, { enabled: true, shadow: false, storeRoot, now: T(24) }); // 故意不给 createUserMessage
     const original = enterDecision([userMessage('yaml 装不上')]);
     const out = await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: original });
-    assert.equal(out, original, '造不出消息就不注入，但绝不抛');
-    assert.ok(warns.some((w) => w.includes('注入失败')), warns.join(' | '));
+    assert.notEqual(out, original, '有命中就该注入（本地工厂兜底）');
+    const injected = out.messages.find((m) => m?.source?.kind === 'dsh-gokifu-longmemory');
+    assert.ok(injected, '注入消息必须带 source.kind');
+    assert.equal(injected.role, 'user');
+    assert.ok(Object.isFrozen(injected));
   } finally {
     cleanup();
   }
@@ -761,4 +764,14 @@ test('A3 心跳: liveStats 默认写 live-stats.jsonl，关掉则不写', async 
   assert.ok(on.text.split('\n').filter(Boolean).length >= 1);
   const off = await mk(false);
   assert.equal(off.exists, false, 'liveStats:false 不应写');
+});
+
+test('R16: 宿主包不可解析时，本地消息工厂形状与宿主一致（不动 asar）', async () => {
+  const { makeUserMessageFallback } = await import('../src/plugin.mjs');
+  const msg = makeUserMessageFallback({ content: [{ type: 'text', text: 'x' }], source: { kind: 'dsh-gokifu-longmemory', form: 'memory-card', digest: 'abc' } });
+  assert.equal(msg.role, 'user');
+  assert.match(msg.id, /^[0-9a-f-]{36}$/);
+  assert.deepEqual(msg.content, [{ type: 'text', text: 'x' }]);
+  assert.equal(msg.source.form, 'memory-card');
+  assert.ok(Object.isFrozen(msg) && Object.isFrozen(msg.content));
 });
