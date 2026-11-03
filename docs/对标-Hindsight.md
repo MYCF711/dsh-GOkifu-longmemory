@@ -124,7 +124,7 @@
 |---|---|---|
 | A1 负迁移 | **0%**，覆盖 **26/26**（全部被闸拦下，非空转） | `evidence/M7-A1-exercised.md` |
 | A2 收益 | LOO（只计错误签名）**25.3%**；时间切分 holdout **24.2%**（45/186）；**注入召回 A2b：覆盖 19/19、严格 17/19（89.5%）** | 分桶：multiHop 15/15、openDomain 2/4（`evidence/M7-a2b-buckets.md`） |
-| A3 可靠性 | **not-live**（插件未被宿主加载；判据 `live-stats.jsonl`） | 安装机制已修正到 bundle patch 层（0.98.0），待一次重启 |
+| A3 可靠性 | **live**：宿主 14 次真实注入、失败 0（`live-stats` 只统计 `src=index.js`） | 2026-11-04 05:24 首条；作用域两类兜底均在真实注入中出现 |
 | A4 延迟/成本 | 合成 p50 4–5ms；**真实会话注入 p50 22.4ms / p95 32.9ms**（167 局 / 533 claim） | Hindsight p50 **4,715ms**；随语料近似线性（`evidence/M7-latency-vs-corpus.md`） |
 | A5 作用域 | 越界 **0**（真实会话回放 39 局） | |
 | A6 可回溯 | **100%**（每条注入带 episode+seq+日期） | 单测断言 |
