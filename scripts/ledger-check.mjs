@@ -51,7 +51,11 @@ export const LIVE_DRIFT = Object.freeze({ claim: 12, threads: 12, episodes: 12 }
 export function compare(ledger, actual, { live = false } = {}) {
   const has = (v) => Number.isFinite(v);
   const bad = [];
-  const drift = live ? LIVE_DRIFT : { claim: 0, threads: 0, episodes: 0 };
+  // 容差按比例：语料在线上持续增长，固定 ±12 会被正常归档追上；2%（下限 12）仍能挡住"改错了"的量级。
+  const scale = (v, base) => (live ? Math.max(base, Math.ceil((Number.isFinite(v) ? v : 0) * 0.02)) : 0);
+  const drift = live
+    ? { claim: scale(actual.claim, LIVE_DRIFT.claim), threads: scale(actual.threads, LIVE_DRIFT.threads), episodes: scale(actual.episodes, LIVE_DRIFT.episodes) }
+    : { claim: 0, threads: 0, episodes: 0 };
   if (ledger.version && actual.version && ledger.version !== actual.version) bad.push(`版本：台账 ${ledger.version} vs package ${actual.version}`);
   if (ledger.tests && actual.tests) {
     for (const k of ['total', 'pass', 'fail', 'skip']) {

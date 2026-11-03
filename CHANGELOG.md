@@ -2,6 +2,30 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.108.0（2026-11-04）
+
+### audit-07 修复（有条件通过 → 逐条处理）
+- **台账容差改为按比例**：线上 `autoArchive` 持续入馆，固定 ±12 会被正常增长追上；改为「live 时 2%（下限 12）」，claim 836 vs 852 这类正常漂移不再误报，量级错误仍会被挡。
+- **`m5` 状态标签补齐** `live` / `live-idle`（此前状态列打印 undefined）。
+- **`MAINTENANCE.md` 已发布列表补全 0.78 → 0.108**（此前止于 0.77.3）。
+- **装前预检加动态导入**：`import('kifu-loader')` + `apply` 可用性 + 插件名核对；软链缺失/复制安装导致 re-export 断裂会当场报错，而不是宿主静默失败（audit-07 指出的唯一安装风险）。
+- **引用纠正**：`evidence/M7-replay-live.md` 补记「跨作用域 0 应引 m5 A5 读数」，该文件只作"注入是否发生"的证据。
+- 说明：audit-07 报的「ledger-check FAIL 仍 exit 0」是管道取尾部导致的误读——脚本 `main` 里是 `process.exit(out.ok ? 0 : 1)`；已在报告复核项里备注。
+
+### 验证
+414 条测试（410 pass / 0 fail / 4 skip）；`check PASS`；`preflight PASS`（含动态导入）。
+
+## 0.107.0（2026-11-04）
+
+### N10 线上验证：scopeFrom=session-log 生效
+- 重启后新 pid 的心跳带 `scope=w:d:/…/长期记忆系统`、`scopeFrom=session-log`——不再是 `profiles/desktop` 假作用域。
+- 心跳 4301 → 4889；仍 0 注入，因为当前消息无信号（`no-signal`），符合设计。
+- 首次注入守望已重启（30 秒间隔 / 12 小时），命中即自动落证 `evidence/M7-A3-first-inject.md`。
+- 证据 `evidence/M7-N10-live.md`。
+
+### 验证
+414 条测试（410 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.106.0（2026-11-04）
 
 ### Q18 开闸设计（B 方案，默认关，先合后翻）
