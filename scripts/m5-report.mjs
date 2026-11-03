@@ -260,6 +260,28 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     const isSameScope = item.sameScope !== undefined ? Boolean(item.sameScope) : [...prior].some((id) => scopeOf.get(id) === scope);
     sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, specific, sameScope: isSameScope });
   }
+  // 2026-11-03（调研 28 Mem0）：按 LOCOMO 四类做机械分桶，便于看短板。
+  // 规则（优先级从上到下）：temporal（签名含时间词/时间戳）> multi-hop（prior ≥2 局）> open-domain（跨工作区）> single-hop。
+  const TIME_RE = /(\d{4}-\d{2}-\d{2}|\d+\s*(秒|分钟|小时|天|周|月|年)|今天|昨天|刚才|最近|上周|上个月)/;
+  const bucketOf = (item, priorSize, sameScope) => {
+    const sig = String(item.sig ?? '');
+    if (TIME_RE.test(sig)) return 'temporal';
+    if (priorSize >= 2) return 'multiHop';
+    if (!sameScope) return 'openDomain';
+    return 'singleHop';
+  };
+  for (const row of sampled) {
+    const item = use.find((x) => x.sig.slice(0, 60) === row.sig) ?? {};
+    row.bucket = bucketOf(item, Array.isArray(row.prior) ? row.prior.length : 0, row.sameScope);
+  }
+  const buckets = {};
+  for (const row of sampled) {
+    const b = row.bucket ?? 'singleHop';
+    buckets[b] = buckets[b] ?? { n: 0, specific: 0, hit: 0 };
+    buckets[b].n += 1;
+    if (row.specific) buckets[b].specific += 1;
+    if (row.hit) buckets[b].hit += 1;
+  }
   const sameScopeSampled = sampled.filter((x) => x.sameScope).length;
   const sameScopeHits = sampled.filter((x) => x.sameScope && x.hit).length;
   return {
@@ -278,6 +300,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     crossScopeSampled: sampled.filter((x) => !x.sameScope).length,
     crossScopeStrict: sampled.filter((x) => !x.sameScope && x.specific).length,
     sampled,
+    buckets,
   };
 }
 
@@ -324,7 +347,7 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
       n,
       status: measured ? 'measured' : 'not-consumed',
       caveat: measured
-        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout** rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}）；**注入召回 A2b** 覆盖=${injectionRecall && Number.isFinite(injectionRecall.recall) ? pct(injectionRecall.recall) : 'n/a'}（${injectionRecall?.hits ?? '?'}/${injectionRecall?.n ?? '?'}）· **严格**=${injectionRecall && Number.isFinite(injectionRecall.recallSpecific) ? pct(injectionRecall.recallSpecific) : 'n/a'}（${injectionRecall?.specificHits ?? '?'}/${injectionRecall?.n ?? '?'}）；**跨项目唯先例** ${injectionRecall?.crossScopeStrict ?? '?'}/${injectionRecall?.crossScopeSampled ?? '?'}（Q18 的上限）`
+        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout** rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}）；**注入召回 A2b** 覆盖=${injectionRecall && Number.isFinite(injectionRecall.recall) ? pct(injectionRecall.recall) : 'n/a'}（${injectionRecall?.hits ?? '?'}/${injectionRecall?.n ?? '?'}）· **严格**=${injectionRecall && Number.isFinite(injectionRecall.recallSpecific) ? pct(injectionRecall.recallSpecific) : 'n/a'}（${injectionRecall?.specificHits ?? '?'}/${injectionRecall?.n ?? '?'}）；**跨项目唯先例** ${injectionRecall?.crossScopeStrict ?? '?'}/${injectionRecall?.crossScopeSampled ?? '?'}（Q18 的上限）${injectionRecall?.buckets ? `；**分桶（严格）** ${Object.entries(injectionRecall.buckets).map(([k, v]) => `${k} ${v.specific}/${v.n}`).join(' · ')}` : ''}`
         : 'LOO 分母为 0（没有可评测的失败签名）⇒ 不写 0',
       detail: {
         holdout,
