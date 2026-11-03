@@ -746,6 +746,8 @@ const STATUS_LABEL = Object.freeze({
   measured: 'measured',
   'not-live': 'not-live（未上线）',
   'not-consumed': 'not-consumed（没数据）',
+  live: 'live（线上在跑且有注入）',
+  'live-idle': 'live-idle（线上在跑但无注入）',
 });
 
 export function formatM5Report(report) {

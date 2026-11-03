@@ -18,3 +18,7 @@
 | ep-d70b7c2f | 是 | 2 | `w:e:/Documents/deepseek-harness/default-workspace` |
 | ep-0ef39d3a | 是 | 2 | `w:e:/Documents/deepseek-harness/default-workspace` |
 | ep-ce5dbb93 | 是 | 2 | `w:d:/DeepSeek Harness/default-workspace/DSH-GO` |
+
+## 作用域闸的机械核对（2026-11-04 补记，回应 audit-07）
+本文件当时只记了 12 局注入表，没记 `crossScopeRefs` 行。今天可复算的口径是 `m5` 的 **A5 = 0.00%**（见 `evidence/M5-six-axis.md`），
+而不是"本表里的 0"。以后凡是引用"跨作用域 0"，请引 m5 A5 读数；本表只作"注入是否发生"的证据。
