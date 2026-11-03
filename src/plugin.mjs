@@ -78,6 +78,9 @@ export const DEFAULT_CONFIG = Object.freeze({
   autoBuild: true,
   storeRoot: null,
   shadowDir: null,
+  // 2026-11-04（M4 精度抽样）：注入成功时把卡片正文抽存到 `<storeRoot>/card-samples.jsonl`，
+  // 供事后做「注入质量」人工/机械核对。默认开；不写会话日志、只写 sidecar。
+  sampleCards: true,
   budgetTokens: 500,
   limit: 5,
   oncePerSession: true,
@@ -162,6 +165,7 @@ export function sanitizeConfig(raw = {}) {
     enabled: boolOf(src.enabled, DEFAULT_CONFIG.enabled),
     shadow: boolOf(src.shadow, DEFAULT_CONFIG.shadow),
     storeRoot: typeof src.storeRoot === 'string' && src.storeRoot.trim() !== '' ? src.storeRoot.trim() : null,
+    sampleCards: typeof src.sampleCards === 'boolean' ? src.sampleCards : DEFAULT_CONFIG.sampleCards,
     shadowDir: typeof src.shadowDir === 'string' && src.shadowDir.trim() !== '' ? src.shadowDir.trim() : null,
     budgetTokens: positiveInt(src.budgetTokens, DEFAULT_CONFIG.budgetTokens, 100000),
     limit: positiveInt(src.limit, DEFAULT_CONFIG.limit, 100),
@@ -715,6 +719,18 @@ export function appendLiveStats(storeRoot, row) {
   } catch { /* 心跳失败不影响决策 */ }
 }
 
+/** 注入质量抽样：只写 sidecar；失败不影响注入（2026-11-04）。 */
+export function appendCardSample(storeRoot, row) {
+  try {
+    if (!storeRoot || !fs.existsSync(storeRoot)) return;
+    const file = path.join(storeRoot, 'card-samples.jsonl');
+    const stat = fs.existsSync(file) ? fs.statSync(file) : null;
+    if (stat && stat.size > 8 * 1024 * 1024) return; // 8 MB 上限，避免无限增长
+    fs.appendFileSync(file, `${JSON.stringify({ at: Date.now(), ...row })}
+`);
+  } catch { /* 抽样失败不影响注入 */ }
+}
+
 export function writeRepeatTelemetry({ config, trigger, card = null, digest = null, at = Date.now(), shadow = false } = {}) {
   const dir = resolveShadowDir(config);
   fs.mkdirSync(dir, { recursive: true });
@@ -940,7 +956,17 @@ export function apply(ctx, rawConfig = {}) {
       const result = await decidePreStep({ ctx, config, deps, payload, decision });
       // enabled=false 时的 "skip disabled" 没有诊断价值，别写（任何库内调用都会带出来一堆噪声）。
       if (config.liveStats !== false && !(result.action === 'skip' && result.reason === 'disabled')) {
-        appendLiveStats(resolveStoreRoot(config), {
+        const storeRootForStats = resolveStoreRoot(config);
+        if (config.sampleCards === true && (result.action === 'inject') && result.card?.section) {
+          appendCardSample(storeRootForStats, {
+            scope: lastResolvedScope(session?.id)?.scope ?? null,
+            scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
+            digest: result.digest ?? null,
+            tokens: result.card?.tokens ?? null,
+            section: String(result.card.section),
+          });
+        }
+        appendLiveStats(storeRootForStats, {
           kind: 'pre-step',
           scope: lastResolvedScope(session?.id)?.scope ?? null,
           scopeFrom: lastResolvedScope(session?.id)?.from ?? null,

@@ -775,3 +775,19 @@ test('R16: 宿主包不可解析时，本地消息工厂形状与宿主一致（
   assert.equal(msg.source.form, 'memory-card');
   assert.ok(Object.isFrozen(msg) && Object.isFrozen(msg.content));
 });
+
+test('M4: 注入抽样只写 sidecar，且 8MB 上限后停止', async () => {
+  const { appendCardSample } = await import('../src/plugin.mjs');
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-sample-'));
+  appendCardSample(dir, { digest: 'd1', tokens: 12, section: '<memory-ledger>x</memory-ledger>' });
+  const file = path.join(dir, 'card-samples.jsonl');
+  const rows = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].digest, 'd1');
+  assert.match(rows[0].section, /memory-ledger/);
+  // 库不存在时不写（不把"无库"变成"有库"）
+  const missing = path.join(tmpdir(), 'kifu-missing-' + Date.now());
+  appendCardSample(missing, { digest: 'd2' });
+  assert.equal(existsSync(path.join(missing, 'card-samples.jsonl')), false);
+  rmSync(dir, { recursive: true, force: true });
+});

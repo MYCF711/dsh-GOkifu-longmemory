@@ -5,6 +5,32 @@
 > **更正记录（约定，2026-11-04 起）**：**已发布版本的段落一律不再改写**（audit-10 残留 C：连续两版覆盖式改写已发布段，产生互相矛盾的公开文本）。
 > 需要更正时，在文件**顶部**新增 `## 更正 · <日期>` 段，写「原文是什么、正确是什么、依据（审计编号/提交）」，旧段保持原样。
 
+## 0.117.0（2026-11-04）
+
+### M4 抽样抓到 A5 实质越界 → 补闸
+- `audit-card-samples.mjs` 抽查 7 张真实注入卡：33 条引用 **100% 可回溯**，但 **1 条跨作用域**。
+- 根因：`u:owner` 类级 claim 的 support 跨多个工作区，注入层按 support[0]/命中局取一条出处 ⇒ 把别项目的失败原文渲染进本项目的卡。
+- 修：`entryFromClaim` 只选**同作用域** support；全在别的作用域则不渲染（查不到 episode 记录时不误杀）。
+- 新增单测（a/b 两作用域夹具，断言卡里不出现别项目的 ep）；线上验收看 `audit-card-samples` 的 `crossScopeRefs` 归 0。
+- 证据 `evidence/M7-A5-live-leak.md`。
+
+### 验证
+418 条测试（414 pass / 0 fail / 4 skip）；`check PASS`。
+
+## 0.116.0（2026-11-04）
+
+### M4 精度抽样：注入卡片留样（默认开）
+- 新增配置 `sampleCards`（默认 true）：注入成功时把卡片正文追加到 `<storeRoot>/card-samples.jsonl`
+  （只写 sidecar、不写会话日志；8 MB 上限；失败不影响注入）。字段 `{at, scope, scopeFrom, digest, tokens, section}`，
+  与心跳 `digest` 可一一对应。
+- 动机：本会话那张卡由「整点巡检…」这类**宽泛指令**触发，给的却是五类失败教训 —— 泛相关风险必须留证；
+  离线 A1 用留出集，看不到线上。
+- 下一步：按 `evidence/M7-live-injection-sample-plan.md` 抽 N 条逐条核「引用是否属实 / 是否泛相关 / 是否跨项目」。
+- 单测覆盖：只写 sidecar、库不存在不写、8 MB 上限。
+
+### 验证
+416 条测试（412 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.115.0（2026-11-04）
 
 ### 知识库：调研 32 A-MEM（NeurIPS 2025）
