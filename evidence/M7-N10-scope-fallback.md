@@ -29,3 +29,12 @@ resolved: {"scope":"w:d:/…/长期记忆系统","from":"episode-fallback"}
 ## 预期
 下次重启后，心跳会带 `scopeFrom=episode-fallback|session-log`；若信号命中，`action=inject` 会出现 ——
 A3 才会从 `live-idle` 变 `live`。
+
+## 端到端演示（真实会话 id，无需重启即可验证）
+```
+session 1b9837d6-… -> {"scope":"w:d:/DeepSeek Harness/default-workspace","from":"episode-fallback"}
+hits 5 · section? true · tokens 276
+- [antipattern] + CategoryInfo : ParserError: … (ep-22d3bd16, 2026-11-03, seq 283)
+- [antipattern] device docs dsh (ep-22d3bd16, 2026-11-03, seq …)
+```
+说明：**同一信号在兜底后的作用域下能命中并渲染出真实卡片**；宿主里只差一次重启把新代码加载进去。
