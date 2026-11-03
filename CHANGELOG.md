@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.103.0（2026-11-03）
+
+### 首次注入守望 `scripts/watch-first-inject.mjs`
+- 轮询 `live-stats.jsonl`，出现 `action=inject` 时把**首条注入**的快照写进 `evidence/M7-A3-first-inject.md`
+  （时间、src/pid、scope/scopeFrom、digest、tokens、心跳总数）。
+- 已后台启动（每 60 秒检查，最多 2 小时）——A3 首次注入不会因为没人盯而丢掉证据。
+
+### 验证
+412 条测试（408 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.102.1（2026-11-03）
 
 ### N10 端到端演示（真实会话，无需重启即可验证）
