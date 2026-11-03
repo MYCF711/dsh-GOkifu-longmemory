@@ -44,18 +44,23 @@ export function parseLedger(text) {
   };
 }
 
-export function compare(ledger, actual) {
+// 2026-11-04：插件在宿主里跑起来后，autoArchive 会持续把新会话入馆 ⇒ 台账写下的数字是**快照**，
+// 发版检查时必然已经涨了几个。给"线上在跑"的漂移容忍（只对计数，不给方向性指标开口子）。
+export const LIVE_DRIFT = Object.freeze({ claim: 12, threads: 12, episodes: 12 });
+
+export function compare(ledger, actual, { live = false } = {}) {
   const has = (v) => Number.isFinite(v);
   const bad = [];
+  const drift = live ? LIVE_DRIFT : { claim: 0, threads: 0, episodes: 0 };
   if (ledger.version && actual.version && ledger.version !== actual.version) bad.push(`版本：台账 ${ledger.version} vs package ${actual.version}`);
   if (ledger.tests && actual.tests) {
     for (const k of ['total', 'pass', 'fail', 'skip']) {
       if (ledger.tests[k] !== actual.tests[k]) bad.push(`测试 ${k}：台账 ${ledger.tests[k]} vs 实测 ${actual.tests[k]}`);
     }
   }
-  if (has(ledger.claim) && has(actual.claim) && ledger.claim !== actual.claim) bad.push(`claim：台账 ${ledger.claim} vs 实测 ${actual.claim}`);
-  if (has(ledger.threads) && has(actual.threads) && ledger.threads !== actual.threads) bad.push(`卷：台账 ${ledger.threads} vs 实测 ${actual.threads}`);
-  if (has(ledger.episodes) && has(actual.episodes) && ledger.episodes !== actual.episodes) bad.push(`局数：台账 ${ledger.episodes} vs 实测 ${actual.episodes}`);
+  if (has(ledger.claim) && has(actual.claim) && Math.abs(ledger.claim - actual.claim) > drift.claim) bad.push(`claim：台账 ${ledger.claim} vs 实测 ${actual.claim}（容差 ${drift.claim}，线上归档在涨）`);
+  if (has(ledger.threads) && has(actual.threads) && Math.abs(ledger.threads - actual.threads) > drift.threads) bad.push(`卷：台账 ${ledger.threads} vs 实测 ${actual.threads}（容差 ${drift.threads}）`);
+  if (has(ledger.episodes) && has(actual.episodes) && Math.abs(ledger.episodes - actual.episodes) > drift.episodes) bad.push(`局数：台账 ${ledger.episodes} vs 实测 ${actual.episodes}（容差 ${drift.episodes}）`);
   // 波动量给容差（同一命令两次测量：A4 p50 抖 ±0.5ms，A2 随语料微动 ±0.5pp）
   // A2 在 26.5–26.8% 之间随 pipeline 时间窗微动（2026-11-02 实测抖动 ±0.15pp）⇒ 容差 0.5pp
   if (has(ledger.a2) && has(actual.a2) && Math.abs(ledger.a2 - actual.a2) > 0.5) bad.push(`A2：台账 ${ledger.a2}% vs 实测 ${actual.a2}%（容差 0.5pp）`);
@@ -132,7 +137,14 @@ if (invoked) {
   const agents = read('AGENTS.md');
   const sec7 = agents.slice(agents.indexOf('## 7 ·'), agents.indexOf('## 8 ·'));
   const agentsOk = agents.includes('本节的旧快照会过期') && !sec7.includes('条测试');
-  let bad = compare(ledger, actual);
+  // 线上在跑（<store>/live-stats.jsonl 15 分钟内有写入）⇒ 计数快照必然漂移，给计数容差（方向性指标不开口子）
+  const LIVE_WINDOW_MS = 15 * 60 * 1000;
+  let live = false;
+  try {
+    const st = fs.statSync(path.join(process.env.DSH_HOME || 'D:/DeepSeek Harness/home', 'memory-context', 'live-stats.jsonl'));
+    live = Date.now() - st.mtimeMs < LIVE_WINDOW_MS;
+  } catch { live = false; }
+  let bad = compare(ledger, actual, { live });
   if (badParseTests) bad.push('测试计数解析失败（fail-closed）');
   if (full) bad = fullCheck(ledger, bad);
   if (!agentsOk) bad.push('AGENTS §7：指针缺失或写回了测试条数');

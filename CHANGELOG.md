@@ -8,6 +8,9 @@
 - `loadSignatureIndex` 按 (mtime, size) 缓存，`writeSignatureIndex` 失效；微基准 300 次读取 160ms → 13ms。
 - 诚实结论：单次约 0.5ms → 0.04ms，属廉价清理；`m5` 完整跑仍是 **130s**，成本在 A2 LOO 与热路径重复建卡。
 - 证据 `evidence/M7-sigindex-cache.md`。
+- **线上漂移容差**：插件在宿主里跑后 autoArchive 持续入馆，台账数字是快照 ⇒ `ledger-check` 在
+  `<store>/live-stats.jsonl` 15 分钟内有写入时，对「局数/claim/卷」给 ±12 计数容差（方向性指标不开口子；
+  测试计数与 A2/A4 容差不变）。修掉"发版时台账必然过期"的死循环。
 
 ### 验证
 414 条测试（410 pass / 0 fail / 4 skip）；`check PASS`。
