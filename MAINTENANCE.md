@@ -24,9 +24,9 @@
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | **414 条**（410 pass / 0 fail / 4 skip）[本] 2026-11-04 03:31 |
-| 六轴 | A1 **1.75%** · A2 **22.83%** · A3 live-idle · A4 p50 **7.90ms（3 次中位数，单次抖动 ±2ms）** · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-04 03:31 · node scripts/m5-report.mjs` |
-| 语料 | 305 局 / **341 卷** / **claim 852**（有效期已止 92；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-04 03:31 · node scripts/cli.mjs audit + store` |
+| 测试 | **414 条**（410 pass / 0 fail / 4 skip）[本] 2026-11-04 04:09 |
+| 六轴 | A1 **0.00%** · A2 **22.99%** · A3 live-idle · A4 p50 **7.73ms（3 次中位数，单次抖动 ±2ms）** · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-04 04:09 · node scripts/m5-report.mjs` |
+| 语料 | 336 局 / **340 卷** / **claim 913**（有效期已止 99；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-04 04:09 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
 | 已发布 | **0.15.0 → 0.111.0 的 CHANGELOG 段齐全**；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。 |
 | 证据 | `M6-acceptance.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
