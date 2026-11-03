@@ -2,6 +2,17 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.87.0（2026-11-03）
+
+### 零命令行启用：关掉 DSH 就自动装好
+- 新增 `scripts/enable-on-exit.mjs`：后台常驻，轮询 `DeepSeek Harness.exe`；连续两轮不存在（DSH 已退出）后自动跑 `re-enable`，
+  写完配置再跑一次 `install-doctor` 并记日志（`evidence/enable-on-exit.log`）。
+- `re-enable` 增"依赖已就绪则跳过 pnpm install"：预置依赖后，关掉到重开的窗口从 ~30s 压到**几秒**。
+- 用户侧零命令：预置依赖 → 关掉 DSH → 等 5–10 秒 → 重新打开。
+
+### 验证
+`re-enable --dry-run`：`bundle: 已有 · 摘除 3 条 · package.json 将改: false`；404 条测试全绿。
+
 ## 0.86.0（2026-11-03）
 
 ### 修正：`install-doctor` 的"已注册"是假阳性（你看到 `ok 插件注册` 但插件其实没启用）
