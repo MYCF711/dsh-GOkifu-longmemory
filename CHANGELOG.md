@@ -2,6 +2,17 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.92.0（2026-11-03）
+
+### A2b 分桶：失分全部在 openDomain（跨工作区）
+- 按 LOCOMO 四类做机械分桶（temporal > multiHop > openDomain > singleHop），复算 19 条冻结卷：
+  **multiHop 15/15 严格**、**openDomain 2/4 严格**（hit 4/4）；singleHop/temporal 本卷无样本。
+- 结论：89.5% 的失分不是"普遍召回差"，而是跨工作区先例的**判别词没带出来**；Q18 若开 B，受益的正是这 2 条。
+- 不改行为；证据 `evidence/M7-a2b-buckets.md`；m5 报告里新增「分桶（严格）」一行。
+
+### 验证
+406 条测试（402 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.91.0（2026-11-03）
 
 ### 知识库：调研 28 Mem0（生产级长期记忆）
