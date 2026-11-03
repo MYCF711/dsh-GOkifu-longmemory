@@ -3,44 +3,59 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { registrationHit } from '../scripts/install-doctor.mjs';
+import { registrationHit, doctor } from '../scripts/install-doctor.mjs';
 
-function fixture(files) {
-  const home = mkdtempSync(path.join(tmpdir(), 'kifu-doctor-'));
-  for (const [rel, text] of Object.entries(files)) {
-    const abs = path.join(home, rel);
-    mkdirSync(path.dirname(abs), { recursive: true });
-    writeFileSync(abs, text);
-  }
+const mk = (patch, pkg = {}) => {
+  const home = mkdtempSync(path.join(tmpdir(), 'kifu-doc-'));
+  const dir = path.join(home, 'profiles', 'desktop');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'cordis.patch.yml'), patch);
+  writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
   return home;
-}
+};
 
-test('install-doctor: 未注册 ⇒ hits 为空', () => {
-  const home = fixture({ 'profiles/desktop/cordis.patch.yml': 'plugins: []\n' });
-  try {
-    const reg = registrationHit(home);
-    assert.deepEqual(reg.hits, []);
-  } finally { rmSync(home, { recursive: true, force: true }); }
+test('doctor: 只有 disabled 块 ⇒ 未启用（不准报已注册）', () => {
+  const home = mk(`- id: kifu
+  name: dsh-gokifu-longmemory
+  disabled: true
+- id: dsh-gokifu-longmemory
+  name: dsh-gokifu-longmemory
+  disabled: true
+`);
+  const r = registrationHit(home);
+  assert.equal(r.enabled, 0);
+  assert.equal(r.disabled, 2);
+  rmSync(home, { recursive: true, force: true });
 });
 
-test('install-doctor: 注册但 disabled:true 会被单独计数', () => {
-  const yml = 'services:\n  - id: kifu-longmemory\n    name: dsh-gokifu-longmemory\n    disabled: true\n  - id: other\n    name: something-else\n';
-  const home = fixture({ 'profiles/desktop/cordis.patch.yml': yml });
-  try {
-    const reg = registrationHit(home);
-    assert.ok(reg.hits.length >= 1);
-    assert.equal(reg.disabled, 1, '只有带 disabled:true 的那条算禁用');
-  } finally { rmSync(home, { recursive: true, force: true }); }
+test('doctor: 注释里提到包名不算命中（防假阳性）', () => {
+  const home = mk(`- id: theme
+  name: "@x/ui-theme"
+  config:
+    preference: dark
+
+# === 临时禁用：dsh-gokifu-longmemory ===
+- id: kifu
+  name: dsh-gokifu-longmemory
+  disabled: true
+`);
+  const r = registrationHit(home);
+  assert.equal(r.enabled, 0, '注释不能被算成启用块');
+  assert.equal(r.disabled, 1);
+  rmSync(home, { recursive: true, force: true });
 });
 
-test('install-doctor: 跳过 memory-context/sessions 等大目录', () => {
-  const home = fixture({
-    'memory-context/claims/c-1.json': '{"text":"dsh-gokifu-longmemory"}',
-    'sessions/x/session.json': '{"name":"dsh-gokifu-longmemory"}',
-    'profiles/desktop/cordis.patch.yml': 'name: dsh-gokifu-longmemory\n',
-  });
-  try {
-    const reg = registrationHit(home);
-    assert.equal(reg.hits.length, 1, '只应命中 profiles 配置');
-  } finally { rmSync(home, { recursive: true, force: true }); }
+test('doctor: package.json 依赖/bundles 有包名 ⇒ 启用', () => {
+  const home = mk('', { dependencies: { 'dsh-gokifu-longmemory': 'link:/x' } });
+  const r = registrationHit(home);
+  assert.equal(r.enabled, 1);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('doctor: 没有注册 ⇒ enabled=0 且 hits 为空', () => {
+  const home = mk('- id: theme\n  name: "@x/ui-theme"\n');
+  const r = registrationHit(home);
+  assert.equal(r.enabled, 0);
+  assert.deepEqual(r.hits, []);
+  rmSync(home, { recursive: true, force: true });
 });

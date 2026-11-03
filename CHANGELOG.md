@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.86.0（2026-11-03）
+
+### 修正：`install-doctor` 的"已注册"是假阳性（你看到 `ok 插件注册` 但插件其实没启用）
+- 两个根因：① 把 `storages/schedule.json` 也算注册（定时任务提示词里恰好含包名）；② patch 按块解析时把**注释行**吞进上一个块，
+  注释里提到包名 → 被算成"启用 1 处"。
+- 现在只看 profile 的 `cordis.patch.yml` / `cordis.yml` / `package.json`；注释作为块边界；只有**非 disabled 块或依赖/bundles**才算启用。
+- 当前真实输出：`FAIL 插件注册（启用，而非仅出现） · 启用 0 处 · 禁用 2 处（只有禁用块 ⇒ 还没跑 re-enable）`。
+- 新增 4 条单测（只剩禁用块 / 注释不算 / 依赖算 / 没有注册）。
+
+### 验证
+404 条测试（400 pass / 0 fail / 4 skip）；`check PASS`；`ledger-check --full PASS`。
+
 ## 0.85.0（2026-11-03）
 
 ### D5 真实触发率测量：低频安全网，不是主收益
