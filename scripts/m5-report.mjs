@@ -217,6 +217,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
   }
   const use = frozenItems ? frozenItems.slice(0, limit) : eligible.slice(0, limit);
   let hits = 0;
+  let claimHits = 0;
   let specificHits = 0;
   let displayedHits = 0;
   const sampled = [];
@@ -231,6 +232,9 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     const section = String(card?.section ?? '');
     const prior = priorEpisodes.get(item.sig) ?? new Set();
     let hit = false;
+    let hitByClaim = false;
+    let bestOverlap = 0;
+    let bestText = '';
     let specific = false;
     let displayed = false;
     // 主判据：卡片里的 **claim** 是否覆盖当年那条（support 命中 prior episodes）——
@@ -242,11 +246,13 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
       const covered = Array.isArray(record?.support) ? record.support.some((x) => prior.has(String(x?.episode ?? ''))) : false;
       if (covered) {
         hit = true;
+        hitByClaim = true;
         // 严格口径：只要**任一**覆盖该签名的 claim 文本与其有 ≥2 个判别词重合就算命中
         // （早期实现取第一条覆盖 claim 就 break，会把"类级章节也在卡里"的情况误判为失分）
         const text = String(record?.text ?? '').toLowerCase();
         const tokens = String(item.sig).toLowerCase().split(/[^a-z0-9一-鿿]+/).filter((t) => t.length >= 4 && t !== 'path');
         const overlap = tokens.filter((t) => text.includes(t)).length;
+        if (overlap > bestOverlap) { bestOverlap = overlap; bestText = String(record?.text ?? '').slice(0, 120); }
         if (overlap >= 2) specific = true;
       }
     }
@@ -255,10 +261,11 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
       if (m && prior.has(m[3])) { displayed = true; hit = true; break; }
     }
     if (hit) hits += 1;
+    if (hitByClaim) claimHits += 1;
     if (displayed) displayedHits += 1;
     if (specific) specificHits += 1;
     const isSameScope = item.sameScope !== undefined ? Boolean(item.sameScope) : [...prior].some((id) => scopeOf.get(id) === scope);
-    sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, specific, sameScope: isSameScope });
+    sampled.push({ sig: item.sig.slice(0, 60), prior: [...prior].slice(0, 3), hit, hitByClaim, bestOverlap, bestText, specific, sameScope: isSameScope });
   }
   // 2026-11-03（调研 28 Mem0）：按 LOCOMO 四类做机械分桶，便于看短板。
   // 规则（优先级从上到下）：temporal（签名含时间词/时间戳）> multi-hop（prior ≥2 局）> open-domain（跨工作区）> single-hop。
@@ -277,16 +284,18 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
   const buckets = {};
   for (const row of sampled) {
     const b = row.bucket ?? 'singleHop';
-    buckets[b] = buckets[b] ?? { n: 0, specific: 0, hit: 0 };
+    buckets[b] = buckets[b] ?? { n: 0, specific: 0, hit: 0, hitByClaim: 0 };
     buckets[b].n += 1;
     if (row.specific) buckets[b].specific += 1;
     if (row.hit) buckets[b].hit += 1;
+    if (row.hitByClaim) buckets[b].hitByClaim += 1;
   }
   const sameScopeSampled = sampled.filter((x) => x.sameScope).length;
   const sameScopeHits = sampled.filter((x) => x.sameScope && x.hit).length;
   return {
     n: use.length,
     hits,
+    claimHits,
     specificHits,
     displayedHits,
     recallDisplayed: use.length ? displayedHits / use.length : null,
