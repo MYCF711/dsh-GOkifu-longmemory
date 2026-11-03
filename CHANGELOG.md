@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.91.0（2026-11-03）
+
+### 知识库：调研 28 Mem0（生产级长期记忆）
+- [外] 抽取→整合→检索；LOCOMO 四类问题（single-hop/temporal/multi-hop/open-domain）；相对 OpenAI 记忆 LLM-as-a-Judge +26%，图记忆再 +2%；对比全上下文 p95 延迟 −91%、token −90%。
+- 对照：他们允许 ADD/UPDATE/DELETE，我们只增不改 + `supersededBy`（同样问题的两种解法，差异来自边界）；图记忆与我们 link 同构。
+- 可复用：①"整合"是价值核心；②评测按 LOCOMO 四类分桶重算 A2b（已有冻结卷可扩展）。
+
+### 验证
+406 条测试（402 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.90.0（2026-11-03）
 
 ### doctor 识别别名包 + 文档对齐
