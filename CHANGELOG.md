@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.98.1（2026-11-03）
+
+### 装前预检 `scripts/preflight-bundle.mjs`（只读）
+- 按 DSH 真实规则核对：bundles 每个包**声明了**哪些 patch、会插入哪些 id、这些 id 是否被 profile 的 patch 禁用。
+- 真实 home 实测：`id=kifu-memory name=kifu-loader` 被正确插入，`PASS`。
+- 只对本项目相关 bundle 判失败（其他插件被禁用是主人的选择，仅展示）。
+
+### 验证
+409 条测试（405 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.98.0（2026-11-03）
 
 ### 安装真相：bundle 必须自己声明 `dsh.bundle.patch`（否则宿主不读它的 patch）
