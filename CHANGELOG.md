@@ -2,6 +2,21 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.89.0（2026-11-03）
+
+### 安装：别名包 `kifu-loader`（不改热重载开关就能启用）
+- 历史遗留的两个 `disabled: true` 块会压过 bundle 列表，导致同名包永不加载；改 patch 又必须 DSH 关闭。
+- 新增 `packages/kifu-loader`：只是把 `src/plugin.mjs` 原样再导出一次，profile 注册的是 `kifu-loader`（不在任何禁用名单里）。
+- profile 侧：依赖 + bundles 增加 `kifu-loader`，移除原来的 `dsh-gokifu-longmemory` bundle（依赖保留），`pnpm install` 完成。
+- 预检：导入成功、`apply` 注册 `agent/pre-step` + `agent/turn-stopping`、真实库无报错。
+
+### 对比方案
+- 直接改 patch：需 DSH 全程关闭 + 有热重载风险（本机事故历史）；
+- 别名包：只改 profile 的 `package.json`（非热重载开关），重启一次即生效，失败可整包移除回滚。
+
+### 验证
+405 条测试（401 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.88.0（2026-11-03）
 
 ### 安全版 re-enable：失败也炸不了 DSH
