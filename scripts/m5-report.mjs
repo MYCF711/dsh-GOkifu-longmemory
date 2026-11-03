@@ -218,6 +218,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
   const use = frozenItems ? frozenItems.slice(0, limit) : eligible.slice(0, limit);
   let hits = 0;
   let claimHits = 0;
+  let readableHits = 0;
   let specificHits = 0;
   let displayedHits = 0;
   const sampled = [];
@@ -262,6 +263,12 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     }
     if (hit) hits += 1;
     if (hitByClaim) claimHits += 1;
+    // 2026-11-03：卡片可读性口径 —— 卡片正文里是否出现目标签名的 ≥2 个判别词。
+    // 与严格口径不同：它检验"卡片有没有把这条错误的词带出来"，不要求来自 claim 文本。
+    const sec = section.toLowerCase();
+    const sigTokens = String(item.sig).toLowerCase().split(/[^a-z0-9一-鿿]+/).filter((t) => t.length >= 4 && t !== 'path');
+    const cardOverlap = sigTokens.filter((t) => sec.includes(t)).length;
+    if (cardOverlap >= 2) readableHits += 1;
     if (displayed) displayedHits += 1;
     if (specific) specificHits += 1;
     const isSameScope = item.sameScope !== undefined ? Boolean(item.sameScope) : [...prior].some((id) => scopeOf.get(id) === scope);
@@ -296,6 +303,8 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     n: use.length,
     hits,
     claimHits,
+    readableHits,
+    recallReadable: use.length ? readableHits / use.length : null,
     specificHits,
     displayedHits,
     recallDisplayed: use.length ? displayedHits / use.length : null,
