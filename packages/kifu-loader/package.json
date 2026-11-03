@@ -4,5 +4,13 @@
   "private": true,
   "type": "module",
   "main": "index.mjs",
-  "exports": { ".": "./index.mjs" }
+  "exports": {
+    ".": "./index.mjs",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.mjs",
+    "cordis.patch.yml"
+  ]
 }

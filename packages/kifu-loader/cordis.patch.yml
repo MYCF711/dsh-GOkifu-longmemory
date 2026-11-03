@@ -1,0 +1,6 @@
+# kifu-loader 的 bundle patch（2026-11-03）
+# 作用：给棋院插件换一个**新的 id** 插进插件树，绕开 profile 里那两块针对
+# `kifu-longmemory` / `dsh-gokifu-longmemory` 的历史 disabled 条目（profile patch 后合并、优先级更高）。
+- insert:
+    - id: kifu-memory
+      name: 'kifu-loader'
