@@ -40,6 +40,7 @@
 //   deps             null  —— 依赖替身（测试用：createStore/walk/buildMemoryCard/runGates/writeShadow）
 
 import { createHash } from 'node:crypto';
+import { zstdDecompressSync } from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -398,7 +399,9 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   const at = clockOf(config);
   const store = deps.createStore({ root: storeRoot });
   const cwd = typeof session?.cwd === 'string' && session.cwd.trim() !== '' ? session.cwd : process.cwd();
-  const scope = scopeKeyFromPath(cwd);
+  const resolved = resolveSessionScope({ session, store, storeRoot });
+  if (typeof session?.id === 'string') LAST_SCOPE.set(session.id, resolved);
+  const scope = resolved.scope;
   const signal = signalFromText(text, { at });
   signal.scopeKey = scope;
   // 首条消息里若直接贴着报错原文（很常见："又报这个错"），把类级错误作为实体信号，
@@ -635,6 +638,68 @@ function repeatStateFor(map, session, after) {
  * 用途：装了插件之后，`live-stats.jsonl` 里**出现行**本身就是"插件真的在宿主里跑过"的证据。
  * 只写 storeRoot 内（sidecar），失败一律吞掉，绝不影响本轮注入。
  */
+
+// 2026-11-03（N10）：会话 cwd 落在 DSH_HOME 里（profiles/desktop 等）时，scopeKeyFromPath 会得到
+// 一个没有棋谱的假作用域，导致永远 no-hit。用**本会话历史 episode 的 scopeKey**兜底（归档时读过会话
+// header 的真实 cwd），比猜目录名可靠。
+const SESSION_SCOPE_CACHE = new WeakMap();
+const LAST_SCOPE = new Map();
+export function lastResolvedScope(sessionId) { return sessionId ? (LAST_SCOPE.get(sessionId) ?? null) : null; }
+export function sessionScopeIndex(store) {
+  if (!store || typeof store.list !== 'function') return new Map();
+  const hit = SESSION_SCOPE_CACHE.get(store);
+  if (hit) return hit;
+  const map = new Map();
+  for (const row of store.list('episodes')) {
+    const rec = row?.record ?? row;
+    const sid = rec?.sessionId;
+    if (typeof sid !== 'string' || !sid) continue;
+    const at = Number.isFinite(rec?.lastEventAt) ? rec.lastEventAt : 0;
+    const prev = map.get(sid);
+    if (!prev || (prev.at ?? 0) < at) map.set(sid, { scope: rec.scopeKey, at });
+  }
+  const out = new Map([...map].map(([k, v]) => [k, v.scope]));
+  SESSION_SCOPE_CACHE.set(store, out);
+  return out;
+}
+
+const SESSION_LOG_SCOPE_CACHE = new Map();
+/** 从本会话日志的 header 里读真实 cwd（会话日志第一帧就是 header，单帧解压即可）。 */
+export function sessionLogScope(sessionId, home) {
+  if (!sessionId || !home) return null;
+  if (SESSION_LOG_SCOPE_CACHE.has(sessionId)) return SESSION_LOG_SCOPE_CACHE.get(sessionId);
+  let scope = null;
+  try {
+    const root = path.join(home, 'sessions');
+    for (const group of fs.readdirSync(root)) {
+      const file = path.join(root, group, sessionId, 'session.v4.jsonl.zstd');
+      if (!fs.existsSync(file)) continue;
+      const head = zstdDecompressSync(fs.readFileSync(file)).toString('utf8').split(String.fromCharCode(10))[0];
+      const parsed = JSON.parse(head);
+      if (typeof parsed?.cwd === 'string' && parsed.cwd) { scope = scopeKeyFromPath(parsed.cwd); break; }
+    }
+  } catch { scope = null; }
+  SESSION_LOG_SCOPE_CACHE.set(sessionId, scope);
+  return scope;
+}
+
+export function resolveSessionScope({ session = null, store = null, storeRoot = null } = {}) {
+  const cwd = typeof session?.cwd === 'string' && session.cwd.trim() !== '' ? session.cwd : process.cwd();
+  const direct = scopeKeyFromPath(cwd);
+  const home = storeRoot ? path.dirname(storeRoot) : null;
+  if (!home) return { scope: direct, from: 'session-cwd' };
+  const under = direct.replace(/^w:/, '').toLowerCase().startsWith(home.split(String.fromCharCode(92)).join('/').toLowerCase());
+  if (!under) return { scope: direct, from: 'session-cwd' };
+  const idx = sessionScopeIndex(store);
+  const sid = typeof session?.id === 'string' ? session.id : null;
+  const fallback = sid ? idx.get(sid) : null;
+  if (fallback) return { scope: fallback, from: 'episode-fallback' };
+  // 新会话还没归档过：直接读它的日志 header（第一帧 = session 元数据，含真实 cwd）。
+  const fromLog = sessionLogScope(sid, home);
+  if (fromLog) return { scope: fromLog, from: 'session-log' };
+  return { scope: direct, from: 'session-cwd' };
+}
+
 export function appendLiveStats(storeRoot, row) {
   try {
     if (!storeRoot) return;
@@ -857,6 +922,8 @@ export function apply(ctx, rawConfig = {}) {
       if (config.liveStats !== false && !(result.action === 'skip' && result.reason === 'disabled')) {
         appendLiveStats(resolveStoreRoot(config), {
           kind: 'pre-step',
+          scope: lastResolvedScope(session?.id)?.scope ?? null,
+          scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
           action: result.action ?? 'skip',
           reason: result.reason ?? null,
           digest: result.digest ?? null,

@@ -2,6 +2,18 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.102.0（2026-11-03）
+
+### N10：会话作用域兜底（修「插件在跑但永远 no-hit」）
+- 根因：`session.cwd` 可能落在 `$DSH_HOME/profiles/...`，`scopeKeyFromPath` 得到没有棋谱的假作用域，walk 全被作用域闸挡掉。
+- 两级兜底：① 本会话历史 episode 的 scopeKey；② 新会话读 `session.v4.jsonl.zstd` 第一帧 header 的真实 cwd。
+- 心跳新增 `scope` / `scopeFrom` 字段，便于线上核对；兜底失败保持原样（不乱猜）。
+- 实测：真实 session id → `episode-fallback` 命中 `w:d:/…/长期记忆系统`；同一信号在该作用域下命中 4–5 条、在 profile 作用域下 0 条。
+- 4 条单测；证据 `evidence/M7-N10-scope-fallback.md`。
+
+### 验证
+412 条测试（408 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.101.0（2026-11-03）
 
 ### A3 状态：not-live → live-idle（插件已在宿主里跑）
