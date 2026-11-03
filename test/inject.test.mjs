@@ -741,3 +741,29 @@ test('R12: preferenceHardOnly=true ⇒ soft 偏好不进卡；默认 false ⇒ �
   const off = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24), budgetTokens: 2000, limit: 10 });
   assert.ok(String(off.section ?? '').includes('理由：'), '默认关：soft 仍在');
 });
+
+test('R12/A5: u:owner 类级 claim 只选同作用域 support（线上抽查发现的跨项目引用）', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifu-scope-'));
+  const store = createStore({ root, now: T(20) });
+  store.ensureDirs();
+  store.putMany('episodes', [
+    { ...episode('ep-scope0001', 21, 2), scopeKey: 'w:d:/proj/a' },
+    { ...episode('ep-scope0002', 22, 2), scopeKey: 'w:d:/proj/b' },
+  ]);
+  store.putMany('claims', [
+    claim({
+      id: 'c-scope0001', kind: 'antipattern', text: 'class:sandbox-limit · Error: tool call aborted',
+      scopeKey: 'u:owner', day: 21, state: 'semantic',
+      support: [
+        { episode: 'ep-scope0002', seq: 11, occurredAt: T(22) },
+        { episode: 'ep-scope0001', seq: 12, occurredAt: T(21) },
+      ],
+    }),
+  ]);
+  const hits = [{ claim: 'claims/c-scope0001', claimId: 'c-scope0001', claimKind: 'antipattern', claimState: 'semantic', episode: 'ep-scope0001', seq: 12, occurredAt: T(21) }];
+  const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: 'w:d:/proj/a', now: T(24) });
+  const text = String(card.section ?? '');
+  assert.match(text, /ep-scope0001/, '应引用同作用域的先例');
+  assert.ok(!text.includes('ep-scope0002'), '不得把别项目的先例渲染进本项目的卡');
+  rmSync(root, { recursive: true, force: true });
+});

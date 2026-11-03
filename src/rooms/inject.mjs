@@ -383,9 +383,9 @@ function stateTokenOf(claim) {
   return state;
 }
 
-function buildEntry({ episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null }) {
+function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null }) {
   if (!episode || !Number.isFinite(seq) || !Number.isFinite(occurredAt)) return null;
-  const rawText = singleLine(text);
+  const rawText = singleLine(`${prefix}${text}`);
   if (!rawText) return null;
   const date = formatCardDate(occurredAt);
   return {
@@ -401,8 +401,27 @@ function buildEntry({ episode, seq, occurredAt, marker, state, text, kind, claim
   };
 }
 
-function entryFromClaim(hit, claim) {
-  const support = claim.support;
+function entryFromClaim(hit, claim, options = {}) {
+  // 2026-11-04（M4 线上抽查发现）：u:owner 类级 claim 的 support 跨多个工作区，
+  // 直接取 support[0] 会把"别项目的失败原文 + ep"渲染进本项目的卡（A5 的实质越界）。
+  // 这里只选**同作用域**的 support；同作用域一条都没有 ⇒ 不渲染（返回 null）。
+  const all = Array.isArray(claim.support) ? claim.support : [];
+  const scope = typeof options.scope === 'string' && options.scope ? options.scope : null;
+  const byId = options.episodesById instanceof Map ? options.episodesById : null;
+  // Q18（默认关）：开关 + 类级章节 + 该 hit 由 walk 标了 class:cross-scope ⇒ 允许跨域证据，并在行首标 [跨项目]。
+  // walk 只有在 allowCrossScopeClass 打开时才会给 hit 打 `class:cross-scope`；
+  // 所以这里只看这个标记，卡片本身不需要再传开关（Q18 由 walk 一处控制）。
+  const crossAllowed = String(claim.text ?? '').startsWith('class:')
+    && Array.isArray(hit?.why) && hit.why.includes('class:cross-scope');
+  const support = scope && byId && !crossAllowed
+    ? all.filter((sup) => {
+      const rec = byId.get(String(sup?.episode ?? ''));
+      // 查不到该局（测试夹具/库未加载到）⇒ 无法证明越界，保留；查得到且明确别的作用域 ⇒ 丢掉。
+      if (!rec || typeof rec.scopeKey !== 'string') return true;
+      return rec.scopeKey === scope;
+    })
+    : all;
+  if (!support.length && all.length) return null; // 有 support 但全属别的作用域 ⇒ 不渲染
   let src = null;
   if (Number.isFinite(hit?.seq)) src = support.find((s) => Number(s.seq) === Number(hit.seq)) ?? null;
   if (!src) src = support.find((s) => String(s.episode) === String(hit?.episode ?? '')) ?? support[0] ?? null;
@@ -420,6 +439,7 @@ function entryFromClaim(hit, claim) {
     seq,
     occurredAt,
     marker: stateTokenOf(claim),
+    ...(crossAllowed ? { prefix: '[跨项目] ' } : {}),
     state: typeof claim.state === 'string' && claim.state ? claim.state : 'observed',
     text: claim.text,
     kind: claim.kind,
@@ -457,7 +477,7 @@ function entryFromEpisode(hit, view) {
  * hits → 候选条目。缺 (episode, seq, occurredAt) 的条目**直接丢**（无源不入、无时不入），
  * 只计数进省略；这样记忆卡本身不会出现「有行没出处」的形态。
  */
-function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, signal = null, sigIndex = null }) {
+function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, signal = null, sigIndex = null, allowCrossScopeClass = false }) {
   const entries = [];
   let droppedNoProvenance = 0;
   let droppedNoText = 0;
@@ -473,7 +493,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       droppedSoftPreference += 1;
       continue;
     }
-    const entry = claim ? entryFromClaim(hit, claim) : entryFromEpisode(hit, view);
+    const entry = claim ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true }) : entryFromEpisode(hit, view);
     if (entry && scope) {
       const rec = view.episodesById.get(String(hit?.episode ?? ''));
       const epScope = rec && typeof rec.scopeKey === 'string' ? rec.scopeKey : null;
@@ -602,6 +622,7 @@ export function buildMemoryCard({
   droppedUnknownScope = 0,
   walkCrossScope = 0,
   preferenceHardOnly = false,
+  allowCrossScopeClass = false,
 } = {}) {
   const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
   const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
