@@ -21,10 +21,13 @@ if (!fs.existsSync(file)) {
 const rows = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => {
   try { return JSON.parse(l); } catch { return null; }
 }).filter(Boolean);
+// 2026-11-04：区分宿主行与仿真行（脚本写的 src 是脚本名；只有 src=index.js 是宿主）。
+const hostRows = rows.filter((r) => String(r.src ?? '') === 'index.js');
+const simRows = rows.filter((r) => String(r.src ?? '') !== 'index.js');
 const byAction = {};
 const byReason = {};
 const tokens = [];
-for (const r of rows) {
+for (const r of hostRows) {
   byAction[r.action ?? '?'] = (byAction[r.action ?? '?'] ?? 0) + 1;
   if (r.reason) byReason[r.reason] = (byReason[r.reason] ?? 0) + 1;
   if (Number.isFinite(r.tokens)) tokens.push(r.tokens);
@@ -34,6 +37,8 @@ const p = (q) => (tokens.length ? tokens[Math.min(tokens.length - 1, Math.floor(
 const summary = {
   file,
   lines: rows.length,
+  hostLines: hostRows.length,
+  simLines: simRows.length,
   firstAt: rows[0]?.at ?? null,
   lastAt: rows[rows.length - 1]?.at ?? null,
   actions: byAction,
@@ -45,6 +50,7 @@ if (json) console.log(JSON.stringify(summary, null, 2));
 else {
   console.log(`A3 心跳：${file}`);
   console.log(`共 ${summary.lines} 行 · ${new Date(summary.firstAt).toLocaleString()} → ${new Date(summary.lastAt).toLocaleString()} · shadow ${summary.shadow} 行`);
+  console.log(`宿主行 ${summary.hostLines} · 仿真行 ${summary.simLines}（动作/原因/tokens 只统计宿主行）`);
   console.log(`动作：${Object.entries(byAction).map(([k, v]) => `${k}=${v}`).join(' · ')}`);
   if (Object.keys(byReason).length) console.log(`原因：${Object.entries(byReason).map(([k, v]) => `${k}=${v}`).join(' · ')}`);
   console.log(`tokens：p50 ${summary.tokens.p50} · p95 ${summary.tokens.p95} · max ${summary.tokens.max}`);
