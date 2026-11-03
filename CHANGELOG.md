@@ -2,6 +2,19 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.98.0（2026-11-03）
+
+### 安装真相：bundle 必须自己声明 `dsh.bundle.patch`（否则宿主不读它的 patch）
+- 从 DSH 实现里确认：`dsh.profile.bundles` 的每一项，宿主只读它在 package.json 里**声明**的 patch
+  （`"dsh": { "bundle": { "patch": "./cordis.patch.yml" } }`），不是"包里有文件就会读"。
+- 因此 0.89 的别名包只进 bundles 没有声明 → 宿主什么都没插；profile 里两块 disabled 依旧生效。
+- 修：`packages/kifu-loader` ① 自带 `cordis.patch.yml`（insert id `kifu-memory`、name `kifu-loader`）；
+  ② package.json 声明 `dsh.bundle.patch`；③ 导出 `./cordis.patch.yml`。
+- 生效判据不变：重启后 `live-stats.jsonl` 出现行。
+
+### 验证
+409 条测试（405 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.97.0（2026-11-03）
 
 ### N9 接线：按签名追回历史失败原文（只追加、受 A5 约束）

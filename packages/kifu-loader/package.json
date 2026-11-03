@@ -12,5 +12,10 @@
   "files": [
     "index.mjs",
     "cordis.patch.yml"
-  ]
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
 }
