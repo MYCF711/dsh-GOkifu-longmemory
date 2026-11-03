@@ -2,6 +2,16 @@
 
 > 每次功能实现都发版本并写在这里。**不发 npm**（私有自用），只发 GitHub Release + tag。
 
+## 0.104.0（2026-11-03）
+
+### 签名索引加缓存（12.3× 单调用提速；如实说明不是主因）
+- `loadSignatureIndex` 按 (mtime, size) 缓存，`writeSignatureIndex` 失效；微基准 300 次读取 160ms → 13ms。
+- 诚实结论：单次约 0.5ms → 0.04ms，属廉价清理；`m5` 完整跑仍是 **130s**，成本在 A2 LOO 与热路径重复建卡。
+- 证据 `evidence/M7-sigindex-cache.md`。
+
+### 验证
+414 条测试（410 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.103.0（2026-11-03）
 
 ### 首次注入守望 `scripts/watch-first-inject.mjs`

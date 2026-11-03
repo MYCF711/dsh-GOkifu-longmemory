@@ -13,10 +13,19 @@ export function sigIndexPath(storeRoot) {
   return path.join(storeRoot, SIG_INDEX_FILE);
 }
 
+// 2026-11-03：加缓存。m5 一次会建几百张卡，每张都 readFile+JSON.parse 这个文件（实测单文件数百 KB），
+// 直接把账算成了分钟级；按 (mtime, size) 缓存，写索引时失效。
+const INDEX_CACHE = new Map();
+
 export function loadSignatureIndex(storeRoot) {
   try {
-    const data = JSON.parse(fs.readFileSync(sigIndexPath(storeRoot), 'utf8'));
+    const file = sigIndexPath(storeRoot);
+    const stat = fs.statSync(file);
+    const hit = INDEX_CACHE.get(file);
+    if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.data;
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (!data || data.version !== SIG_INDEX_VERSION || typeof data.entries !== 'object') return null;
+    INDEX_CACHE.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, data });
     return data;
   } catch {
     return null;
