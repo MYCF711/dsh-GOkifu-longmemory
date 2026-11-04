@@ -13,7 +13,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -984,4 +984,135 @@ test('R13 闸4 T155: [A, A, B] 同文 ⇒ 报重复，detail.ids 只有 A、B �
   assert.ok(err);
   assert.deepEqual([...err.detail.ids].sort(), ['c-bbbb0001', 'c-bbbb0002']);
   assert.equal(err.detail.ids.length, 2, '同一 id 出现两次只该计一次');
+});
+
+// ===========================================================================
+// T158 · 闸 3 探针：file 的方向位 + version 的「读不到 ≠ 失效」
+// ===========================================================================
+
+test('T158a: expect:"missing" —— 文件仍不存在 ⇒ ok；文件出现 ⇒ file-appeared（stale）', () => {
+  const ws = wsDir();
+  const file = path.join(ws, 'gone.txt'); // 一开始就不存在
+  const record = rec({ validity: { type: 'file', value: file, expect: 'missing' } });
+
+  const okCheck = runValidityCheck({ records: { claims: [record] }, workspace: ws, now: T(20) });
+  const okResult = okCheck.results[`claims:${CLAIM_ID}`];
+  assert.equal(okResult.ok, true, '仍不存在 = 证据成立');
+  assert.equal(okResult.exists, false);
+  assert.equal(okResult.expect, 'missing');
+
+  const okCard = cardFrom({ record });
+  assert.equal(runWith({ card: okCard.card, records: okCard.records, validityResults: okCheck.results }).ok, true);
+
+  writeFileSync(file, 'appeared'); // 文件出现 ⇒ 该记忆失效
+  const appeared = runValidityCheck({ records: { claims: [record] }, workspace: ws, now: T(20) });
+  const appearedResult = appeared.results[`claims:${CLAIM_ID}`];
+  assert.equal(appearedResult.ok, false);
+  assert.equal(appearedResult.reason, 'file-appeared');
+  assert.equal(appearedResult.unverified, undefined, '这是真失效，不是"核不了"');
+  const badRes = runWith({ card: okCard.card, records: okCard.records, validityResults: appeared.results });
+  assert.equal(badRes.ok, false);
+  assert.ok(hasCode(badRes, 'gate3/stale-not-marked'));
+});
+
+test('T158a: 缺省 expect 仍是 exists 语义（向后兼容）；旧记录靠 file-exists 前置条件推断 missing', () => {
+  const ws = wsDir();
+  const missing = path.join(ws, 'nope.txt');
+
+  // 没有 expect、也没有 ENOENT 标记 ⇒ 默认 exists ⇒ 文件不在 = file-missing（旧行为不变）
+  const plain = rec({ validity: { type: 'file', value: missing } });
+  const plainCheck = runValidityCheck({ records: { claims: [plain] }, workspace: ws, now: T(20) });
+  assert.equal(plainCheck.results[`claims:${CLAIM_ID}`].ok, false);
+  assert.equal(plainCheck.results[`claims:${CLAIM_ID}`].reason, 'file-missing');
+  assert.equal(plainCheck.results[`claims:${CLAIM_ID}`].expect, 'exists');
+
+  // 旧记录（无 expect）+ claim.mjs 的 ENOENT 标记（file-exists 同路径）⇒ 推断 missing ⇒ 不存在 = ok
+  const legacy = rec({
+    validity: { type: 'file', value: missing },
+    preconditions: [{ check: 'file-exists', value: missing, why: '该条记录的是证据时刻「此路径不存在」' }],
+  });
+  const legacyCheck = runValidityCheck({ records: { claims: [legacy] }, workspace: ws, now: T(20) });
+  assert.equal(legacyCheck.results[`claims:${CLAIM_ID}`].expect, 'missing', '旧记录按 ENOENT 标记推断方向位');
+  assert.equal(legacyCheck.results[`claims:${CLAIM_ID}`].ok, true);
+
+  // 显式 expect 优先于推断
+  const explicit = rec({
+    validity: { type: 'file', value: missing, expect: 'exists' },
+    preconditions: [{ check: 'file-exists', value: missing, why: 'fixture' }],
+  });
+  assert.equal(runValidityCheck({ records: { claims: [explicit] }, workspace: ws, now: T(20) }).results[`claims:${CLAIM_ID}`].reason, 'file-missing');
+});
+
+test('T158a: 非法 expect 值 ⇒ file-bad-expect（判红，不静默降级）', () => {
+  const ws = wsDir();
+  const record = rec({ validity: { type: 'file', value: path.join(ws, 'x.txt'), expect: 'sometimes' } });
+  const check = runValidityCheck({ records: { claims: [record] }, workspace: ws, now: T(20) });
+  assert.equal(check.results[`claims:${CLAIM_ID}`].ok, false);
+  assert.equal(check.results[`claims:${CLAIM_ID}`].reason, 'file-bad-expect');
+  const card = cardFrom({ record });
+  const res = runWith({ card: card.card, records: card.records, validityResults: check.results });
+  assert.ok(hasCode(res, 'gate3/stale-not-marked'), '坏记录照样挡注入');
+});
+
+test('T158b: version 读不到包 ⇒ unverified（不是 stale），summary 分开记数', () => {
+  const ws = wsDir(); // 空工作区：一个 package.json 都没有
+  const record = rec({ validity: { type: 'version', value: 'no-such-pkg-xyz@1.0.0' } });
+  const check = runValidityCheck({ records: { claims: [record] }, workspace: ws, now: T(20), dshHome: path.join(ws, 'no-home') });
+  const result = check.results[`claims:${CLAIM_ID}`];
+  assert.equal(result.ok, false);
+  assert.equal(result.unverified, true, '核不了 ≠ 失效');
+  assert.equal(result.reason, 'version-file-unreadable');
+  assert.equal(check.summary.unverified, 1);
+  assert.equal(check.summary.failed, 0, 'unverified 不混进 failed');
+
+  // 闸 3：不判红，但要如实记 unverified
+  const card = cardFrom({ record });
+  const res = runWith({ card: card.card, records: card.records, validityResults: check.results });
+  assert.equal(res.ok, true, JSON.stringify(res.errors));
+  assert.ok(res.checks.unverified.some((u) => u.code === 'gate3/validity-unverified'), 'unverified 要有账');
+  assert.equal(hasCode(res, 'gate3/stale-not-marked'), false);
+});
+
+test('T158b: version 查找面放宽到 <DSH_HOME>/profiles/*/node_modules/<name>/package.json', () => {
+  const ws = wsDir();
+  const home = path.join(ws, 'home');
+  const pkgDir = path.join(home, 'profiles', 'desktop', 'node_modules', '@scope', 'pkg');
+  mkdirSync(pkgDir, { recursive: true });
+  writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: '@scope/pkg', version: '2.0.0' }));
+
+  const same = rec({ validity: { type: 'version', value: '@scope/pkg@2.0.0' } });
+  const sameCheck = runValidityCheck({ records: { claims: [same] }, workspace: ws, now: T(20), dshHome: home });
+  assert.equal(sameCheck.results[`claims:${CLAIM_ID}`].ok, true, 'profiles 里读到且版本一致');
+  assert.equal(sameCheck.results[`claims:${CLAIM_ID}`].package, '@scope/pkg');
+
+  const changed = rec({ validity: { type: 'version', value: '@scope/pkg@1.0.0' } });
+  const changedCheck = runValidityCheck({ records: { claims: [changed] }, workspace: ws, now: T(20), dshHome: home });
+  assert.equal(changedCheck.results[`claims:${CLAIM_ID}`].ok, false);
+  assert.equal(changedCheck.results[`claims:${CLAIM_ID}`].reason, 'version-mismatch', '真读到且版本不符 ⇒ stale');
+  assert.equal(changedCheck.summary.failed, 1);
+});
+
+test('T158b: version 查找面兜底到 <DSH_HOME>/profiles/*/workspace/package.json', () => {
+  const ws = wsDir();
+  const home = path.join(ws, 'home');
+  const wsDirInProfile = path.join(home, 'profiles', 'desktop', 'workspace');
+  mkdirSync(wsDirInProfile, { recursive: true });
+  writeFileSync(path.join(wsDirInProfile, 'package.json'), JSON.stringify({ name: 'workspace-pkg', version: '3.1.4' }));
+
+  const record = rec({ validity: { type: 'version', value: 'workspace-pkg@3.1.4' } });
+  const check = runValidityCheck({ records: { claims: [record] }, workspace: ws, now: T(20), dshHome: home });
+  assert.equal(check.results[`claims:${CLAIM_ID}`].ok, true);
+});
+
+test('T158b: 读过但同名包不存在 ⇒ unverified（不是 version-mismatch）', () => {
+  const ws = wsDir();
+  writeFileSync(path.join(ws, 'package.json'), JSON.stringify({ name: 'other-pkg', version: '9.9.9' }));
+  // 让记录自己的 scopeKey 指向这个临时工作区（probe 按记录自己的作用域核）
+  const record = rec({ scopeKey: 'w:' + ws.split(path.sep).join('/'), validity: { type: 'version', value: 'wanted-pkg@1.0.0' } });
+  const check = runValidityCheck({ records: { claims: [record] }, workspace: ws, now: T(20), dshHome: path.join(ws, 'no-home') });
+  const result = check.results[`claims:${CLAIM_ID}`];
+  assert.equal(result.ok, false);
+  assert.equal(result.unverified, true);
+  assert.equal(result.reason, 'version-package-not-found');
+  assert.equal(check.summary.failed, 0);
 });

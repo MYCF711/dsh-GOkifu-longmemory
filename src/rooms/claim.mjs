@@ -719,7 +719,9 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
         representativeAt: at,
 
-        validity: { type: 'file', value: path },
+        // T158a：ENOENT 派生的 fact 语义是「证据时刻该路径不存在」⇒ 方向位 missing。
+        // probeValidity 按 expect 判：仍不存在 = ok；文件出现了 = stale（file-appeared）。
+        validity: { type: 'file', value: path, expect: 'missing' },
 
         preconditions: [{
 

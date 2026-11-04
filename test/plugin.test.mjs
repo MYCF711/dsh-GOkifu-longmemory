@@ -820,3 +820,119 @@ test('R13: gateCodesFromGates 去重、截断、只给码不给卡内容', async
   assert.deepEqual(gateCodesFromGates({ errors: Array.from({ length: 9 }, (_, i) => ({ code: `c${i}` })) }), ['c0', 'c1', 'c2', 'c3', 'c4']);
   assert.deepEqual(gateCodesFromGates({}), []);
 });
+
+// ---------------------------------------------------------------------------
+// T160：gates-failed 的心跳要能说出"被哪几条 claim 拦住"
+//
+// 现状（precision-auditor 实测）：被闸挡下的卡不入 card-samples.jsonl，心跳行只有
+// digest / tokens / gateIds / gateCodes；事件过去后无法还原是哪几条 claim 被拦。
+// 补：gateClaimIds（去重、最多 5 个）+ gateLineCount（卡片渲染行数）。
+// 边界：**只记 id 与计数，绝不记卡正文**。
+// ---------------------------------------------------------------------------
+
+/** 读 live-stats.jsonl 的最后一行（没有文件返回 null）。 */
+function lastLiveStatsRow(storeRoot) {
+  const file = path.join(storeRoot, 'live-stats.jsonl');
+  if (!existsSync(file)) return null;
+  const lines = readFileSync(file, 'utf8').split('\n').filter(Boolean);
+  return lines.length ? JSON.parse(lines[lines.length - 1]) : null;
+}
+
+test('T160 心跳: gates-failed ⇒ 记 gateClaimIds（去重）与 gateLineCount，且不含卡正文', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  const { buildMemoryCard: realBuildCard } = await import('../src/rooms/inject.mjs');
+  let captured = null;
+  try {
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({
+      storeRoot,
+      deps: {
+        buildMemoryCard: (args) => { captured = realBuildCard(args); return captured; },
+        runGates: () => ({
+          ok: false,
+          errors: [{ gate: '4', code: 'gate4/unsuperseded-duplicate', detail: { ids: ['c-a', 'c-a', 'c-b'] } }],
+          checks: {},
+        }),
+      },
+    }));
+    const { session } = makeSession(workspace);
+    const original = enterDecision([userMessage('yaml 装不上')]);
+    const out = await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: original });
+    assert.equal(out, original, '被闸拦下就不注入');
+
+    const row = lastLiveStatsRow(storeRoot);
+    assert.ok(row, '心跳应当写一行');
+    assert.equal(row.reason, 'gates-failed');
+    assert.deepEqual(row.gateClaimIds, ['c-a', 'c-b'], `gateClaimIds 应是去重后的 id 列表，实际：${JSON.stringify(row.gateClaimIds)}`);
+    assert.ok(captured && captured.claims.length >= 1, '夹具应当渲染出至少 1 行');
+    assert.equal(row.gateLineCount, captured.claims.length, 'gateLineCount = 卡片渲染行数（card.claims.length）');
+    assert.equal(typeof row.gateLineCount, 'number');
+    // 边界：心跳里不许出现记忆内容
+    assert.equal(JSON.stringify(row).includes('Cannot find module'), false, '心跳里不许出现卡正文');
+    assert.equal(JSON.stringify(row).includes('memory-ledger'), false, '心跳里不许出现卡片结构');
+  } finally {
+    cleanup();
+  }
+});
+
+test('T160 心跳: errors 里拿不到 id ⇒ gateClaimIds 写 []（不猜、不编）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({
+      storeRoot,
+      deps: {
+        runGates: () => ({
+          ok: false,
+          errors: [
+            { gate: 'anthropic', code: 'boundary/imperative', detail: null }, // 没有 id 字段
+            { gate: '6', code: 'gate6/token-mismatch', detail: { expected: 1, actual: 2 } }, // 只有数字
+          ],
+          checks: {},
+        }),
+      },
+    }));
+    const { session } = makeSession(workspace);
+    await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: enterDecision([userMessage('yaml 装不上')]) });
+
+    const row = lastLiveStatsRow(storeRoot);
+    assert.deepEqual(row.gateClaimIds, [], `拿不到 id 就写空数组，实际：${JSON.stringify(row.gateClaimIds)}`);
+    assert.ok(Number.isFinite(row.gateLineCount) && row.gateLineCount >= 1, `行数应当是真数，实际：${JSON.stringify(row.gateLineCount)}`);
+    assert.deepEqual(row.gateCodes, ['boundary/imperative', 'gate6/token-mismatch'], '错误码照旧');
+  } finally {
+    cleanup();
+  }
+});
+
+test('T160 心跳: 非 gates-failed 的行不带这两个字段（不误导）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot }));
+    const { session } = makeSession(workspace);
+    const out = await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: enterDecision([userMessage('yaml 装不上')]) });
+    assert.equal(out.messages.length, 2, '正常注入');
+    const row = lastLiveStatsRow(storeRoot);
+    assert.equal(row.action, 'inject');
+    assert.equal('gateClaimIds' in row, false, '只有 gates-failed 才记这两个字段');
+    assert.equal('gateLineCount' in row, false);
+  } finally {
+    cleanup();
+  }
+});
+
+test('T160: gateClaimIdsFromGates 去重、限 5 个、只收字符串', async () => {
+  const { gateClaimIdsFromGates } = await import('../src/plugin.mjs');
+  assert.deepEqual(
+    gateClaimIdsFromGates({ errors: [{ detail: { ids: ['c-1', 'c-1', 'c-2'] } }, { detail: { claimId: 'c-3' } }, { detail: { id: 'c-4' } }] }),
+    ['c-1', 'c-2', 'c-3', 'c-4'],
+  );
+  assert.deepEqual(
+    gateClaimIdsFromGates({ errors: [{ detail: { ids: ['c-1', 'c-2', 'c-3', 'c-4', 'c-5', 'c-6'] } }] }),
+    ['c-1', 'c-2', 'c-3', 'c-4', 'c-5'],
+    '最多 5 个',
+  );
+  assert.deepEqual(gateClaimIdsFromGates({ errors: [{ detail: { ids: ['c-1', null, 42, ''] } }] }), ['c-1']);
+  assert.deepEqual(gateClaimIdsFromGates({ errors: [] }), []);
+  assert.deepEqual(gateClaimIdsFromGates(null), []);
+});
