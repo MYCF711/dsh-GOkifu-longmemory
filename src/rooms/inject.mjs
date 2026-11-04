@@ -430,9 +430,21 @@ function entryFromClaim(hit, claim, options = {}) {
     ? src.episode
     : (typeof hit?.episode === 'string' ? hit.episode : '');
   const seq = Number.isFinite(src?.seq) ? Number(src.seq) : (Number.isFinite(hit?.seq) ? Number(hit.seq) : null);
-  const occurredAt = Number.isFinite(claim.occurredAt)
-    ? claim.occurredAt
-    : (Number.isFinite(src?.occurredAt) ? src.occurredAt : (Number.isFinite(hit?.occurredAt) ? hit.occurredAt : null));
+  // 2026-11-04（audit-11 实测）：原先「文字取 claim.text / 坐标取 src / 日期取 claim.occurredAt」三者可脱钩 ——
+  // 线上 44 条引用里 15 条的文字只在**本局别处**出现、1 条本局根本没有那段文字，还有 34/44 的日期不是所引那条事件的时间。
+  // 注入只能是事实：卡上的每个字都必须落在它自己标注的 (ep, seq) 上，所以
+  //   ① 文字取 `src.quote`（该 seq 的原文；claim 的 `class:<token>` 是机械标签，保留成前缀）；
+  //   ② 日期取 `src.occurredAt`（所引那条事件的时刻）；
+  //   ③ 只有旧夹具/旧数据缺 `quote` 时才退回 `claim.text` —— 那不是"允许脱钩"，而是让
+  //      `scripts/audit-card-samples.mjs` 能把它抓成 elsewhere/missing 的可见失败（真实库里 quote 1661/1661 齐全）。
+  const label = /^class:[^\s·]+/.exec(String(claim.text ?? ''))?.[0] ?? null;
+  const quote = typeof src?.quote === 'string' ? src.quote.trim() : '';
+  const body = quote || String(claim.text ?? '').trim();
+  const text = body ? (label && !body.startsWith(label) ? `${label} · ${body}` : body) : null;
+  if (!text) return null;
+  const occurredAt = Number.isFinite(src?.occurredAt)
+    ? Number(src.occurredAt)
+    : (Number.isFinite(claim.occurredAt) ? claim.occurredAt : (Number.isFinite(hit?.occurredAt) ? hit.occurredAt : null));
 
   return buildEntry({
     episode,
@@ -441,7 +453,7 @@ function entryFromClaim(hit, claim, options = {}) {
     marker: stateTokenOf(claim),
     ...(crossAllowed ? { prefix: '[跨项目] ' } : {}),
     state: typeof claim.state === 'string' && claim.state ? claim.state : 'observed',
-    text: claim.text,
+    text,
     kind: claim.kind,
     claimId: claim.id,
     edgeId: typeof src?.edgeId === 'string' ? src.edgeId : null,

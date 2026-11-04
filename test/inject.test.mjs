@@ -767,3 +767,65 @@ test('R12/A5: u:owner 类级 claim 只选同作用域 support（线上抽查发�
   assert.ok(!text.includes('ep-scope0002'), '不得把别项目的先例渲染进本项目的卡');
   rmSync(root, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------
+// A6 引文可核（2026-11-04 audit-11）：卡上的每个字都必须落在它自己标注的 (ep, seq) 上
+//   事故：文字取 claim.text（claim 的 exemplar，可能来自另一局），坐标取 src，日期取 claim.occurredAt。
+//   线上 44 条引用里 15 条的文字只在本局别处、1 条本局根本没有，34/44 的日期不是所引那条事件的时间。
+// ---------------------------------------------------------------------------
+
+function makeProvenanceFixture() {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-prov-'));
+  const store = createStore({ root, now: T(20) });
+  store.ensureDirs();
+  store.putMany('episodes', [episode('ep-bbbbbbb1', 21, 1), episode('ep-bbbbbbb2', 22, 1)]);
+  store.putMany('claims', [
+    // claim.text 是 21 号局（另一局）的 exemplar；support 里那条是真的 22 号局 42 处事件。
+    claim({ id: 'c-bbbb0001', kind: 'antipattern', text: 'Cannot find module "left-pad"（21 号局的 exemplar）', day: 21, state: 'observed',
+      support: [{ episode: 'ep-bbbbbbb2', seq: 42, quote: 'TypeError: x is not a function（22 号局 42 处的原文）', day: 22 }] }),
+    claim({ id: 'c-bbbb0002', kind: 'antipattern', text: 'class:tool-unavailable · sed: -e expression #1, char 1: unknown command', day: 21, state: 'semantic',
+      support: [{ episode: 'ep-bbbbbbb2', seq: 43, quote: 'sed: -e expression #1, char 1: unknown command: `,`', day: 22 }] }),
+    // 旧数据形态：support 没有 quote（夹具走 claim() 的 quote 兜底，这里显式抹掉）
+    { ...claim({ id: 'c-bbbb0003', kind: 'fact', text: '旧数据没有 quote 时退回 claim 文本', day: 21, state: 'observed',
+      support: [{ episode: 'ep-bbbbbbb2', seq: 44, day: 22 }] }),
+      support: [{ episode: 'ep-bbbbbbb2', seq: 44, occurredAt: T(22) }] },
+  ]);
+  return { root, store };
+}
+
+test('A6: 卡上文字取 src.quote（不是 claim.text），日期取 src.occurredAt（不是 claim.occurredAt）', () => {
+  const { root, store } = makeProvenanceFixture();
+  try {
+    const hits = [hit({ episodeId: 'ep-bbbbbbb2', seq: 42, claimId: 'c-bbbb0001' })];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const lines = cardLines(card);
+    assert.equal(lines.length, 1, `应渲染 1 行，实际 ${lines.length}`);
+    assert.ok(lines[0].includes('22 号局 42 处的原文'), `卡上应是所引位置的原文：${lines[0]}`);
+    assert.ok(!lines[0].includes('21 号局的 exemplar'), `claim 的 exemplar 不许顶替现场原文：${lines[0]}`);
+    assert.ok(lines[0].includes(formatCardDate(T(22))), `日期应是所引事件的时刻（${formatCardDate(T(22))}）：${lines[0]}`);
+    assert.ok(!lines[0].includes(formatCardDate(T(21))), `日期不许取 claim.occurredAt：${lines[0]}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('A6: 类级 claim 的 class:<token> 标签保留成前缀，叙事部分仍是原文', () => {
+  const { root, store } = makeProvenanceFixture();
+  try {
+    const hits = [hit({ episodeId: 'ep-bbbbbbb2', seq: 43, claimId: 'c-bbbb0002' })];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const line = cardLines(card)[0] ?? '';
+    assert.ok(line.includes('class:tool-unavailable'), `类级标签要保留：${line}`);
+    assert.ok(line.includes('unknown command: `,`'), `叙事部分取原文：${line}`);
+    assert.ok(line.indexOf('class:tool-unavailable') < line.indexOf('sed:'), '标签在叙事之前');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('A6: 旧数据缺 quote ⇒ 退回 claim.text（审计会把它抓成 elsewhere），日期仍取 src.occurredAt', () => {
+  const { root, store } = makeProvenanceFixture();
+  try {
+    const hits = [hit({ episodeId: 'ep-bbbbbbb2', seq: 44, claimId: 'c-bbbb0003' })];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const line = cardLines(card)[0] ?? '';
+    assert.ok(line.includes('旧数据没有 quote 时退回 claim 文本'), `无 quote 时退回 claim.text：${line}`);
+    assert.ok(line.includes(formatCardDate(T(22))), `日期仍取所引事件时刻：${line}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
