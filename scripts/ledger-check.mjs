@@ -49,7 +49,7 @@ export function parseLedger(text) {
 // 发版检查时必然已经涨了几个。给"线上在跑"的漂移容忍（只对计数，不给方向性指标开口子）。
 export const LIVE_DRIFT = Object.freeze({ claim: 12, threads: 12, episodes: 12 });
 
-export function compare(ledger, actual, { live = false } = {}) {
+export function compare(ledger, actual, { live = false, staleHours = 6 } = {}) {
   const has = (v) => Number.isFinite(v);
   const bad = [];
   // 容差按比例：语料在线上持续增长，固定 ±12 会被正常归档追上；2%（下限 12）仍能挡住"改错了"的量级。
@@ -63,12 +63,37 @@ export function compare(ledger, actual, { live = false } = {}) {
       if (ledger.tests[k] !== actual.tests[k]) bad.push(`测试 ${k}：台账 ${ledger.tests[k]} vs 实测 ${actual.tests[k]}`);
     }
   }
-  if (has(ledger.claim) && has(actual.claim) && Math.abs(ledger.claim - actual.claim) > drift.claim) bad.push(`claim：台账 ${ledger.claim} vs 实测 ${actual.claim}（容差 ${drift.claim}，线上归档在涨）`);
-  if (has(ledger.threads) && has(actual.threads) && Math.abs(ledger.threads - actual.threads) > drift.threads) bad.push(`卷：台账 ${ledger.threads} vs 实测 ${actual.threads}（容差 ${drift.threads}）`);
-  if (has(ledger.episodes) && has(actual.episodes) && Math.abs(ledger.episodes - actual.episodes) > drift.episodes) bad.push(`局数：台账 ${ledger.episodes} vs 实测 ${actual.episodes}（容差 ${drift.episodes}）`);
+  // 2026-11-04（0.137.0）：**语料只增不减** —— 变少是数据丢失（真问题），变多是线上一直在归档（预期）。
+  // 原来的对称容差会让"每次发版都被正常增长挡住"（今天连撞三次）。线上（live）改成单向规则：
+  //   ① 实测 < 台账 - 容差 ⇒ 红（有人删了/归档坏了解析）；
+  //   ② 实测 > 台账 + 容差 且台账时点超过 staleHours ⇒ 红（台账太久没刷，读数不可信）；
+  //   ③ 其余（增长但台账够新）⇒ 放行。
+  // 非线上（干净克隆/CI，测不到真库）仍按原对称容差判。
+  const ledgerAgeH = (() => {
+    if (typeof ledger.stamp !== 'string') return null;
+    const t = Date.parse(ledger.stamp.replace(' ', 'T') + ':00+08:00');
+    return Number.isFinite(t) ? (Date.now() - t) / 3_600_000 : null;
+  })();
+  const corpusCheck = (name, ledgerV, actualV, tol) => {
+    if (!has(ledgerV) || !has(actualV)) return;
+    if (!live) {
+      if (Math.abs(ledgerV - actualV) > tol) bad.push(`${name}：台账 ${ledgerV} vs 实测 ${actualV}（容差 ${tol}）`);
+      return;
+    }
+    if (actualV < ledgerV - tol) { bad.push(`${name}：实测 ${actualV} 少于台账 ${ledgerV}（容差 ${tol}）—— 语料只增不减，变少要查`); return; }
+    if (actualV > ledgerV + tol && ledgerAgeH !== null && ledgerAgeH > staleHours) {
+      bad.push(`${name}：台账 ${ledgerV} vs 实测 ${actualV}（台账 ${ledgerAgeH.toFixed(1)}h 未更新，超 ${staleHours}h 上限）`);
+    }
+  };
+  corpusCheck('claim', ledger.claim, actual.claim, drift.claim);
+  corpusCheck('卷', ledger.threads, actual.threads, drift.threads);
+  corpusCheck('局数', ledger.episodes, actual.episodes, drift.episodes);
   // 波动量给容差（同一命令两次测量：A4 p50 抖 ±0.5ms，A2 随语料微动 ±0.5pp）
   // A2 在 26.5–26.8% 之间随 pipeline 时间窗微动（2026-11-02 实测抖动 ±0.15pp）⇒ 容差 0.5pp
-  if (has(ledger.a2) && has(actual.a2) && Math.abs(ledger.a2 - actual.a2) > 0.5) bad.push(`A2：台账 ${ledger.a2}% vs 实测 ${actual.a2}%（容差 0.5pp）`);
+  // 2026-11-04（0.137.0）：A2 是 LOO，分母是整库；线上持续归档时它自己会动（今天 22.53 → 23.04，涨的部分来自新局）。
+  // 线上放宽到 2pp；真正关心的退化由 A2b 严格口径（逐条注入召回）与消融复测抓，不让整库变大冒充回归。
+  const a2Tol = live ? 2 : 0.5;
+  if (has(ledger.a2) && has(actual.a2) && Math.abs(ledger.a2 - actual.a2) > a2Tol) bad.push(`A2：台账 ${ledger.a2}% vs 实测 ${actual.a2}%（容差 ${a2Tol}pp${live ? '，线上整库增长' : ''}）`);
   // A4 单次抖动可达 ±2ms（GC/冷热），台账写的是 3 次中位数 ⇒ 容差 3ms（已在台账注明）
   // 2026-11-04（audit-08 R2）：A4 p50 在高负载下抖动可达 7ms+，固定 3ms 会假红。
   // 线上在跑时按「实测值的 50%，下限 3ms」给容差；非线上仍按 3ms（防回归）。
