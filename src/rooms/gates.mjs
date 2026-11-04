@@ -656,6 +656,28 @@ function isMergeRelated(a, b) {
   return false;
 }
 
+/**
+ * T162c：**成员侧反指针** `mergedInto: '<合并节点 id>'`。
+ *
+ * 为什么需要：T162b 只让"合并节点 ↔ 成员"免于 gate4 —— 但当**两个成员彼此同文**、
+ * 合并节点本身没上卡时，成员身上没有任何信息说明它们属于同一合并组，仍会判重复、整卡打回。
+ * 规则（与合流侧契约一致）：
+ *   · 两条同文记录的 `mergedInto` 是同一个非空字符串 ⇒ 同一合并组（**组由记录自己证明**，
+ *     不需要合并节点在场）⇒ 不判重复；
+ *   · 该合并节点取不到 ⇒ 仍然不判红，只把这一对计入 `checks.merged.unresolved`（可观测，不阻塞）；
+ *   · 只有一条带指针 / 空串 / 指向不同节点 ⇒ **不是**合并关系，判据一字不改。
+ *
+ * @returns {{related:boolean, unresolved:boolean}}
+ */
+function mergeRelationOf(a, b, resolver) {
+  if (isMergeRelated(a, b)) return { related: true, unresolved: false };
+  const am = typeof a?.mergedInto === 'string' ? a.mergedInto.trim() : '';
+  const bm = typeof b?.mergedInto === 'string' ? b.mergedInto.trim() : '';
+  if (!am || am !== bm) return { related: false, unresolved: false };
+  const node = resolver && typeof resolver.get === 'function' ? resolver.get(recordKindOf(am), am) : null;
+  return { related: true, unresolved: !node };
+}
+
 // ---------------------------------------------------------------------------
 // 主入口
 // ---------------------------------------------------------------------------
@@ -721,7 +743,7 @@ export function runGates({
     provenanceChecked: 0,
     downgradeChecked: 0,
     unverified: [],
-    merged: { total: 0, skippedGate4: 0, skippedGate2: 0, unverified: 0 },
+    merged: { total: 0, skippedGate4: 0, skippedGate2: 0, unverified: 0, unresolved: 0 },
     byGate: { 0: 0, 1: 0, 2: 0, '2b': 0, 3: 0, 4: 0, 5: 0, 6: 0, '6b': 0, 7: 0, boundary: 0 },
   };
   /** 判不了的：非 strict 记 unverified（不假装合规），strict 直接失败。 */
@@ -1017,7 +1039,10 @@ export function runGates({
     for (let a = 0; a < group.length; a += 1) {
       for (let b = a + 1; b < group.length; b += 1) {
         if (group[a].record.id === group[b].record.id) continue;
-        if (isMergeRelated(group[a].record, group[b].record)) {
+        // T162c：既认"合并节点 ↔ 成员"（T162b），也认**成员侧反指针** mergedInto（两条同组即豁免）。
+        const relation = mergeRelationOf(group[a].record, group[b].record, resolver);
+        if (relation.unresolved) checks.merged.unresolved += 1;
+        if (relation.related) {
           exempt.add(group[a].record.id);
           exempt.add(group[b].record.id);
         }

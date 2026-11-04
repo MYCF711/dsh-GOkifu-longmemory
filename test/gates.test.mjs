@@ -1264,3 +1264,83 @@ test('T162b 闸2⑥ 守卫: 合并节点 state 超出「成员允许态 ∪ 并�
   const res = runWith({ card, records: { claims: { ...records.claims, [mem.id]: mem } } });
   assert.equal(hasCode(res, 'gate2/state-over-claim'), true, '守卫：真正越级的 state 仍要打回');
 });
+
+// ---------------------------------------------------------------- 闸 4 成员反指针（T162c）
+//
+// 残留缺口：两个**成员**彼此同文、且同时上同一张卡时，闸 4 看不出它们属于同一合并组
+// （成员身上没有 `merge.members`），仍会报 gate4/unsuperseded-duplicate ⇒ 整卡打回。
+// 修：认成员侧反指针 `mergedInto: '<合并节点 id>'` —— 两条同文记录的 `mergedInto` 相同
+// 即视为同一合并组；指向的节点取不到也不判红，只计入 `checks.merged.unresolved`。
+
+/** 造一张"两条同文 claim"的卡（不同 id），并把两条记录都塞进 records。 */
+function sameTextCard({ aOver = {}, bOver = {} } = {}) {
+  const a = rec({ id: 'c-t162c001', text: '同一段文字（两条成员）', state: 'observed', ...aOver });
+  const b = rec({ id: 'c-t162c002', text: '同一段文字（两条成员）', state: 'observed', ...bOver });
+  const { card, records } = cardFrom({ record: a });
+  records.claims[b.id] = b;
+  const two = clone(card);
+  const rowB = { ...clone(two.claims[0]), claimId: b.id };
+  two.claims.push(rowB);
+  two.section = two.section.replace('</memory-ledger>', `${rowB.line}\n</memory-ledger>`);
+  retoken(two);
+  return { card: two, records, a, b };
+}
+
+test('R13 闸4 T162c: 两条同文成员的 mergedInto 相同 ⇒ 同一合并组，不判重复', () => {
+  const { card, records } = sameTextCard({
+    aOver: { mergedInto: 'c-merge0001' },
+    bOver: { mergedInto: 'c-merge0001' },
+  });
+  // 合并节点本身不在卡上（成员各自成行），records 里也没有它 ⇒ 这时不该判红
+  const res = runWith({ card, records });
+  assert.equal(res.ok, true, `同一合并组的成员同文不该判重复：${JSON.stringify(res.errors)}`);
+  assert.equal(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'), false);
+});
+
+test('R13 闸4 T162c 守卫: 两条同文成员的 mergedInto **不同** ⇒ 照报 gate4/unsuperseded-duplicate', () => {
+  const { card, records } = sameTextCard({
+    aOver: { mergedInto: 'c-merge0001' },
+    bOver: { mergedInto: 'c-merge9999' },
+  });
+  const res = runWith({ card, records });
+  assert.equal(res.ok, false, '不同合并组 = 真的重复，必须报');
+  const err = res.errors.find((e) => e.code === 'gate4/unsuperseded-duplicate');
+  assert.ok(err);
+  assert.deepEqual([...err.detail.ids].sort(), ['c-t162c001', 'c-t162c002']);
+});
+
+test('R13 闸4 T162c 守卫: 只有一条带 mergedInto / 空串 ⇒ 不算合并关系，照报', () => {
+  const one = sameTextCard({ aOver: { mergedInto: 'c-merge0001' } });
+  assert.equal(runWith({ card: one.card, records: one.records }).ok, false, '只有一条有反指针不算组');
+  const empty = sameTextCard({ aOver: { mergedInto: '' }, bOver: { mergedInto: '' } });
+  assert.equal(runWith({ card: empty.card, records: empty.records }).ok, false, '空串不是指针');
+});
+
+test('R13 闸4 T162c: mergedInto 指向不存在的节点 ⇒ 不判红，但计入 checks.merged.unresolved', () => {
+  const { card, records } = sameTextCard({
+    aOver: { mergedInto: 'c-ghost0001' },
+    bOver: { mergedInto: 'c-ghost0001' },
+  });
+  const res = runWith({ card, records });
+  assert.equal(res.ok, true, `组已由两条记录自己证明，不该判红：${JSON.stringify(res.errors)}`);
+  assert.ok(res.checks.merged.unresolved >= 1, `checks.merged.unresolved 应当计数，实际：${JSON.stringify(res.checks.merged)}`);
+});
+
+test('R13 闸4 T162c: mergedInto 指向**存在**的节点 ⇒ 不判红且不计 unresolved', () => {
+  const { card, records } = sameTextCard({
+    aOver: { mergedInto: 'c-merge0001' },
+    bOver: { mergedInto: 'c-merge0001' },
+  });
+  records.claims['c-merge0001'] = rec({ id: 'c-merge0001', text: '合并节点（不在卡上）', state: 'candidate' });
+  const res = runWith({ card, records });
+  assert.equal(res.ok, true, JSON.stringify(res.errors));
+  assert.equal(res.checks.merged.unresolved, 0, '节点取得到就不该记 unresolved');
+});
+
+test('R13 闸4 T162c 守卫: 无 mergedInto 的两条同文 claim ⇒ 行为一字不变（照报）', () => {
+  const { card, records } = sameTextCard();
+  const res = runWith({ card, records });
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'));
+  assert.equal(res.checks.merged.unresolved, 0);
+});
