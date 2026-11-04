@@ -17,6 +17,36 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.144.0（2026-11-05）
+
+### 邻域视图（R11b）：`kifu.view()` —— 18×18 的一块棋，边界留边
+- 新 `src/rooms/view.mjs`：`buildNeighborhood({ center, view, maxNodes=324, depth≤2 })`
+  → `{center, nodes, edges, frontier, counts, truncated, clamped}`。
+  **中心恒在 `nodes[0]`**；边只留两端都在邻域内的；**被截断的边全部进 `frontier`** —— agent 不够时顺着它再走一步。
+- 真库实测（497 局 / 1232 claim）：以 `ep-8cc34e32` 为中心 → **202 节点 / 402 边 / 534 边界边**；
+  `maxNodes=12` ⇒ `truncated.nodes=true` 且 frontier 非空；`maxNodes=9999` ⇒ `clamped=true`（夹到 324）。
+- **不跨作用域**：异域节点与异域边一个都不进（4 个真实作用域各跑 depth=2，越界 0）。
+- **知识库是巨型节点**（`lib:docs/调研`）：以它为中心才展开成每篇一个 `note` 子节点；普通邻域**不会**被它撑大。
+- 坏参数只抛 `bad-argument: …`；中心不在视图里返回空结构不抛。
+
+### SDK / 工具面同步
+- `src/sdk.mjs` 新增 `view({center, maxNodes, depth, scope})`（只读、零模型，按需拼一次整图视图并缓存）。
+- 工具面新增 `kifu_view`（第 6 个只读工具）。
+
+### 合流的底座（两件并行产出）
+- `docs/合流-契约.md`：机械判据（同 kind+scope、归一正文相等为主判据、门控 Jaccard ≥0.85 为次判据、9 条否决项）、
+  合成节点结构、**T1 A6 不退化 / T2 A5 零越界 / T3 可逆幂等** 三条硬断言。真库预估 **27 组 / 46 条**可合。
+- `scripts/dup-report.mjs`：重复度体检（三口径 + 分桶 + 聚簇 + 脱敏，只读）。真库 1232 条：
+  A 615 对 / B 36 对 / C 252 对；**≥2 口径同时命中 = 43 簇 / 64 条（5.2%）** 作为高精度种子；
+  19 簇被 `validity`/`preconditions` 差异挡下 —— 这正是"版本号/路径本身就是正文"的那批。
+
+### 裁定（自裁 S18）
+① 合并节点 `text` 不带前缀（标签进 `merge` 字段）；② `counters.injections` 记被渲染出来的那条；
+③ S3 大棋谱复用 `merge` 字段，不另开 `kifu` 节点类型。
+
+### 验证
+535 条测试（531 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.143.0（2026-11-04）
 
 ### 发版闸的判据换了：不再看"心跳新鲜度"，改看"有没有读到 store"
