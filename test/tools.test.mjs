@@ -1,6 +1,9 @@
 // 棋院工具面（PTC / run_code）的 tombstone test：删掉 src/tools.mjs ⇒ 本文件整片红。
 // 契约：docs/SDK-PTC.md 的工具一节。这里钉住：形状对、参数透传、错误不抛、注册失败不连累其它工具。
 import test from 'node:test';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { buildMemoryTools, registerMemoryTools, TOOL_PREFIX } from '../src/tools.mjs';
 
@@ -78,4 +81,21 @@ test('tools: 注册 —— 有 ctx.tools.register 就全注册；没有就安静
   }, { warn: (_ctx, msg) => warned.push(msg) });
   assert.equal(names.length, 4, '除被拒的那个，其余都注册成功');
   assert.ok(warned.some((m) => m.includes('_card')), '被拒的要 warn，且说明不影响注入');
+});
+
+test('tools: 注册凭据落盘（原子写、可读回），失败返回 false 不抛', async () => {
+  const { recordToolRegistration } = await import('../src/tools.mjs');
+
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-tools-reg-'));
+  try {
+    assert.equal(recordToolRegistration(dir, ['kifu_stats', 'kifu_get'], { at: 1793793301076 }), true);
+    const back = JSON.parse(readFileSync(path.join(dir, 'tools-registered.json'), 'utf8'));
+    assert.equal(back.count, 2);
+    assert.deepEqual(back.names, ['kifu_stats', 'kifu_get']);
+    assert.equal(back.at, 1793793301076);
+    assert.ok(!existsSync(path.join(dir, 'tools-registered.json.tmp')), '不许留 tmp 碎片');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+
+  assert.equal(recordToolRegistration('', ['x']), false, '空目录 ⇒ false，不抛');
+  assert.equal(recordToolRegistration(path.join(tmpdir(), 'kifu-nope-不存在的目录', 'x'), ['x']), false);
 });

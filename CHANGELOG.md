@@ -17,6 +17,20 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.136.0（2026-11-04）
+
+### 工具面加一条「注册凭据」：重启一次就能确认工具到底进去了没有
+- 背景：工具是**插件加载时**注册的，从会话里看不出"注册成没成" —— 今天重启后我们只能猜。
+- 新增 `recordToolRegistration()`（`src/tools.mjs`）：插件加载时若确实注册成功，就在
+  `<storeRoot>/tools-registered.json` 写一条 `{at, names, count, host}`；**原子写**（tmp + rename），
+  失败返回 `false`、不抛、不影响注入。
+- 用法：重启一次后 `cat ~/DeepSeek Harness/home/memory-context/tools-registered.json` 就能确认
+  宿主是否把 `ctx.tools` 交给了插件、五个 `kifu_*` 是否都在。
+
+### 验证
+495 条测试（491 pass / 0 fail / 4 skip）：新增 1 条覆盖凭据落盘（原子写、可读回、空目录/不存在目录返回 false）；
+`check PASS`；新宿主（pid 13364）线上 A6 首批样本 at-seq 2/2、missing 0、跨作用域 0。
+
 ## 0.135.0（2026-11-04）
 
 ### 知识库到 38 篇：调研 37 · AWS AgentCore Memory（"遗忘"的工程形态）

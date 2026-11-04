@@ -56,7 +56,7 @@ import {
 import { probeValidity, validityKeyOf, runGates } from './rooms/gates.mjs';
 import { classifyErrorClass } from './rooms/claim.mjs';
 import { errorClassKeyOf } from './rooms/topic.mjs';
-import { registerMemoryTools } from './tools.mjs';
+import { registerMemoryTools, recordToolRegistration } from './tools.mjs';
 import { createMemorySdk } from './sdk.mjs';
 import { createStore } from './rooms/persist.mjs';
 import { createWalkCache } from './rooms/walk.mjs';
@@ -898,6 +898,8 @@ export function apply(ctx, rawConfig = {}) {
       createSdk: (opts) => createMemorySdk({ ...opts, dshHome: opts?.dshHome || dshHome || null }),
       warn,
     });
+    // 2026-11-04：留一条「到底注册上没有」的凭据 —— 工具在插件加载时注册，从会话里看不出来。
+    if (storeRoot && names.length) recordToolRegistration(storeRoot, names, { host: 'dsh' });
   } catch (error) {
     warn(ctx, `工具面注册整体失败（不影响注入）：${String(error?.message ?? error)}`);
   }
