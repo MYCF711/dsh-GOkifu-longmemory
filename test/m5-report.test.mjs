@@ -22,7 +22,7 @@ import zlib from 'node:zlib';
 import { createHash } from 'node:crypto';
 
 import {
-  runM5, measureA1, measureA3, runPipeline, buildSignalTexts, formatM5Report, renderM5Markdown,
+  runM5, measureA1, measureA3, measureA2b, runPipeline, buildSignalTexts, formatM5Report, renderM5Markdown,
   parseArgs, runCli, AXIS_IDS, AXIS_STATUSES,
 } from '../scripts/m5-report.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
@@ -408,4 +408,24 @@ test('m5: 复用口径 —— A2/A1 的底层入口和 eval.mjs 是同一个（�
 
   const h1 = await runH1({ storeRoot: fixture.storeRoot, workspace: fixture.root, now: ARCHIVE_TS, signals: 3 });
   assert.ok(Number.isFinite(h1.injected), 'runH1 返回 injected');
+});
+
+test('m5: A2b 失分归因 —— 空库时全部记 notRetrieved（不把检索失败说成文本问题）', () => {
+  const store = createStore({ root: path.join(tmp, 'empty-a2b') });
+  store.ensureDirs();
+  const SIG = 'json decode error expecting value line 1';
+  const report = {
+    primary: {
+      rows: [
+        { episode: 'ep-prior1', scopeKey: 'w:d:/x', startedAt: T0, repeatSignatures: [SIG], novelSignatures: [] },
+        { episode: 'ep-later1', scopeKey: 'w:d:/x', startedAt: T0 + 1000, repeatSignatures: [SIG], novelSignatures: [] },
+      ],
+    },
+  };
+  const frozen = { items: [{ sig: SIG, scopeKey: 'w:d:/x', episode: 'ep-later1', prior: ['ep-prior1'], sameScope: true }] };
+  const r = measureA2b({ store, report, splitAt: T0 + 500, frozen });
+  assert.equal(r.n, 1);
+  assert.equal(r.specificHits, 0, '空库里召回不到 ⇒ 严格 0');
+  assert.deepEqual(r.missBy, { covered: 0, notRetrieved: 1 }, '要归因成"未检索到"，不能算成文本不匹配');
+  assert.equal(typeof r.recallSpecific, 'number');
 });

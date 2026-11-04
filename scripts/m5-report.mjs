@@ -288,6 +288,16 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     const item = use.find((x) => x.sig.slice(0, 60) === row.sig) ?? {};
     row.bucket = bucketOf(item, Array.isArray(row.prior) ? row.prior.length : 0, row.sameScope);
   }
+  // 2026-11-04：失分**归因**（下一步该修哪一层，不再靠猜）。
+  //   covered     —— claim 覆盖了当年那条（支撑命中 prior 局），但 claim 文本与该签名的判别词重叠 <2
+  //                  ⇒ 是"检索到了、但卡片说的是同类的另一条错"，属文本/选源问题；
+  //   notRetrieved—— 一条覆盖该签名的 claim 都没进卡 ⇒ 属检索/排序问题。
+  const missBy = { covered: 0, notRetrieved: 0 };
+  for (const row of sampled) {
+    if (row.specific) continue;
+    if (row.hitByClaim) missBy.covered += 1;
+    else missBy.notRetrieved += 1;
+  }
   const buckets = {};
   for (const row of sampled) {
     const b = row.bucket ?? 'singleHop';
@@ -319,6 +329,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     crossScopeStrict: sampled.filter((x) => !x.sameScope && x.specific).length,
     sampled,
     buckets,
+    missBy,
   };
 }
 
@@ -365,7 +376,7 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
       n,
       status: measured ? 'measured' : 'not-consumed',
       caveat: measured
-        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout** rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}）；**注入召回 A2b** 覆盖=${injectionRecall && Number.isFinite(injectionRecall.recall) ? pct(injectionRecall.recall) : 'n/a'}（${injectionRecall?.hits ?? '?'}/${injectionRecall?.n ?? '?'}）· **严格**=${injectionRecall && Number.isFinite(injectionRecall.recallSpecific) ? pct(injectionRecall.recallSpecific) : 'n/a'}（${injectionRecall?.specificHits ?? '?'}/${injectionRecall?.n ?? '?'}）；**跨项目唯先例** ${injectionRecall?.crossScopeStrict ?? '?'}/${injectionRecall?.crossScopeSampled ?? '?'}（Q18 的上限）${injectionRecall?.buckets ? `；**分桶（严格）** ${Object.entries(injectionRecall.buckets).map(([k, v]) => `${k} ${v.specific}/${v.n}`).join(' · ')}` : ''}`
+        ? `LOO（both 口径，**只计像错误的签名**）repeat=${totals.repeatError} novel=${totals.novelError}；1σ=±${pct(sigma)}；coverage=${pct(report.primary.coverage.ratio)}（${report.primary.coverage.evaluated}/${report.corpus.rootEpisodes} 局）；全量口径 ${pct(rateAll)}（${totals.repeat}/${totals.signatures}，含非错误文本）；**时间切分 holdout** rate=${holdout && Number.isFinite(holdout.rate) ? pct(holdout.rate) : 'n/a'}（${holdout?.repeat ?? '?'}/${holdout?.n ?? '?'}）；**注入召回 A2b** 覆盖=${injectionRecall && Number.isFinite(injectionRecall.recall) ? pct(injectionRecall.recall) : 'n/a'}（${injectionRecall?.hits ?? '?'}/${injectionRecall?.n ?? '?'}）· **严格**=${injectionRecall && Number.isFinite(injectionRecall.recallSpecific) ? pct(injectionRecall.recallSpecific) : 'n/a'}（${injectionRecall?.specificHits ?? '?'}/${injectionRecall?.n ?? '?'}）；**跨项目唯先例** ${injectionRecall?.crossScopeStrict ?? '?'}/${injectionRecall?.crossScopeSampled ?? '?'}（Q18 的上限）${injectionRecall?.buckets ? `；**分桶（严格）** ${Object.entries(injectionRecall.buckets).map(([k, v]) => `${k} ${v.specific}/${v.n}`).join(' · ')}` : ''}${injectionRecall?.missBy ? `；**失分归因** 覆盖但文本不匹配 ${injectionRecall.missBy.covered} / 未检索到 ${injectionRecall.missBy.notRetrieved}` : ''}`
         : 'LOO 分母为 0（没有可评测的失败签名）⇒ 不写 0',
       detail: {
         holdout,
