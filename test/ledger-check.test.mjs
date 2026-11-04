@@ -63,3 +63,18 @@ test('ledger-check compare: 局数/A2/A4 不一致（超容差）要报', () => 
   const within = compare(l, { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 322, threads: 143, episodes: 117, a2: 26.9, a4: 2.5 });
   assert.deepEqual(within, [], '容差内不报');
 });
+
+test('ledger-check: m5 采集失败时不许伪装成「台账缺 A2/A4」', () => {
+  const l = parseLedger([
+    'main = 0.59.0',
+    '**389 条**（385 pass / 0 fail / 4 skip）',
+    '[本] 2026-11-02 21:00',
+  ].join('\n'));
+  const bad = fullCheck(l, [], { now: Date.parse('2026-11-02T22:00:00'), m5CollectFailed: 'exit=1 · stderr: boom' });
+  assert.ok(bad.some((x) => x.includes('m5 采集失败')), '要报采集失败');
+  assert.ok(bad.some((x) => x.includes('boom')), '要带上 m5 的 stderr 尾巴');
+  assert.ok(!bad.some((x) => x.includes('台账缺 A2/A4')), '不许把采集失败说成台账缺值');
+  // 没有采集失败时，缺 A2/A4 仍按原口径报
+  const plain = fullCheck(l, [], { now: Date.parse('2026-11-02T22:00:00') });
+  assert.ok(plain.some((x) => x.includes('台账缺 A2/A4')));
+});

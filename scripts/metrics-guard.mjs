@@ -12,7 +12,7 @@
 //   A2b 严格  ≥ 0.55（样本仅 18 条，1 条 = 5.6pp；2026-11-02 观察到同 store 下 0.611–0.667 的跳动）
 //   A2b 覆盖  = 1.00（上限参考）
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,14 +75,44 @@ if (invokedDirectly) {
   const limits = { ...LIMITS };
   if (strictIdx >= 0 && Number.isFinite(Number(argv[strictIdx + 1]))) limits.a2bStrictMin = Number(argv[strictIdx + 1]);
   const json = argv.includes('--json');
-  let report = null;
-  try {
-    const { stdout } = await execFileAsync(process.execPath, [path.join(REPO, 'scripts/m5-report.mjs'), '--json'], { cwd: REPO, maxBuffer: 64 * 1024 * 1024, env: process.env });
-    report = JSON.parse(stdout);
-  } catch (error) {
-    console.error(`metrics-guard: 采集失败（${String(error?.message ?? error)}）`);
+  // 2026-11-04：本机实测过 m5 --json **间歇性静默死亡**（一次 patrol 里报 "Command failed"，重跑又正常）。
+  // 原实现把 m5 的 stderr 吞了、把 JSON.parse 失败和子进程失败混成一句 "采集失败"，等于把可诊断信息丢掉。
+  // 现在：分别记 exitCode / stderr / stdout 尾部，落 tmp/m5-raw.json 供事后看；只对"exit≠0 且 stderr 为空"
+  // 这种静默死亡重试一次（重试很贵，别对真错误反复跑）。
+  const collect = async () => {
+    const r = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [path.join(REPO, 'scripts/m5-report.mjs'), '--json'], { cwd: REPO, env: process.env });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (d) => { stdout += d; });
+      child.stderr.on('data', (d) => { stderr += d; });
+      child.on('error', (error) => resolve({ exitCode: null, stdout, stderr: `${stderr}${String(error?.message ?? error)}` }));
+      child.on('close', (code) => resolve({ exitCode: code, stdout, stderr }));
+    });
+    const tail = (text, n = 600) => String(text ?? '').trim().slice(-n);
+    let report = null;
+    let parseError = null;
+    try { report = JSON.parse(r.stdout); } catch (error) { parseError = String(error?.message ?? error); }
+    return { ...r, report, parseError, tail };
+  };
+  let got = await collect();
+  if (!got.report && got.exitCode !== 0 && !got.tail(got.stderr)) {
+    console.error('metrics-guard: m5 静默死亡（exit≠0 且 stderr 为空），重试一次…');
+    got = await collect();
+  }
+  if (!got.report) {
+    try {
+      fs.mkdirSync(path.join(REPO, 'tmp'), { recursive: true });
+      fs.writeFileSync(path.join(REPO, 'tmp/m5-raw.json'), `${got.stdout ?? ''}`);
+      fs.writeFileSync(path.join(REPO, 'tmp/m5-raw.stderr.txt'), `${got.stderr ?? ''}`);
+    } catch { /* 证据写失败不影响报错 */ }
+    console.error(`metrics-guard: 采集失败 · exit=${got.exitCode ?? 'n/a'}${got.parseError ? ` · JSON 解析：${got.parseError}` : ''}`);
+    if (got.tail(got.stderr)) console.error(`  m5 stderr 尾部：${got.tail(got.stderr)}`);
+    if (got.parseError && got.tail(got.stdout)) console.error(`  m5 stdout 尾部：${got.tail(got.stdout, 300)}`);
+    console.error('  原始输出已落 tmp/m5-raw.json 与 tmp/m5-raw.stderr.txt');
     process.exit(2);
   }
+  const report = got.report;
   const verdict = judge(report, limits);
   const out = { at: new Date().toISOString(), root: HOME, limits, ...verdict };
   try {
