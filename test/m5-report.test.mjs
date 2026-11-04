@@ -295,8 +295,10 @@ test('m5: A1 —— 无 validity ⇒ not-consumed（value=null）；有覆盖 �
     },
   });
   assert.equal(mapped.status, 'measured');
-  assert.equal(mapped.value, 0.2);
-  assert.equal(mapped.n, 5);
+  // 2026-11-04（S16）：主值取闸门后 —— 这才是「错误记忆真的到了模型」；闸前的 0.2 仍留在 detail 里
+  assert.equal(mapped.value, 0);
+  assert.equal(mapped.detail.staleTransferRate, 0.2);
+  assert.equal(mapped.n, 5, '没有 postGateInjected 时 n 退回注入条数');
   assert.equal(mapped.detail.validityCoverage.ratio, 1);
   assert.equal(mapped.detail.crossScopeLeakRate, 0);
 

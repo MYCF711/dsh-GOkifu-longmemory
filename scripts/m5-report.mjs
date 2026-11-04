@@ -148,6 +148,8 @@ export async function measureA1({ storeRoot, workspace, now, signals, crossScope
   const exercisedValidity = Number(h1.validityCoverage?.exercised ?? renderedValidity);
   const validityCoverage = withValidity === 0 ? null : exercisedValidity / withValidity;
   const injected = Number(h1.injected ?? 0);
+  const postGateStaleRate = h1.postGateStaleRate ?? null;
+  const postGateInjected = h1.postGateInjected ?? 0;
   const measured = injected > 0 && withValidity > 0;
   const vacuous = measured && exercisedValidity === 0;
   const detail = {
@@ -167,13 +169,18 @@ export async function measureA1({ storeRoot, workspace, now, signals, crossScope
   if (withValidity === 0) parts.push('语料里没有带 validity 的条目 ⇒ stale 分子恒为 0，未锻炼到');
   else if (exercisedValidity === 0) parts.push(`带 validity 的 ${withValidity} 条既没被渲染、也没被闸拦下 ⇒ 覆盖率为 0，0% 不代表没风险`);
   else if (renderedValidity === 0) parts.push(`带 validity 的 ${withValidity} 条**全部被闸拦下**（渲染 0 / 拦下 ${exercisedValidity}）⇒ 0% 是"闸有效"的证据，不是空转`);
+  // 2026-11-04（口径更正 S16）：A1 的主值改取**闸门后**的 stale 率 —— 负迁移指的是「错误记忆真的进了模型的上下文」，
+  // 闸是产品的一部分；闸前那个数是「候选暴露度」（诊断用，照旧打印，不藏）。
+  parts.push(`**闸前** staleTransferRate=${pct(h1.staleTransferRate)}（${h1.staleInjected ?? 0}/${injected} 候选）· **闸后** postGateStaleRate=${pct(postGateStaleRate)}（${h1.postGateStale ?? 0}/${h1.postGateInjected ?? 0} 到达模型）`);
   parts.push(`validityCoverage=${pct(validityCoverage)}（渲染 ${renderedValidity} + 闸拦 ${exercisedValidity - renderedValidity} / 共 ${withValidity}）`);
   parts.push(`crossScopeLeakRate=${pct(crossScopeLeakRate)}（见 A5）`);
   if (vacuous) parts.unshift('**0% 是空转的**（带 validity 的条目既没被渲染、也没被闸拦下）');
   return axis({
-    value: measured ? (h1.staleTransferRate ?? null) : null,
+    // 主值 = 闸门后（真正到达模型的那部分）；闸前的数在 caveat 与 detail.staleTransferRate 里
+    // 闸后优先；旧 report 没给闸后数时退回闸前（保持向后兼容，不把有读数的情况变成 null）
+    value: measured ? (Number.isFinite(h1.postGateStaleRate) ? h1.postGateStaleRate : (h1.staleTransferRate ?? null)) : null,
     unit: 'rate',
-    n: injected,
+    n: Number.isFinite(h1.postGateInjected) ? h1.postGateInjected : injected,
     status: measured ? 'measured' : 'not-consumed',
     caveat: parts.join('；'),
     detail,

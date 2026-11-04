@@ -345,7 +345,7 @@ function compareClaims(a, b) {
  * 第 5 条故意收紧：没有 claim 指向命中事件时**不随手抓一条该局别的 claim**（那正是 F8「顺藤摸错枝」），
  * 而是退回指针行。全部按 (episode, seq, occurredAt) 校验，缺源的一律不入卡。
  */
-function pickClaim(hit, view) {
+function pickClaimBase(hit, view) {
   if (hit?.claim && typeof hit.claim === 'object' && typeof hit.claim.text === 'string') {
     const c = hit.claim;
     return {
@@ -525,6 +525,37 @@ function entryFromEpisode(hit, view) {
 }
 
 /**
+ * T115（0.124.0）：**同一局里往往不止一条教训**，而 walk 命中的那个 seq（或它自带的 claim）可能锚定着
+ * 与本次失败无关的类级泛教训。实测：`syntaxerror … checkSyntax` 那条考卷，5 个 hit 全落在同一局、
+ * 各自只带一条"工具坏了"的泛教训，真正对得上的那条在同一局的另一个 seq 上（`claim.text` 重叠 8 vs 0）。
+ * 规则：在**该局**的 claim 里挑与本次信号判别词重叠最高的那条 —— 要求 ≥2 且**严格优于**原选，
+ * 否则保持原行为（不为了换而换）。出处仍由 `entryFromClaim` 从所选 claim 的 support 里取，
+ * 所以「文字 / 坐标 / 日期」三者一致的不变量不受影响（A5 作用域闸也照旧在 entryFromClaim 里生效）。
+ */
+function pickClaim(hit, view, options = {}) {
+  const base = pickClaimBase(hit, view);
+  const tokens = Array.isArray(options.signalTokens) ? options.signalTokens : [];
+  const episode = String(hit?.episode ?? '');
+  if (!tokens.length || !episode) return base;
+  const pool = (view.claimsByEpisode.get(episode) ?? []).filter((c) => Array.isArray(c?.support) && c.support.length);
+  if (!pool.length) return base;
+  const scoreOf = (c) => {
+    const t = String(c?.text ?? '').toLowerCase();
+    if (!t) return -1;
+    return tokens.filter((x) => t.includes(x)).length;
+  };
+  const baseScore = base ? scoreOf(base) : -1;
+  let best = null;
+  let bestScore = -1;
+  for (const c of pool) {
+    const sc = scoreOf(c);
+    if (sc > bestScore) { best = c; bestScore = sc; }
+  }
+  if (best && bestScore >= 2 && bestScore > baseScore) return best;
+  return base;
+}
+
+/**
  * hits → 候选条目。缺 (episode, seq, occurredAt) 的条目**直接丢**（无源不入、无时不入），
  * 只计数进省略；这样记忆卡本身不会出现「有行没出处」的形态。
  */
@@ -538,7 +569,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
 
   for (const hit of Array.isArray(hits) ? hits : []) {
     if (!hit || typeof hit !== 'object') continue;
-    const claim = pickClaim(hit, view);
+    const claim = pickClaim(hit, view, { signalTokens: signalTokensOf(signal) });
     // Q19-B 预置（默认关）：只保留 hard 约束，丢弃 soft（理由句/闲聊/复述）
     if (preferenceHardOnly && claim && claim.kind === 'preference' && claim.level !== 'hard') {
       droppedSoftPreference += 1;
