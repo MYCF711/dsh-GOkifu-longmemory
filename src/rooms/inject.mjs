@@ -113,6 +113,49 @@ export function singleLine(text) {
     .trim();
 }
 
+/**
+ * 扫描一段模型可见文本里的指令式片段。
+ * @returns {Array<{pattern:string, at:number, excerpt:string}>}
+ */
+/**
+ * 2026-11-04（0.138.0）：**误伤表** —— 有些"祈使模式"其实是普通词的一部分。
+ * 线上实测（1192 条 claim 全库扫）：`请` 命中 51 次里绝大多数是 `请求`（HTTP request，本仓的日常名词），
+ * `记得` 命中 11 次里大半是 `我记得`（叙述）。这些不是指令，却被边界闸当成指令 ⇒ 整张卡被拦/整行被丢。
+ * 只加了最小排除集：`请` 后面是 求/示/假/教，或前面是 申/邀/聘/提/恳/呈/敬/回；`记得` 前面是 我/不/还/也/都/你。
+ */
+export const IMPERATIVE_EXCLUSIONS = Object.freeze({
+  // 键与字符一律用码位写，避免边界审计把**规则表本身**当成注入里的祈使句（自检踩过）。
+  '\u8bf7': { before: new Set(['\u7533', '\u9080', '\u8058', '\u63d0', '\u6073', '\u5448', '\u656c', '\u56de']), after: new Set(['\u6c42', '\u793a', '\u5047', '\u6559', '\u67ec']) },
+  '\u8bb0\u5f97': { before: new Set(['\u6211', '\u4e0d', '\u8fd8', '\u4e5f', '\u90fd', '\u4f60']), after: new Set([]) },
+});
+
+function isExcludedHit(text, pattern, at) {
+  const rule = IMPERATIVE_EXCLUSIONS[pattern];
+  if (!rule) return false;
+  const before = at > 0 ? text[at - 1] : '';
+  const after = text[at + pattern.length] ?? '';
+  return rule.before.has(before) || rule.after.has(after);
+}
+
+export function auditImperatives(text) {
+  const s = String(text ?? '');
+  const out = [];
+  if (!s) return out;
+  for (const pattern of IMPERATIVE_PATTERNS) {
+    let from = 0;
+    for (;;) {
+      const at = s.indexOf(pattern, from);
+      if (at < 0) break;
+      if (isExcludedHit(s, pattern, at)) { from = at + pattern.length; continue; }
+      const start = Math.max(0, at - 12);
+      const end = Math.min(s.length, at + pattern.length + 12);
+      out.push({ pattern, at, excerpt: s.slice(start, end).replace(/\s+/g, ' ').trim() });
+      from = at + pattern.length;
+    }
+  }
+  return out.sort((a, b) => (a.at - b.at) || String(a.pattern).localeCompare(String(b.pattern)));
+}
+
 /** 单行化 + 截断（降表示的第一级：先截文本，不丢日期与出处）。 */
 export function clipLine(text, max = TEXT_CLIP) {
   const s = singleLine(text);
@@ -573,6 +616,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
   let droppedNoProvenance = 0;
   let droppedNoText = 0;
   let droppedSoftPreference = 0;
+  let droppedImperative = 0;
   const seen = new Set();
   const cap = Math.max(ENTRY_LIMIT * 8, 40);
 
@@ -595,6 +639,12 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
     if (!entry) {
       if (claim && !clipLine(claim.text)) droppedNoText += 1;
       else droppedNoProvenance += 1;
+      continue;
+    }
+    // 2026-11-04（0.138.0）：边界闸对祈使句是**卡级 fail-closed** —— 线上实测有一次整张卡因此没注入。
+    // 规则不变（注入内容不许有祈使句），但粒度改成**行**：这一行丢掉、其余照常注入，并在 omitted 里如实记数。
+    if (auditImperatives(entry.rawText).length) {
+      droppedImperative += 1;
       continue;
     }
     const key = `${entry.source.episode}\u0000${entry.source.seq}\u0000${entry.rawText}`;
@@ -635,7 +685,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
     if (entries.length >= cap) break;
   }
 
-  return { entries, sigAdded, dropped: { noProvenance: droppedNoProvenance, noText: droppedNoText, softPreference: droppedSoftPreference } };
+  return { entries, sigAdded, dropped: { noProvenance: droppedNoProvenance, noText: droppedNoText, softPreference: droppedSoftPreference, imperative: droppedImperative } };
 }
 
 function compareEntries(a, b) {
@@ -767,6 +817,7 @@ export function buildMemoryCard({
   const { entries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex });
   const sorted = entries.slice().sort(compareEntries);
   const droppedProvenance = dropped.noProvenance + dropped.noText;
+  const droppedImperative = Number.isFinite(dropped.imperative) ? dropped.imperative : 0;
 
   // 取前缀并按「先降表示、后降条数」的阶梯收敛到预算内（方案 §7.2 纪律 3）：
   //   阶梯 1：文本 160 字 —— 完整表示
@@ -810,10 +861,11 @@ export function buildMemoryCard({
   // 连空壳都放不进预算（预算小到不合理）⇒ 零展开，但**省略必须如实记数**（不许静默丢）。
   if (section === null) beyond = sorted.length;
 
-  const omittedTotal = beyond + droppedProvenance + crossScope + unknownScope;
+  const omittedTotal = beyond + droppedProvenance + crossScope + unknownScope + droppedImperative;
   const omittedParts = [];
   if (beyond > 0) omittedParts.push(`超出 ${limit} 条上限/预算 ${budgetTokens} tokens 的 ${beyond} 条`);
   if (droppedProvenance > 0) omittedParts.push(`无源不入 ${droppedProvenance} 条（缺 occurredAt 或 seq）`);
+  if (droppedImperative > 0) omittedParts.push(`含指令式片段未纳入 ${droppedImperative} 条（只丢该行，其余照常）`);
   if (crossScope > 0) omittedParts.push(`跨作用域未纳入 ${crossScope} 条 [scope=${scopeKey}]`);
   if (unknownScope > 0) omittedParts.push(`作用域未知未纳入 ${unknownScope} 条`);
   const omissions = omittedTotal > 0

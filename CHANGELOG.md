@@ -17,6 +17,40 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.139.0（2026-11-04）
+
+### 工具面注册：两条路都试，且"没注册上"也留凭据
+- 重启后实测：`tools-registered.json` **没出现** —— 说明插件里直接访问 `ctx.tools.register` 没拿到（`names` 为空就不写文件）。
+- 改（`src/plugin.mjs`）：先试直接路径；拿不到就**按 webServer 同一套服务依赖声明**再试一次
+  `ctx.inject(['tools'], host => registerMemoryTools(host, …))`；两条都记下结果。
+- 凭据**无论成没成都写**，字段扩为 `{at, names, count, host, via, ctxHasRegister}`：
+  - `via: "direct"` / `"inject"` / `"none"` —— 走通了哪条；
+  - `names: []` —— 「没注册上」本身就是判据，不用再靠猜。
+
+### 验证
+497 条测试（493 pass / 0 fail / 4 skip）：新增 1 条覆盖凭据字段（空数组也落盘、`via`/`ctxHasRegister` 如实写）；
+`check PASS`；`boundary-audit PASS`。
+
+## 0.138.0（2026-11-04）
+
+### 边界闸改成「行级丢弃」：一条祈使句不再拖垮整张卡
+- 线上第一次抓到带闸 id 的记录：`gateIds=["boundary"] gateCodes=["boundary/imperative"]` ——
+  **一张卡里只要有一行含祈使句，整张卡就不注入**。规则没错（注入内容不许是指令），但代价是其余 4 行干净的记忆一起丢。
+- 改：`buildMemoryCard` 组装条目时**按行**过滤含指令片段的行 —— 丢那一行、其余照常注入，
+  并在 `omitted` 里如实记数（「含指令式片段未纳入 N 条（只丢该行，其余照常）」）。
+- 闸门仍保留原判据（外部拼出来的卡带祈使句照样打回），属于 defense in depth。
+
+### 顺手把误伤也收了一半
+- 全库 1192 条 claim 扫一遍：**29 条（2.4%）被判「含指令」**，其中 `请` 命中 51 次、`记得` 11 次 ——
+  一看上下文就明白：`请` 的大头是 **`请求`**（HTTP request，本仓日常名词），`记得` 的大头是 **`我记得`**（叙述）。
+- 新增 `IMPERATIVE_EXCLUSIONS`（最小排除集）：`请` 后接 求/示/假/教/柬 或前接 申/邀/聘/提/恳/呈/敬/回、
+  `记得` 前接 我/不/还/也/都/你 ⇒ 不算指令。**29 条降到 13 条（-55%）**，`记得` 归零。
+- 规则表改用**码位**写（`\u8bf7`），否则 `boundary-audit` 会把规则表本身当成注入里的祈使句（自检时真踩到）。
+
+### 验证
+496 条测试（492 pass / 0 fail / 4 skip）：端到端契约同步更新（卡上不许出现该行 + `omissions` 记 1 条 +
+外部伪造卡仍被打回），新增 9 个误伤用例；`boundary-audit PASS（0 处）`；`check PASS`。证据：`evidence/M8-boundary-line-level-2026-11-04.md`。
+
 ## 0.137.0（2026-11-04）
 
 ### 发版闸不再被"正常增长"挡住：语料改成单向判据

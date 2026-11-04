@@ -393,9 +393,14 @@ test('R13 端到端: store 里的指令式 claim ⇒ 闸门拦住（R12 不改�
     const hits = [{ episode: 'ep-aaaaaaa1', seq: 9, why: ['git'], occurredAt: T(22), kind: 'constraint', depth: 1 }];
     const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
 
-    assert.ok(card.section.includes('你应该'), 'R12 只渲染，不改写原文（改写 = 越界）');
-    const res = runGates({ card, walkResult: walkOf(hits) });
-    assert.equal(res.ok, false, '闸门必须把它打回');
+    // 2026-11-04（0.138.0）契约变更：R12 现在**按行**丢掉含祈使句的条目（而不是把整张卡送进闸门被判死）。
+    // 规则不变（注入内容不许有祈使句），粒度从「卡」改成「行」—— 线上实测有一次整张卡因此没注入。
+    assert.ok(!String(card.section ?? '').includes('你应该'), '含祈使句的行不许出现在卡上');
+    assert.match(String(card.omissions ?? ''), /含指令式片段未纳入 1 条/, '省略必须如实记数（不许静默丢）');
+    // 闸门仍然兜底：外部拼出来的卡带祈使句 ⇒ 照样打回（defense in depth）
+    const forged = { section: '- [antipattern] 你应该先 git status（ep-aaaaaaa1, 2026-10-22, seq 9）', claims: [{ claimId: 'c-x' }], tokens: 20 };
+    const res = runGates({ card: forged, walkResult: walkOf(hits) });
+    assert.equal(res.ok, false, '闸门必须把外来卡里的祈使句打回');
     assert.ok(hasCode(res, 'boundary/imperative'));
   } finally {
     rmSync(root, { recursive: true, force: true });

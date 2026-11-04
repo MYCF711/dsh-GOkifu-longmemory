@@ -99,3 +99,19 @@ test('tools: 注册凭据落盘（原子写、可读回），失败返回 false 
   assert.equal(recordToolRegistration('', ['x']), false, '空目录 ⇒ false，不抛');
   assert.equal(recordToolRegistration(path.join(tmpdir(), 'kifu-nope-不存在的目录', 'x'), ['x']), false);
 });
+
+
+test('tools: 凭据必须写明 via 与 ctxHasRegister（两条注册路径的判据）', async () => {
+  const { recordToolRegistration } = await import('../src/tools.mjs');
+  const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = (await import('node:path')).default;
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-tools-via-'));
+  try {
+    assert.equal(recordToolRegistration(dir, [], { via: 'none', ctxHasRegister: false }), true);
+    const back = JSON.parse(readFileSync(path.join(dir, 'tools-registered.json'), 'utf8'));
+    assert.deepEqual(back.names, [], '空数组也要落盘 —— "没注册上"本身就是判据');
+    assert.equal(back.via, 'none');
+    assert.equal(back.ctxHasRegister, false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

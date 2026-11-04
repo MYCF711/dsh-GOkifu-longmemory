@@ -34,6 +34,7 @@ import {
   IMPERATIVE_PATTERNS,
   INDEX_LINE_RE,
   PROVENANCE_LINE_RE,
+  auditImperatives,
   estimateTokens,
   formatCardDate,
   isScopeVisible,
@@ -46,6 +47,10 @@ import {
   replayAdjudication,
   validateAdjudication,
 } from './adjudicate.mjs';
+
+// 2026-11-04（0.138.0）：`auditImperatives` 已搬到 inject（创建卡片时按行过滤要用同一份实现），
+// 这里重新导出，保持 gates 的对外面不变（测试与 CLI 都从这里取）。
+export { auditImperatives };
 
 /** 本仓库启用的闸（顺序 = 报告顺序）。M4 起十道全开。 */
 export const ACTIVE_GATES = Object.freeze(['0', '1', '2', '2b', '3', '4', '5', '6', '6b', '7', 'boundary']);
@@ -505,28 +510,6 @@ const stateOf = (entry) => {
 // ---------------------------------------------------------------------------
 // 边界扫描
 // ---------------------------------------------------------------------------
-
-/**
- * 扫描一段模型可见文本里的指令式片段。
- * @returns {Array<{pattern:string, at:number, excerpt:string}>}
- */
-export function auditImperatives(text) {
-  const s = String(text ?? '');
-  const out = [];
-  if (!s) return out;
-  for (const pattern of IMPERATIVE_PATTERNS) {
-    let from = 0;
-    for (;;) {
-      const at = s.indexOf(pattern, from);
-      if (at < 0) break;
-      const start = Math.max(0, at - 12);
-      const end = Math.min(s.length, at + pattern.length + 12);
-      out.push({ pattern, at, excerpt: s.slice(start, end).replace(/\s+/g, ' ').trim() });
-      from = at + pattern.length;
-    }
-  }
-  return out.sort((a, b) => (a.at - b.at) || String(a.pattern).localeCompare(String(b.pattern)));
-}
 
 /** 扫描工具治理痕迹（`permission: allow` 之类本不该出现在记忆卡里）。 */
 export function auditGovernance(text) {
