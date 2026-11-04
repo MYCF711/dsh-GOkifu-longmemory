@@ -35,9 +35,15 @@
 2. 粘进 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` 的插件列表；
 3. 重启一次；`cat "$DSH_HOME/memory-context/tools-registered.json"` 看到 `"via": "tools-plugin"`、`"count": 5` 即成功。
 
+### A2b 严格口径：89.47%（17/19）→ **94.74%（18/19）**
+- 0.138.0 把边界闸从"卡级 fail-closed"改成"行级丢弃"后，原本因一条祈使句被**整卡拦掉**的那张考卷能注入其余内容了 ——
+  其中一条被计入严格口径的注入因此命中。
+- 这是**两次独立复跑**都读到 18/19 的读数（改动前两次都是 17/19），不是单次抖动。
+- 台账（`MAINTENANCE.md` 六轴行）已同步为 18/19，并注明升分原因。
+
 ### 验证
 501 条测试（497 pass / 0 fail / 4 skip）：新增 4 条覆盖独立插件（`inject` 声明 / 五个工具注册 / 无工具面不抛 / 凭据 `via` 字段）；
-`check PASS`。
+`check PASS`；`metrics-guard PASS`（A1=0 · A5=0 · A6=1 · **A2b 18/19** · p50 14.18ms）。
 
 ## 0.140.0（2026-11-04）
 
