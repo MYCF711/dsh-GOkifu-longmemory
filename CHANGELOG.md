@@ -17,6 +17,33 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.129.0（2026-11-04）
+
+### SDK 面：把记忆的读操作做成可在 PTC / `run_code` 里反复调用的一层
+- 新增 `src/sdk.mjs`：`createMemorySdk({ dshHome, scope, now })` 返回 `describe / stats / get / search / walk / card / recentFailures / scopeOf`。
+  一个代码块里可以循环、过滤、聚合几十次，而不是一次工具调用只做一件事。
+- 复用既有房间（R11 walk / R12 inject / R13 gates / R15 persist），**不重写逻辑**：`card()` 跑的就是线上同一份 `buildMemoryCard` + 十道闸。
+- 三条铁律（`docs/SDK-PTC.md` 契约 + `test/sdk.test.mjs` 钉住）：
+  ① **只读**——没有写入/入馆接口，跑完库的 sha256 一字不变；
+  ② **零模型零网络**，毫秒级；
+  ③ **有界且 JSON 安全**——`limit` ≤ 50、`budgetTokens` ≤ 2000、`depth` ≤ 2，超限夹紧并如实标 `clamped: true`。
+- 状态语义：`measured` / `empty`（库在但没内容）/ **`missing`（库不存在，不抛异常）**——
+  PTC 代码块不该因为"新机器还没入过馆"就崩；但"库在却读不动"仍抛 `store-unreadable`，不吞。
+- 与线上同一套信号构造：文本里贴着报错原文时会补类级错误实体（少了这一步卡片会莫名变空——实现时踩到）。
+
+### 用法（代码块里）
+
+```js
+import { createMemorySdk } from '<repo>/src/sdk.mjs';
+const sdk = createMemorySdk({ scope: 'w:d:/…/长期记忆系统' });
+const { items } = sdk.recentFailures({ limit: 20 });
+for (const it of items) console.log(it.occurredAt, it.quote.slice(0, 80));
+```
+
+### 验证
+474 条测试（470 pass / 0 fail / 4 skip）：新增 9 条覆盖契约（自描述 / 只读不变 / 夹紧 / 错误语义 / 三种状态 / 任意 cwd 可导入）；
+`check PASS`；`node -e` 从任意工作目录导入实测 `stats` 输出 392 局 / 1053 claim。
+
 ## 0.128.0（2026-11-04）
 
 ### 可交付性闸 + 两个被它逼出来的真问题
