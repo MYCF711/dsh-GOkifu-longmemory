@@ -38,6 +38,14 @@
 //     claim 条目：antipattern ⇒ failure；preference ⇒ constraint；其余 ⇒ claim。
 //   权重只由机械量决定：直接命中 = 主题 idfNorm（缺失回落 0.5）；一跳命中 = link.weight；
 //     多路命中取 max。**没有模型评分参与**。
+// 合并节点展开（T179，合流消费侧；R12 折叠需要"可折的行"）：
+//   命中的 claim 若是合并节点（claim.merge.members 非空），把它代表的成员 claim 作为**同一次命中的展开**
+//   带进 hits（不增加 depth，同一跳）。守卫与顺序：
+//     · 成员与节点的 scopeKey 必须**逐字节相同**（A5：w: 不跨工作区）；
+//     · 成员 support 里必须能取到 (episode, seq, quote) 三件套（无源不入），且要有 occurredAt（无时不入）；
+//     · 成员排在合并节点之后、按 occurredAt 升序；同一 claimId 只出现一次（已在 hits 里的不重复加）；
+//     · 每条合并节点最多带 min(可用成员数, 8) 个；被砍掉的计入 dropped.mergeMembersCapped。
+//   没有 `merge` 字段的 claim 行为**一字不改**（不加块标记、不碰排序）。
 // 预算：每 hit 的 tokens = estimateTokens(episode + claim + kind + why + text)；
 //   CJK 1.5 字/token、ASCII 4 字/token（契约 §7.2「≤500 tokens」的估法）。
 //   截断是**前缀式**的：按排序结果依次收，碰到 limit 或 budget 就停，后面的全部计入 omitted。
@@ -462,17 +470,24 @@ function hopKeyOf(hop) {
 
 /** 排序：档位 → depth 升序 → **跨局重复次数降序** → weight 降序 → occurredAt 降序 → 标识升序。 */
 export function compareHits(a, b) {
-  const classA = CLASS_RANK[a.kind] ?? 9;
-  const classB = CLASS_RANK[b.kind] ?? 9;
+  // T179：合并节点与它的成员是一个**块** —— 块内顺序 = 节点(0) → 成员(1..n，occurredAt 升序)。
+  // 块标记只在"成员真的被展开进来"时才会挂上（见 expandMergeMembers），所以没有合并节点的路径逐字节不变。
+  const blockA = a?._mergeBlock ?? '';
+  const blockB = b?._mergeBlock ?? '';
+  if (blockA !== '' && blockA === blockB) return (a._mergeOrder ?? 0) - (b._mergeOrder ?? 0);
+  const classA = CLASS_RANK[a?._sortKind ?? a.kind] ?? 9;
+  const classB = CLASS_RANK[b?._sortKind ?? b.kind] ?? 9;
   if (classA !== classB) return classA - classB;
   if (a.depth !== b.depth) return a.depth - b.depth;
   const repeatA = finiteNumber(a.repeat) ? a.repeat : 1;
   const repeatB = finiteNumber(b.repeat) ? b.repeat : 1;
   if (repeatB !== repeatA) return repeatB - repeatA;
   if (b.weight !== a.weight) return b.weight - a.weight;
-  const timeA = finiteNumber(a.occurredAt) ? a.occurredAt : Number.NEGATIVE_INFINITY;
-  const timeB = finiteNumber(b.occurredAt) ? b.occurredAt : Number.NEGATIVE_INFINITY;
+  const timeA = finiteNumber(a._sortAt) ? a._sortAt : (finiteNumber(a.occurredAt) ? a.occurredAt : Number.NEGATIVE_INFINITY);
+  const timeB = finiteNumber(b._sortAt) ? b._sortAt : (finiteNumber(b.occurredAt) ? b.occurredAt : Number.NEGATIVE_INFINITY);
   if (timeA !== timeB) return timeB - timeA;
+  // 同一档里，块整体按块 id 排（成员因此紧贴自己的节点，不会散到别的命中中间）
+  if (blockA !== blockB) return blockA < blockB ? -1 : 1;
   if (a.episode !== b.episode) return String(a.episode ?? '') < String(b.episode ?? '') ? -1 : 1;
   const claimA = String(a.claim ?? '');
   const claimB = String(b.claim ?? '');
@@ -600,6 +615,108 @@ export function createWalkCache(store, { records = null } = {}) {
       return byId.get(`${kind}:${id}`) ?? null;
     },
   });
+}
+
+/**
+ * T179（合流消费侧）：命中的是**合并节点**（claim.merge.members 非空）时，把它的成员 claim
+ * 也作为同一次命中的展开带进 hits —— 让 R12 的折叠有多行可折（④c）。
+ *
+ * 只做三件事：找成员 → 过守卫 → 按顺序挂进 claimHits。**不改 depth**（成员沿用节点的 depth），
+ * **不改没有 merge 字段的 claim**（不挂块标记就不影响 compareHits）。
+ *
+ * 守卫（全部机械）：
+ *   · 作用域：成员与节点 scopeKey **逐字节相同**，否则不带（A5：w: 不跨工作区）；
+ *   · 出处：成员 support 里必须有 (episode, seq, quote) 三件套，取不到就不带（无源不入）；
+ *   · 时间：成员必须能算出 occurredAt（无时不入）；
+ *   · 去重：同一 claimId 只出现一次（已在 claimHits 里的不重复加）；
+ *   · 作废：invalidated / validityOk=false 的成员不带；
+ *   · 上限：每条合并节点最多带 min(可用成员数, 8)，被砍掉的计入 dropped.mergeMembersCapped。
+ */
+const MERGE_MEMBERS_MAX = 8;
+
+function expandMergeMembers(claimHits, claims, dropped) {
+  if (!(claimHits instanceof Map) || !Array.isArray(claims)) return;
+  const byId = new Map();
+  for (const claim of claims) if (claim && typeof claim.id === 'string') byId.set(claim.id, claim);
+  const nodes = [...claimHits.values()].filter((hit) => hit && hit.claim && !hit._mergeBlock);
+  for (const nodeHit of nodes) {
+    const nodeClaim = byId.get(nodeHit.claim);
+    const memberIds = Array.isArray(nodeClaim?.merge?.members)
+      ? nodeClaim.merge.members.filter((id) => typeof id === 'string' && id !== '')
+      : [];
+    if (!memberIds.length) continue;
+    const nodeScope = typeof nodeClaim.scopeKey === 'string' ? nodeClaim.scopeKey : '';
+    const eligible = [];
+    for (const memberId of memberIds) {
+      if (memberId === nodeHit.claim) continue;
+      const member = byId.get(memberId);
+      if (!member) continue;
+      if (typeof member.scopeKey !== 'string' || member.scopeKey !== nodeScope) continue; // 逐字节同域
+      if (claimHits.has(memberId)) continue; // 去重：同一 claim 只出现一次
+      if (isInvalidated(member) || member.validityOk === false) continue;
+      const support = Array.isArray(member.support) ? member.support : [];
+      const proof = support.find((entry) => entry
+        && typeof entry.episode === 'string' && entry.episode !== ''
+        && finiteNumber(entry.seq)
+        && typeof entry.quote === 'string' && entry.quote.trim() !== '');
+      if (!proof) continue; // 无源不入
+      const occurredAt = claimTime(member, nodeHit);
+      if (!finiteNumber(occurredAt)) continue; // 无时不入
+      eligible.push({ member, proof, occurredAt });
+    }
+    if (!eligible.length) continue;
+    eligible.sort((x, y) => (x.occurredAt - y.occurredAt)
+      || (String(x.member.id) < String(y.member.id) ? -1 : String(x.member.id) > String(y.member.id) ? 1 : 0));
+    const kept = eligible.slice(0, MERGE_MEMBERS_MAX);
+    const capped = eligible.length - kept.length;
+    if (capped > 0) dropped.mergeMembersCapped = (dropped.mergeMembersCapped ?? 0) + capped;
+    if (!kept.length) continue;
+
+    // 块标记：节点 0 号，成员按 occurredAt 升序 1..n
+    nodeHit._mergeBlock = nodeHit.claim;
+    nodeHit._mergeOrder = 0;
+    nodeHit._sortKind = nodeHit.kind;
+    nodeHit._sortAt = nodeHit.occurredAt;
+    kept.forEach(({ member, proof, occurredAt }, index) => {
+      const memberHit = {
+        episode: proof.episode,
+        nodeId: typeof proof.nodeId === 'string' && proof.nodeId !== '' ? proof.nodeId : null,
+        claim: member.id,
+        claimKind: typeof member.kind === 'string' ? member.kind : null,
+        claimState: typeof member.state === 'string' ? member.state : null,
+        link: null,
+        why: [...nodeHit.why],
+        weight: nodeHit.weight,
+        occurredAt,
+        seq: finiteNumber(proof.seq) ? proof.seq : null,
+        kind: claimHitClass(member),
+        depth: nodeHit.depth, // 同一跳：不增加 depth
+        repeat: supportEpisodeCount(member),
+        text: typeof member.text === 'string' ? member.text.trim() : '',
+        scopeKey: recordScopeKey(member),
+        tokens: 0,
+        _direct: false,
+        _viaKeys: new Set(),
+        via: [],
+        followedLinks: [],
+        _mergeBlock: nodeHit.claim,
+        _mergeOrder: index + 1,
+        _sortKind: nodeHit.kind,
+        _sortAt: nodeHit.occurredAt,
+      };
+      // 证据路径沿用节点的 why（同一命中），再补一跳「合并节点 → 成员」，可审计
+      for (const hop of Array.isArray(nodeHit.via) ? nodeHit.via : []) {
+        const copy = { ...hop };
+        memberHit._viaKeys.add(JSON.stringify([copy.kind, copy.from, copy.to, copy.why]));
+        memberHit.via.push(copy);
+      }
+      const mergeWhy = Array.isArray(nodeHit.why) && nodeHit.why.length ? [nodeHit.why[0]] : ['merge'];
+      memberHit._viaKeys.add(JSON.stringify(['merge', nodeHit.claim, member.id, mergeWhy]));
+      memberHit.via.push({ kind: 'merge', from: nodeHit.claim, to: member.id, why: mergeWhy });
+      memberHit.tokens = hitTokens(memberHit);
+      claimHits.set(member.id, memberHit);
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1088,6 +1205,9 @@ export function walkFromSignals(opts = {}) {
     hit.tokens = hitTokens(hit);
     claimHits.set(claim.id, hit);
   }
+
+  // ---- T179：合并节点命中 ⇒ 成员 claim 同一跳展开（R12 折叠需要成员行）----
+  expandMergeMembers(claimHits, claims, dropped);
 
   // ---- 排序 + 前缀式截断（limit / budget）----
   const candidates = [...episodeHits.values(), ...claimHits.values()].sort(compareHits);
