@@ -56,6 +56,8 @@ import {
 import { probeValidity, validityKeyOf, runGates } from './rooms/gates.mjs';
 import { classifyErrorClass } from './rooms/claim.mjs';
 import { errorClassKeyOf } from './rooms/topic.mjs';
+import { registerMemoryTools } from './tools.mjs';
+import { createMemorySdk } from './sdk.mjs';
 import { createStore } from './rooms/persist.mjs';
 import { createWalkCache } from './rooms/walk.mjs';
 
@@ -885,6 +887,19 @@ export function apply(ctx, rawConfig = {}) {
     }
   } catch (error) {
     warn(ctx, `预热失败（首轮可能变慢）：${String(error?.message ?? error)}`);
+  }
+
+  // 2026-11-04（S17）：把记忆查询注册成**工具** —— PTC / run_code 模式下宿主会据此生成 SDK 绑定，
+  // 代码块里可以直接循环调用（"要查几次查几次"），不再依赖模型反复召回。只读、零模型。
+  try {
+    const storeRoot = resolveStoreRoot(config);
+    const dshHome = storeRoot ? path.dirname(storeRoot) : null;
+    const names = registerMemoryTools(ctx, {
+      createSdk: (opts) => createMemorySdk({ ...opts, dshHome: opts?.dshHome || dshHome || null }),
+      warn,
+    });
+  } catch (error) {
+    warn(ctx, `工具面注册整体失败（不影响注入）：${String(error?.message ?? error)}`);
   }
 
   // 设置页的读写接口（只在本机 webServer 上注册；没有该服务就跳过）。

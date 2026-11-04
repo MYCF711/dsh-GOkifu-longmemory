@@ -86,3 +86,36 @@ for (const [scope, list] of Object.entries(byScope)) {
 - 不做写入/晋升/裁决接口（那是 L2/L4 与钩子的事）。
 - 不做向量检索/模糊匹配的"更聪明"接口（边界成文法：不做 RAG）。
 - 不做"帮我总结这些记忆"（那是模型的事，且会引入未溯源文本）。
+
+---
+
+## 6 · 工具形态（`kifu_*`）：让 PTC 代码块直接调
+
+SDK 是"导入就能用"；**工具**是"宿主把它当一等公民"：插件启动时用 `ctx.tools.register()` 注册五个只读工具，
+PTC / `run_code` 模式下由宿主生成 SDK 绑定，代码块里直接调用（和别的 PTC 工具一样）。
+
+| 工具 | 参数 | 等同 SDK |
+|---|---|---|
+| `kifu_stats` | `{dshHome?}` | `stats()` |
+| `kifu_search` | `{text, limit?, depth?, scope?}` | `search()` |
+| `kifu_card` | `{text, limit?, budgetTokens?, scope?, gates?}` | `card()` |
+| `kifu_recent_failures` | `{limit?, scope?}` | `recentFailures()` |
+| `kifu_get` | `{kind, id}` | `get()` |
+
+纪律：
+
+- **只读**：没有任何写入/入馆工具（入馆只走会话钩子）；
+- **零模型零网络**；**有界**（limit ≤ 50、budgetTokens ≤ 2000、depth ≤ 2，超限夹紧并在结果里标 `clamped`）；
+- **不抛异常**：SDK 的 `SdkError` 翻成 `{ok:false, error:{code,message}}`，代码块可以用返回值分支；
+- **注册失败不连累注入**：宿主没有 `ctx.tools` 就安静跳过；单个工具注册失败只 warn。
+
+> 生效时机：工具在**插件加载时**注册，所以要**重启一次**宿主才会出现在工具面里（与自动注入的改动同一条时间线）。
+
+## 7 · 与自动注入的关系
+
+| | 自动注入（会话模式） | `kifu_*` 工具（PTC / SDK） |
+|---|---|---|
+| 触发 | 首轮/相关轮自动 | 代码块按需 |
+| 形态 | 推一条记忆卡进上下文 | 拿结构化结果自己判断 |
+| 适合 | "不用问就该知道" | "要查几次查几次、要聚合/过滤" |
+| 共同的纪律 | 只给事实、带 provenance 与日期、过十道闸 | 同左（`card()` 跑同一份闸） |
