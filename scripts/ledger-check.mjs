@@ -49,7 +49,7 @@ export function parseLedger(text) {
 // 发版检查时必然已经涨了几个。给"线上在跑"的漂移容忍（只对计数，不给方向性指标开口子）。
 export const LIVE_DRIFT = Object.freeze({ claim: 12, threads: 12, episodes: 12 });
 
-export function compare(ledger, actual, { live = false, staleHours = 6 } = {}) {
+export function compare(ledger, actual, { live = false, staleHours = 6, notes = null } = {}) {
   // 2026-11-04（0.143.0）：`live` 是按心跳新鲜度判的（15 分钟内有写入）。宿主空闲时它就变成 false，
   // 于是又退回对称容差、把「语料正常增长」判成红 —— 发布时（正好没人发消息）连撞了两次。
   // 判据应该看**有没有实测到 store**：能读到库，增长就是真的；读不到（干净克隆/CI）本来也不比。
@@ -63,9 +63,18 @@ export function compare(ledger, actual, { live = false, staleHours = 6 } = {}) {
     ? { claim: scale(actual.claim, LIVE_DRIFT.claim), threads: scale(actual.threads, LIVE_DRIFT.threads), episodes: scale(actual.episodes, LIVE_DRIFT.episodes) }
     : { claim: 0, threads: 0, episodes: 0 };
   if (ledger.version && actual.version && ledger.version !== actual.version) bad.push(`版本：台账 ${ledger.version} vs package ${actual.version}`);
+  // 2026-11-05（T172）：测试数改成**单向**判 —— 每加一波测试就要多花一轮 PR，白烧。
+  //   · 实测 > 台账 ⇒ **放行**（新加测试是正常进展），只记一条 note 级信息（不进 bad、不影响退出码）；
+  //   · 实测 < 台账 ⇒ **红**（测试被删/被跳过才是真信号）；
+  //   · 持平 ⇒ 通过。
+  // 口径与语料那条一致（只查变少），其它项（版本 / A2 / A4 / 语料）一字不改。
   if (ledger.tests && actual.tests) {
     for (const k of ['total', 'pass', 'fail', 'skip']) {
-      if (ledger.tests[k] !== actual.tests[k]) bad.push(`测试 ${k}：台账 ${ledger.tests[k]} vs 实测 ${actual.tests[k]}`);
+      const l = ledger.tests[k];
+      const a = actual.tests[k];
+      if (!Number.isFinite(l) || !Number.isFinite(a)) continue;
+      if (a < l) bad.push(`测试 ${k}：实测 ${a} 少于台账 ${l} —— 测试变少要查（被删/被跳过）`);
+      else if (a > l && Array.isArray(notes)) notes.push(`测试 ${k}：实测 ${a} > 台账 ${l}（新增测试，单向放行）`);
     }
   }
   // 2026-11-04（0.137.0）：**语料只增不减** —— 变少是数据丢失（真问题），变多是线上一直在归档（预期）。
@@ -212,18 +221,20 @@ if (invoked) {
     const st = fs.statSync(path.join(process.env.DSH_HOME || 'D:/DeepSeek Harness/home', 'memory-context', 'live-stats.jsonl'));
     live = Date.now() - st.mtimeMs < LIVE_WINDOW_MS;
   } catch { live = false; }
-  let bad = compare(ledger, actual, { live });
+  const notes = [];
+  let bad = compare(ledger, actual, { live, notes });
   if (badParseTests) bad.push('测试计数解析失败（fail-closed）');
   if (full) bad = fullCheck(ledger, bad, { m5CollectFailed });
   if (!agentsOk) bad.push('AGENTS §7：指针缺失或写回了测试条数');
   if (!read('CHANGELOG.md').includes(`## ${actual.version}`)) bad.push(`CHANGELOG 缺 ${actual.version} 段`);
 
-  const out = { ledger, actual, agentsOk, skippedCorpus: actual.claim === null, ok: bad.length === 0, bad };
+  const out = { ledger, actual, agentsOk, skippedCorpus: actual.claim === null, ok: bad.length === 0, bad, notes };
   if (json) console.log(JSON.stringify(out, null, 2));
   else {
     console.log(`ledger-check：台账 ${ledger.version} · 测试 ${ledger.tests ? `${ledger.tests.total}/${ledger.tests.pass}/${ledger.tests.fail}/${ledger.tests.skip}` : 'n/a'} · claim ${ledger.claim} · 卷 ${ledger.threads}${out.skippedCorpus ? '（无 store，跳过语料核对）' : ''}`);
     console.log(`实测：版本 ${actual.version} · 测试 ${actual.tests ? `${actual.tests.total}/${actual.tests.pass}/${actual.tests.fail}/${actual.tests.skip}` : 'n/a'} · claim ${actual.claim} · 卷 ${actual.threads}`);
     for (const b of bad) console.error(`ERR ${b}`);
+    for (const n of notes) console.log(`NOTE ${n}`);
     console.log(out.ok ? 'ledger-check: PASS' : 'ledger-check: FAIL（台账与实测不一致）');
   }
   process.exit(out.ok ? 0 : 1);

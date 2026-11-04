@@ -138,7 +138,7 @@ export function runApply(argv = process.argv.slice(2), { makeStore = createStore
   if (!dryRun && args.all) {
     const dst = makeStore({ root: outDir });
     dst.ensureDirs();
-    out.mirror = mirrorAll({ src: store, dst, at: Date.now(), extraClaims: out.report?.stats?.merged ?? 0 });
+    out.mirror = mirrorAll({ src: store, dst, at: Date.now(), extraClaims: out.report?.apply?.mergedAdded ?? 0 });
     out.verify = dst.verify();
   } else if (!dryRun && !args.all) {
     // 不镜像时也让影库自洽（manifest/verify 由 applyToShadow 之外补一次）
@@ -180,7 +180,10 @@ export function formatReport(out) {
     lines.push(`index.md ${m.index.missing ? '缺失' : `${m.index.bytes} B${m.index.changed ? '（已更新）' : ''}`} · manifest ${m.manifest.files ?? '?'} 个文件${m.manifest.changed ? '（已更新）' : ''}`);
     lines.push(`逐 kind 一致：${m.mirrorOk ? '是' : `否（不一致：${m.mismatches.join(', ')}）`} · 镜像耗时 ${ms(m.elapsedMs)}`);
   }
-  if (out.verify) lines.push(`影库 verify：${out.verify.ok ? 'OK' : '失败'} · ${out.verify.counts?.files ?? '?'} 文件`);
+  if (out.verify) {
+    const total = Object.values(out.verify.counts ?? {}).reduce((a, b) => a + (Number(b) || 0), 0);
+    lines.push(`影库 verify：${out.verify.ok ? 'OK' : '失败'} · ${total} 条记录${out.verify.ok ? '' : ` · 错误 ${JSON.stringify(out.verify.errors).slice(0, 200)}`}`);
+  }
   lines.push(`quality ${JSON.stringify(quality)} · ok ${out.report.ok}`);
   lines.push(`总耗时 ${ms(out.elapsedMs)}（合流 ${ms(out.consolidateMs)}）`);
   return lines.join('\n');

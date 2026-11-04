@@ -22,15 +22,49 @@ test('ledger-check: 完全一致 ⇒ 无差异', () => {
   assert.deepEqual(bad, []);
 });
 
-test('ledger-check: 任一项不一致都要报出来（含测试四个分量）', () => {
+test('ledger-check: 任一项不一致都要报出来（版本/语料变少）', () => {
   const l = parseLedger(TEXT);
   // 2026-11-04（0.143.0）：语料判据改成单向（只查变少 / 台账过旧），所以这里用**变少**来触发
-  const bad = compare(l, { version: '0.60.0', tests: { total: 390, pass: 385, fail: 0, skip: 5 }, claim: 300, threads: 130 });
+  const bad = compare(l, { version: '0.60.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 300, threads: 130 });
   assert.ok(bad.some((x) => x.startsWith('版本')));
-  assert.ok(bad.some((x) => x.includes('测试 total')));
-  assert.ok(bad.some((x) => x.includes('测试 skip')));
   assert.ok(bad.some((x) => x.startsWith('claim')));
   assert.ok(bad.some((x) => x.startsWith('卷')));
+});
+
+// ── T172：测试数改成**单向**判（只查变少）────────────────────────────────────
+test('ledger-check T172: 实测 > 台账 ⇒ 不报（新加测试是正常进展），只记 note', () => {
+  const l = parseLedger(TEXT); // 台账 389/385/0/4
+  const notes = [];
+  const bad = compare(l, { version: '0.59.0', tests: { total: 397, pass: 393, fail: 0, skip: 4 }, claim: 322, threads: 143 }, { notes });
+  assert.deepEqual(bad, [], '新增测试不许判红');
+  assert.ok(notes.some((x) => x.includes('测试 total') && x.includes('单向放行')), `notes 里要能看到：${JSON.stringify(notes)}`);
+  assert.ok(notes.some((x) => x.includes('测试 pass')));
+});
+
+test('ledger-check T172: 实测 < 台账 ⇒ 必须报（测试被删/被跳过才是真信号）', () => {
+  const l = parseLedger(TEXT);
+  const notes = [];
+  const bad = compare(l, { version: '0.59.0', tests: { total: 380, pass: 376, fail: 0, skip: 4 }, claim: 322, threads: 143 }, { notes });
+  assert.ok(bad.some((x) => x.includes('测试 total') && x.includes('变少')), JSON.stringify(bad));
+  assert.ok(bad.some((x) => x.includes('测试 pass')));
+  assert.deepEqual(notes, [], '变少是 bad，不是 note');
+});
+
+test('ledger-check T172: 持平 ⇒ 通过，且既无 bad 也无 note', () => {
+  const l = parseLedger(TEXT);
+  const notes = [];
+  const bad = compare(l, { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 322, threads: 143 }, { notes });
+  assert.deepEqual(bad, []);
+  assert.deepEqual(notes, []);
+});
+
+test('ledger-check T172: 每一维各自单向（total 涨但 pass 跌 ⇒ 只报跌的那一维）', () => {
+  const l = parseLedger(TEXT);
+  const notes = [];
+  const bad = compare(l, { version: '0.59.0', tests: { total: 390, pass: 380, fail: 0, skip: 4 }, claim: 322, threads: 143 }, { notes });
+  assert.ok(bad.some((x) => x.includes('测试 pass')), 'pass 变少要报');
+  assert.ok(!bad.some((x) => x.includes('测试 total')), 'total 变多不许报');
+  assert.ok(notes.some((x) => x.includes('测试 total')));
 });
 
 test('ledger-check: 缺字段时不误报（只核对能解析的项）', () => {
