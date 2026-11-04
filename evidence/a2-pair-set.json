@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "kind": "a2-pair-set",
+  "splitAt": 1793577600000,
+  "createdAt": 1793762664010,
+  "count": 20,
+  "items": [
+    {
+      "sig": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
+      "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
+      "episode": "ep-9becea64",
+      "prior": [
+        "ep-1e82afca",
+        "ep-d70b7c2f"
+      ]
+    },
+    {
+      "sig": "error: enoent: no such file or directory, open '<path>' at object.readfilesync (node:fs:<line>) at [eval]:<line>",
+      "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
+      "episode": "ep-9becea64",
+      "prior": [
+        "ep-d70b7c2f",
+        "ep-00b50089",
+        "ep-75e7347e"
+      ]
+    },
+    {
+      "sig": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web request used endpoint \"http://127.0.0.1:3425/v1/messages\". search endpoint conf…",
+      "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
+      "episode": "ep-9d375d75",
+      "prior": [
+        "ep-1e82afca",
+        "ep-1286ce28",
+        "ep-a1aab8ef",
+        "ep-22d3bd16",
+        "ep-8cc34e32"
+      ]
+    },
+    {
+      "sig": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
+      "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
+      "episode": "ep-ed98c462",
+      "prior": [
+        "ep-1e82afca",
+        "ep-d70b7c2f",
+        "ep-1286ce28",
+        "ep-00b50089"
+      ]
+    },
+    {
+      "sig": "error: url hostname \"raw.githubusercontent.com\" resolves to a non-public ip address",
+      "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
+      "episode": "ep-e336b9dd",
+      "prior": [
+        "ep-8cc34e32"
+      ]
+    },
+    {
+      "sig": "attributeerror: 'nonetype' object has no attribute 'strip'",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "episode": "ep-c0a5847a",
+      "prior": [
+        "ep-1e82afca"
+      ]
+    },
+    {
+      "sig": "error: this destroys the runtime dsh would need in order to undo it; there is no recovery path",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "episode": "ep-c0a5847a",
+      "prior": [
+        "ep-1e82afca",
+        "ep-8cc34e32"
+      ]
+    },
+    {
+      "sig": "error: this goal operation requires a direct human turn on a top-level agent",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "episode": "ep-c0a5847a",
+      "prior": [
+        "ep-1e82afca",
+        "ep-d70b7c2f",
+        "ep-8cc34e32"
+      ]
+    },
+    {
+      "sig": "error: unknown job <hex>",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "episode": "ep-c0a5847a",
+      "prior": [
+        "ep-00b50089"
+      ]
+    },
+    {
+      "sig": "error: unknown job bash-<hex>",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "episode": "ep-c0a5847a",
+      "prior": [
+        "ep-00b50089"
+      ]
+    },
+    {
+      "sig": "error: wait aborted",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "episode": "ep-c0a5847a",
+      "prior": [
+        "ep-8cc34e32"
+      ]
+    },
+    {
+      "sig": "fatal: needed a single revision",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "episode": "ep-c0a5847a",
+      "prior": [
+        "ep-8cc34e32"
+      ]
+    },
+    {
+      "sig": "filenotfounderror: [errno 2] no such file or directory: '<path>'",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "episode": "ep-c0a5847a",
+      "prior": [
+        "ep-00b50089"
+      ]
+    },
+    {
+      "sig": "json.decoder.jsondecodeerror: expecting value: line <line> column 1 (char 0)",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "episode": "ep-c0a5847a",
+      "prior": [
+        "ep-1e82afca"
+      ]
+    },
+    {
+      "sig": "<path>: -c: line <line>: unexpected eof while looking for matching `\"'",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
+      "episode": "ep-8a73e06b",
+      "prior": [
+        "ep-00b50089"
+      ]
+    },
+    {
+      "sig": "assertionerror",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
+      "episode": "ep-8a73e06b",
+      "prior": [
+        "ep-1e82afca",
+        "ep-00b50089",
+        "ep-8cc34e32"
+      ]
+    },
+    {
+      "sig": "error: old_string was not found in \"<path>\"",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
+      "episode": "ep-8a73e06b",
+      "prior": [
+        "ep-1e82afca"
+      ]
+    },
+    {
+      "sig": "error: tool call aborted",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
+      "episode": "ep-8a73e06b",
+      "prior": [
+        "ep-00b50089",
+        "ep-8cc34e32",
+        "ep-75e7347e"
+      ]
+    },
+    {
+      "sig": "sed: -e expression #<n>, char 1: unknown command: `,'",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
+      "episode": "ep-8a73e06b",
+      "prior": [
+        "ep-1e82afca"
+      ]
+    },
+    {
+      "sig": "syntaxerror: invalid or unexpected token at checksyntax (node:internal/main/check_syntax:<line>)",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
+      "episode": "ep-8a73e06b",
+      "prior": [
+        "ep-1e82afca",
+        "ep-1286ce28",
+        "ep-00b50089",
+        "ep-8cc34e32"
+      ]
+    }
+  ]
+}
