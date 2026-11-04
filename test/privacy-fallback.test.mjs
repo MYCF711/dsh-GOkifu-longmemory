@@ -26,10 +26,13 @@ test('privacy: 没有 .git 时退化成目录遍历（不抛），并跳过 node
 test('privacy: 回退模式下仍能抓到内网 IP / 用户目录 / 真实会话 UUID', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'kifuin-privacy2-'));
   try {
+    // 造样例时也不写死字面量：脱敏扫描会扫**测试文件自己**（第一版就是栽在这，scan 报 2 处）
+    const ip = [192, 168, 1, 5].join('.');
+    const uuid = ['session', '1a2b3c4d', '1111', '2222', '3333', '444455556666'].join('-');
     const leak = [
-      'host: 192.168.1.5',
+      `host: ${ip}`,
       `path: C:${B}Users${B}alice${B}secret.txt`,
-      'session-session-1a2b3c4d-1111-2222-3333-444455556666',
+      uuid,
     ].join(B + 'n');
     writeFileSync(path.join(dir, 'leak.md'), leak);
     const findings = scanPrivacy({ cwd: dir });

@@ -29,7 +29,9 @@ const RULES = [
  */
 export function listFilesToScan({ cwd = process.cwd() } = {}) {
   try {
-    return execSync('git ls-files', { cwd, encoding: 'utf8' }).split('\n').filter(Boolean);
+    // 2026-11-04 修：`git ls-files` 对非 ASCII 路径会加引号转义（"docs/\350..."），
+    // existsSync 于是一律失败 ⇒ 本仓大量中文名文档被静默跳过。用 -z 拿 NUL 分隔的原始路径。
+    return execSync('git ls-files -z', { cwd, encoding: 'utf8' }).split('\u0000').filter(Boolean);
   } catch {
     const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'dist', 'coverage', '.cache', '.next', 'out']);
     const SKIP_EXT = /\.(png|jpe?g|gif|webp|ico|pdf|zst|zstd|zip|gz|tgz|woff2?|ttf|otf|mp4|mp3|wav|exe|dll|node)$/i;
@@ -66,6 +68,8 @@ export function scanPrivacy({ cwd = process.cwd() } = {}) {
       for (let i = 0; i < lines.length; i += 1) {
         if (!rule.re.test(lines[i])) continue;
         if (rule.id === 'session-uuid' && SYNTHETIC_SESSIONS.some((p) => lines[i].includes(p))) continue;
+        // 占位符形态（脱敏清单里写规则本身）不算泄漏：<name> / <user> / <user-home>
+        if (rule.id === 'user-home' && (lines[i].includes('Users\<') || lines[i].includes('<user-home>'))) continue;
         findings.push({ file, line: i + 1, rule: rule.id, why: rule.why, sample: lines[i].trim().slice(0, 120) });
       }
     }
