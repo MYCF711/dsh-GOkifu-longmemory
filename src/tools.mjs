@@ -79,6 +79,20 @@ export function buildMemoryTools({ createSdk = createMemorySdk } = {}) {
       isConcurrencySafe: () => true,
     },
     {
+      name: `${TOOL_PREFIX}_view`,
+      description: '以某个节点为中心的**邻域视图**（18×18 ≈ 324 节点）：返回中心 + 相连节点/边，边界边进 frontier；不够时顺着 frontier 再调一次。只读、零模型。',
+      parameters: argsSchema({
+        kind: { type: 'string', enum: ['episode', 'claim', 'library'] },
+        id: { type: 'string', description: '中心节点 id（如 ep-xxxxxxxx / c-xxxxxxxx / lib:docs/调研）。' },
+        maxNodes: { type: 'integer', minimum: 1, maximum: 324 },
+        depth: { type: 'integer', minimum: 0, maximum: 2 },
+        scope: scopeProp,
+      }, ['kind', 'id']),
+      output: jsonOutput,
+      execute: run((sdk, args) => sdk.view({ center: { kind: args.kind, id: args.id }, maxNodes: args.maxNodes, depth: args.depth, scope: args.scope })),
+      isConcurrencySafe: () => true,
+    },
+    {
       name: `${TOOL_PREFIX}_get`,
       description: '按 id 取一条记录（kinds: episodes/topics/claims/links/threads/joseki/adjudications）。只读。',
       parameters: argsSchema({
