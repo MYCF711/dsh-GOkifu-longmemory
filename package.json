@@ -15,7 +15,7 @@
   },
   "scripts": {
     "check": "node scripts/check.mjs",
-    "test": "node --test",
+    "test": "node --test \"test/*.test.mjs\"",
     "release": "node scripts/release.mjs"
   },
   "engines": {

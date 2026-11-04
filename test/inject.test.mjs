@@ -1052,3 +1052,148 @@ test('R12 T154: 不同 claim / 不同指针各自保留（去重不能把不同�
   }
 });
 
+
+// ---------------------------------------------------------------------------
+// T162a：注入端认「合并节点」（merge）
+//
+// 合流（consolidate）已经能把多条近似 claim 压成一个合并节点：
+//   merge = { version, key, rule, members:[claimId...], representative:{claimId, episode, seq, quote}, supportEpisodes, at }
+// 合并节点的 text 取 representative.quote 原文。消费侧若不认它，合并节点与它的成员会在同一张卡里重复出现。
+// 规则（本刀）：
+//   · 合并节点被命中 ⇒ 渲染它；它的成员即使也被命中，也不再单独成行；
+//   · 合并节点没被直接命中、但 ≥2 个成员被命中 ⇒ 用合并节点替换这些成员行；
+//   · **没有 merge 字段的 claim 行为一字不改**（回归守卫见最后一条）。
+// ---------------------------------------------------------------------------
+
+const MERGE_FREE_GOLDEN = "<memory-ledger>\n# markers: [semantic]=≥3 局且无反例 · [candidate]=2 局 · [observed]=1 局 · [disputed]=存在反例 · [stale]=条件已变只给指针 · [antipattern]=失败教训 · 日期=occurredAt(UTC)\n- [candidate] 测试入口是 node test/run.mjs 而不是 npm test (ep-aaaaaaa1, 2026-10-21, seq 41)\n</memory-ledger>"; // 用改动前的实现算出来的逐字节快照（见回报）
+
+const MERGE_QUOTE = 'Error: yaml 版本漂移（Cannot find module yaml）';
+
+/** 合并节点夹具：三条 episode + 两条成员 claim + 一条合并节点 claim。 */
+function makeMergeFixture() {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-merge-'));
+  const store = createStore({ root, now: T(20) });
+  store.ensureDirs();
+  const episodes = [21, 22, 23].map((day, i) => ({
+    id: `ep-mrg0000${i + 1}`,
+    sessionId: `session-mrg0000${i + 1}`,
+    scopeKey: SCOPE,
+    startedAt: T(day),
+    firstEventAt: T(day),
+    lastEventAt: T(day),
+    recordedAt: T(day),
+    closure: { logPath: null, graphPath: null, seqFrom: 10 + i, seqTo: 10 + i },
+    l0: '',
+    signals: { failures: 1, successes: 0, unsettled: 0, constraints: 0, tools: [] },
+    state: 'archived',
+  }));
+  store.putMany('episodes', episodes);
+  const member = (id, ep, seq, text, day) => ({
+    id,
+    kind: 'antipattern',
+    text,
+    scopeKey: SCOPE,
+    threadIds: [],
+    state: 'observed',
+    support: [{ episode: ep, seq, quote: MERGE_QUOTE, occurredAt: T(day) }],
+    counter: [],
+    validity: { type: 'none', value: null },
+    preconditions: [],
+    occurredAt: T(day),
+    recordedAt: T(day),
+    counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null },
+    supersedes: null,
+  });
+  const mergeNode = {
+    ...member('c-mrg0001', 'ep-mrg00001', 30, MERGE_QUOTE, 23),
+    state: 'candidate',
+    support: [
+      { episode: 'ep-mrg00001', seq: 30, quote: MERGE_QUOTE, occurredAt: T(21) },
+      { episode: 'ep-mrg00002', seq: 12, quote: MERGE_QUOTE, occurredAt: T(22) },
+    ],
+    merge: {
+      version: 1,
+      key: 'yaml-version-drift',
+      rule: 'text-similarity',
+      members: ['c-mem0001', 'c-mem0002'],
+      representative: { claimId: 'c-mem0001', episode: 'ep-mrg00001', seq: 30, quote: MERGE_QUOTE },
+      supportEpisodes: ['ep-mrg00001', 'ep-mrg00002'],
+      at: T(23),
+    },
+  };
+  store.putMany('claims', [
+    member('c-mem0001', 'ep-mrg00001', 30, MERGE_QUOTE, 21),
+    member('c-mem0002', 'ep-mrg00002', 12, MERGE_QUOTE, 22),
+    mergeNode,
+  ]);
+  return { root, store };
+}
+
+const mergeHit = (episodeId, seq, claimId, day) => ({
+  episode: episodeId,
+  nodeId: null,
+  link: null,
+  why: ['yaml'],
+  weight: 1,
+  occurredAt: T(day),
+  kind: 'failure',
+  seq,
+  depth: 1,
+  claimId,
+});
+
+test('T162a: 合并节点被命中 ⇒ 卡上只有合并节点那一行，成员不单独出现', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const hits = [
+      mergeHit('ep-mrg00001', 30, 'c-mem0001', 21),
+      mergeHit('ep-mrg00002', 12, 'c-mem0002', 22),
+      mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23),
+    ];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.deepEqual(ids, ['c-mrg0001'], `卡上只该有合并节点一行，实际：${JSON.stringify(ids)}`);
+    assert.equal(card.claims.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T162a: 只有两个成员被命中（合并节点没被直接命中）⇒ 用合并节点替换成员行', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const hits = [
+      mergeHit('ep-mrg00001', 30, 'c-mem0001', 21),
+      mergeHit('ep-mrg00002', 12, 'c-mem0002', 22),
+    ];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.deepEqual(ids, ['c-mrg0001'], `应当由合并节点取代成员行，实际：${JSON.stringify(ids)}`);
+    // 渲染用的 provenance 是合并节点自己的（representative 的出处），不是成员各自的
+    assert.equal(card.claims[0].source.episode, 'ep-mrg00001');
+    assert.equal(card.claims[0].source.seq, 30);
+    assert.equal(card.claims[0].text, MERGE_QUOTE);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T162a: 只命中一个成员 ⇒ 不替换（合并节点自身没被命中，成员照常成行）', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const hits = [mergeHit('ep-mrg00001', 30, 'c-mem0001', 21)];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.deepEqual(ids, ['c-mem0001'], `单成员不替换，实际：${JSON.stringify(ids)}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T162a 回归守卫: 没有 merge 字段的 claim 卡片逐字节不变', () => {
+  const { store } = fixture();
+  const hits = [hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-0000aa01' })];
+  const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+  assert.equal(card.section, MERGE_FREE_GOLDEN, '无 merge 的卡片必须与改动前逐字节相同');
+  assert.deepEqual(card.claims.map((c) => c.claimId), ['c-0000aa01']);
+});

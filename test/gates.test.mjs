@@ -1116,3 +1116,151 @@ test('T158b: 读过但同名包不存在 ⇒ unverified（不是 version-mismatc
   assert.equal(result.reason, 'version-package-not-found');
   assert.equal(check.summary.failed, 0);
 });
+
+// ---------------------------------------------------------------- 闸 4/闸 2 认「合并节点」（T162b）
+//
+// 合并节点 = 带 `merge.{members, representative, supportEpisodes}` 的 claim；`text` 是 representative 原文，
+// 成员记录仍留在库里（只增不改）。它天然与成员"同文"，也被成员的状态约束 —— 闸 4/闸 2 不能把它判成重复/状态不符。
+
+const MERGE_KEY = 'same-evidence';
+const mergeOf = (members, representative, supportEpisodes = []) => ({
+  version: 1,
+  key: 'k1',
+  rule: MERGE_KEY,
+  members: [...members],
+  representative: { ...representative },
+  supportEpisodes: [...supportEpisodes],
+  at: T(22),
+});
+
+/** 一张卡里放多条记录（每条各自一行），records 全给（闸 1/2/4/5 才能真判）。 */
+function cardFromRecords(records) {
+  const hits = records.map((r) => {
+    const first = Array.isArray(r.support) && r.support.length ? r.support[0] : supportEntry('ep-aaaaaaa1', 30);
+    return {
+      episode: first.episode,
+      why: ['yaml'],
+      kind: 'failure',
+      occurredAt: r.occurredAt ?? T(22),
+      seq: first.seq,
+      depth: 1,
+      claim: {
+        id: r.id,
+        kind: r.kind,
+        state: r.state,
+        text: r.text,
+        occurredAt: r.occurredAt ?? T(22),
+        support: (r.support ?? []).map((s) => ({ episode: s.episode, seq: s.seq })),
+      },
+    };
+  });
+  const card = buildMemoryCard({ walkResult: walkOf(hits), scope: SCOPE, indexPath: '/mem/index.md', episodeCount: 4 });
+  return { card, records: { claims: Object.fromEntries(records.map((r) => [r.id, r])) } };
+}
+
+test('T162b 闸4①: 合并节点与其成员同文 ⇒ 不报 gate4/unsuperseded-duplicate', () => {
+  const text = '同一句失败教训（合并节点代表原文）';
+  const member = rec({
+    id: 'c-mem00001',
+    text,
+    state: 'observed',
+    support: [supportEntry('ep-aaaaaaa1', 30, text)],
+  });
+  const merged = rec({
+    id: 'c-mrg00001',
+    text,
+    state: 'observed',
+    support: [supportEntry('ep-aaaaaaa1', 30, text), supportEntry('ep-aaaaaaa2', 12, text)],
+    merge: mergeOf(['c-mem00001'], { claimId: 'c-mem00001', episode: 'ep-aaaaaaa1', seq: 30, quote: text }, ['ep-aaaaaaa1', 'ep-aaaaaaa2']),
+  });
+  const { card, records } = cardFromRecords([merged, member]);
+  assert.equal(card.claims.length, 2, '两条都该渲染出来（同文也不同 id）');
+  const res = runWith({ card, records });
+  assert.equal(hasCode(res, 'gate4/unsuperseded-duplicate'), false, `合并关系不该判重复：${JSON.stringify(res.errors)}`);
+  assert.equal(res.checks.merged.total, 1, 'checks.merged.total 记一条合并节点');
+  assert.equal(res.checks.merged.skippedGate4, 2, '合并节点与成员都被豁免');
+});
+
+test('T162b 闸4② 守卫: 两个不同 id 同文且无 merge 关系 ⇒ 仍然 gate4/unsuperseded-duplicate', () => {
+  const text = '真的重复了两遍（没有任何 merge 关系）';
+  const a = rec({ id: 'c-dupx0001', text, support: [supportEntry('ep-aaaaaaa1', 30, text)] });
+  const b = rec({ id: 'c-dupx0002', text, support: [supportEntry('ep-aaaaaaa2', 12, text)] });
+  const { card, records } = cardFromRecords([a, b]);
+  const res = runWith({ card, records });
+  assert.equal(hasCode(res, 'gate4/unsuperseded-duplicate'), true, '守卫：真重复必须照报');
+  assert.equal(res.checks.merged.total, 0);
+});
+
+test('T162b 闸4③: 两个合并节点成员有交集 ⇒ 不报 gate4/unsuperseded-duplicate', () => {
+  const text = '两次合流指向同一批证据';
+  const m1 = rec({
+    id: 'c-mrg00011',
+    text,
+    state: 'observed',
+    support: [supportEntry('ep-aaaaaaa1', 30, text)],
+    merge: mergeOf(['c-evd00001', 'c-evd00002'], { claimId: 'c-evd00001', episode: 'ep-aaaaaaa1', seq: 30, quote: text }, ['ep-aaaaaaa1', 'ep-aaaaaaa2']),
+  });
+  const m2 = rec({
+    id: 'c-mrg00012',
+    text,
+    state: 'observed',
+    support: [supportEntry('ep-aaaaaaa2', 12, text)],
+    merge: mergeOf(['c-evd00002', 'c-evd00003'], { claimId: 'c-evd00002', episode: 'ep-aaaaaaa2', seq: 12, quote: text }, ['ep-aaaaaaa2', 'ep-aaaaaaa3']),
+  });
+  const { card, records } = cardFromRecords([m1, m2]);
+  const res = runWith({ card, records });
+  assert.equal(hasCode(res, 'gate4/unsuperseded-duplicate'), false, `成员交集 ⇒ 不判重复：${JSON.stringify(res.errors)}`);
+});
+
+test('T162b 闸2④: 合并节点 state 高于任一成员 ⇒ 不报 gate2/state-over-claim（成员的最高允许态作上限）', () => {
+  const text = '合并后支撑 3 局，成员自身只到 observed';
+  const e1 = { episode: 'ep-aaaaaaa1', seq: 30, quote: text };
+  const e2 = { episode: 'ep-aaaaaaa2', seq: 12, quote: text };
+  const e3 = { episode: 'ep-aaaaaaa3', seq: 7, quote: text };
+  // 成员 A：1 局 ⇒ 至多 observed；成员 B：3 局（允许态含 semantic）但自身仍标 observed
+  const memA = rec({ id: 'c-mem00011', text, state: 'observed', support: [e1] });
+  const memB = rec({ id: 'c-mem00012', text, state: 'observed', support: [e1, e2, e3] });
+  // 合并节点：state 取 semantic（高于两个成员），support 只有 2 条（少于 3 局），但 supportEpisodes 记了 3 局
+  const merged = rec({
+    id: 'c-mrg00021',
+    text,
+    state: 'semantic',
+    support: [e1, e2],
+    merge: mergeOf(['c-mem00011', 'c-mem00012'], { claimId: 'c-mem00011', episode: 'ep-aaaaaaa1', seq: 30, quote: text }, ['ep-aaaaaaa1', 'ep-aaaaaaa2', 'ep-aaaaaaa3']),
+  });
+  const { card, records } = cardFromRecords([merged]);
+  const res = runWith({ card, records: { claims: { ...records.claims, [memA.id]: memA, [memB.id]: memB } } });
+  assert.equal(hasCode(res, 'gate2/state-over-claim'), false, `合并节点不该按单条支撑数判：${JSON.stringify(res.errors)}`);
+  assert.equal(res.checks.merged.skippedGate2, 1, '闸 2 记一次豁免');
+});
+
+test('T162b 闸2⑤: 成员记录取不到 ⇒ 按记录自身 state 放行，并记 merged-unverified（不判红）', () => {
+  const text = '成员已被裁掉，只剩合并节点';
+  const merged = rec({
+    id: 'c-mrg00031',
+    text,
+    state: 'semantic',
+    support: [supportEntry('ep-aaaaaaa1', 30, text), supportEntry('ep-aaaaaaa2', 12, text)],
+    merge: mergeOf(['c-gone00001', 'c-gone00002'], { claimId: 'c-gone00001', episode: 'ep-aaaaaaa1', seq: 30, quote: text }, ['ep-aaaaaaa1', 'ep-aaaaaaa2', 'ep-aaaaaaa3']),
+  });
+  const { card } = cardFromRecords([merged]);
+  const res = runWith({ card, records: { claims: { [merged.id]: merged } } });
+  assert.equal(hasCode(res, 'gate2/state-over-claim'), false, '成员取不到时按记录自身 state 放行');
+  assert.equal(res.checks.merged.unverified, 1, '如实记 merged-unverified');
+  assert.ok(res.checks.unverified.some((u) => u.code === 'gate2/merged-unverified'), 'unverified 列表里要看得到');
+});
+
+test('T162b 闸2⑥ 守卫: 合并节点 state 超出「成员允许态 ∪ 并集支撑」⇒ 仍然 gate2/state-over-claim', () => {
+  const text = '只有 1 局支撑却标 semantic';
+  const merged = rec({
+    id: 'c-mrg00041',
+    text,
+    state: 'semantic',
+    support: [supportEntry('ep-aaaaaaa1', 30, text)],
+    merge: mergeOf(['c-mem00041'], { claimId: 'c-mem00041', episode: 'ep-aaaaaaa1', seq: 30, quote: text }, ['ep-aaaaaaa1']),
+  });
+  const mem = rec({ id: 'c-mem00041', text, state: 'observed', support: [supportEntry('ep-aaaaaaa1', 30, text)] });
+  const { card, records } = cardFromRecords([merged]);
+  const res = runWith({ card, records: { claims: { ...records.claims, [mem.id]: mem } } });
+  assert.equal(hasCode(res, 'gate2/state-over-claim'), true, '守卫：真正越级的 state 仍要打回');
+});

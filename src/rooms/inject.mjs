@@ -335,6 +335,8 @@ function storeView(store, cache = null) {
         support: Array.isArray(rec.support) ? rec.support.filter((s) => s && typeof s === 'object') : [],
         // Q19-B 需要 hard/soft 区分；投影时别把 level 丢掉（2026-11-03 实测踩过）
         level: typeof rec.level === 'string' ? rec.level : null,
+        // T162a：合并节点标记（consolidate 写的 merge.members / representative）；没有就 null。
+        merge: rec.merge && typeof rec.merge === 'object' ? rec.merge : null,
       };
       view.claims.push(claim);
       if (claim.id) view.claimsById.set(claim.id, claim);
@@ -703,6 +705,104 @@ function compareEntries(a, b) {
 }
 
 // ---------------------------------------------------------------------------
+// T162a 合并节点（merge）：同一张卡里「合并节点 + 成员」不许同时成行
+// ---------------------------------------------------------------------------
+
+/** 成员 id → 合并节点 claim 的索引（只在 claim 带 `merge.members` 时建）。 */
+function mergeIndexByMember(view) {
+  const byMember = new Map();
+  for (const claim of Array.isArray(view?.claims) ? view.claims : []) {
+    const merge = claim?.merge;
+    if (!merge || typeof merge !== 'object' || !Array.isArray(merge.members) || !claim.id) continue;
+    for (const memberId of merge.members) {
+      if (typeof memberId === 'string' && memberId !== '' && memberId !== claim.id) byMember.set(memberId, claim);
+    }
+  }
+  return byMember;
+}
+
+/**
+ * 用合并节点自己的出处渲染一行（与普通 claim 行同形状：`entry.claimId` = 合并节点 id）。
+ * 锚点优先 `merge.representative`，缺就从自己的 support 里挑第一条有 (episode, seq) 的；
+ * 两者都没有 ⇒ 无法证明出处，返回 null（无源不入）。
+ */
+function entryFromMergeNode(mergeClaim, options = {}) {
+  const rep = mergeClaim?.merge?.representative;
+  const support = Array.isArray(mergeClaim?.support) ? mergeClaim.support : [];
+  const anchor = rep && typeof rep.episode === 'string' && Number.isFinite(Number(rep.seq))
+    ? { episode: rep.episode, seq: Number(rep.seq), occurredAt: Number.isFinite(rep.occurredAt) ? rep.occurredAt : null }
+    : (support.find((s) => s && typeof s.episode === 'string' && Number.isFinite(Number(s.seq))) ?? null);
+  if (!anchor) return null;
+  const hit = {
+    episode: anchor.episode,
+    seq: Number(anchor.seq),
+    why: [],
+    occurredAt: Number.isFinite(anchor.occurredAt) ? Number(anchor.occurredAt) : (Number.isFinite(mergeClaim.occurredAt) ? mergeClaim.occurredAt : null),
+    claim: mergeClaim.id,
+  };
+  return entryFromClaim(hit, mergeClaim, options);
+}
+
+/**
+ * 卡片选取条目的最后一道：**合并节点优先，成员不再各占一行**。
+ *
+ * 规则（T162a，必须与合流侧的 `merge` 契约一致）：
+ *   1. 合并节点被命中 ⇒ 渲染它；它的成员即使也被命中，也不再单独成行（同一张卡内）。
+ *   2. 合并节点没被直接命中、但**≥2 个成员**被命中 ⇒ 用合并节点替换这些成员行
+ *      （只命中 1 个成员时不动：单条成员没有"合并"可省，替换反而丢出处）。
+ *   3. 没有 `merge` 字段的 claim **一字不改** —— 不建索引、不碰顺序。
+ *
+ * 顺序：合并节点插在它**第一个出现的成员**的位置（保持 walk 的相关性排序），
+ * 成员行整体删除；被删的行不计入 omitted（它们没有丢，只是被合并节点代表了）。
+ */
+function collapseMergeNodes({ entries, view, options = {} }) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (!list.length) return list;
+  const byMember = mergeIndexByMember(view);
+  if (!byMember.size) return list; // 库里没有合并节点：零成本直通
+
+  const renderedIds = new Set(list.filter((e) => typeof e?.claimId === 'string' && e.claimId).map((e) => e.claimId));
+  // 每个合并节点：卡片里出现了它哪几个成员
+  const groups = new Map();
+  for (const entry of list) {
+    const mergeClaim = entry?.claimId ? byMember.get(entry.claimId) : null;
+    if (!mergeClaim) continue;
+    const group = groups.get(mergeClaim.id) ?? { claim: mergeClaim, members: new Set() };
+    group.members.add(entry.claimId);
+    groups.set(mergeClaim.id, group);
+  }
+  if (!groups.size) return list;
+
+  const dropped = new Set(); // 要删掉的成员行
+  const replacement = new Map(); // memberId（首个）→ 合并节点 entry
+  for (const [mergeId, group] of groups) {
+    const renderedDirectly = renderedIds.has(mergeId);
+    if (!renderedDirectly && group.members.size < 2) continue; // 规则 2 的"≥2 个成员"
+    for (const memberId of group.members) dropped.add(memberId);
+    if (renderedDirectly) continue; // 规则 1：合并节点本来就在卡上
+    const entry = entryFromMergeNode(group.claim, options);
+    if (entry) replacement.set([...group.members][0], entry);
+  }
+  if (!dropped.size && !replacement.size) return list;
+
+  const out = [];
+  const placed = new Set();
+  for (const entry of list) {
+    if (entry?.claimId && dropped.has(entry.claimId)) {
+      // 把合并节点插在它第一个成员的位置上（保持排序语义）
+      const mergeEntry = replacement.get(entry.claimId);
+      if (mergeEntry && !placed.has(mergeEntry.claimId)) {
+        out.push(mergeEntry);
+        placed.add(mergeEntry.claimId);
+      }
+      continue;
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // 记忆卡
 // ---------------------------------------------------------------------------
 
@@ -821,7 +921,14 @@ export function buildMemoryCard({
     };
   }
 
-  const { entries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex });
+  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex });
+  // T162a：认「合并节点」。合流（consolidate）会把多条近似 claim 压成一个带 `merge.members` 的节点；
+  // 消费侧不认它，合并节点与它的成员就会在同一张卡里重复出现。规则见 collapseMergeNodes 的注释。
+  const entries = collapseMergeNodes({
+    entries: collectedEntries,
+    view,
+    options: { scope: scopeKey, episodesById: view.episodesById, signalTokens: signalTokensOf(signal) },
+  });
   const sorted = entries.slice().sort(compareEntries);
   const droppedProvenance = dropped.noProvenance + dropped.noText;
   const droppedImperative = Number.isFinite(dropped.imperative) ? dropped.imperative : 0;
