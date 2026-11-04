@@ -61,3 +61,30 @@ node -e "const fs=require('fs');const rows=fs.readFileSync('D:/DeepSeek Harness/
 - 只统计 `src=index.js`（宿主）；`src:sim-inject.mjs` 的仿真行不计入。
 - 样本是"注入成功才留样"，所以 `crossScopeRefs=0` 只覆盖**成功渲染**的卡；被闸挡掉的命中不产生留样（那部分由 A2b 离线指标覆盖）。
 - 抽样窗口只有重启后 6 分钟（8 张），不能外推为长期分布；下一轮巡检继续累计。
+
+## 6 · 更正与追加（同日，audit-11 之后）
+
+本文件 §2 的「可回溯 98/98 = 100%」**只证明**：该 `(ep, seq)` 的 episode 存在、且 seq 落在它的闭包里。
+独立复核（`reports/audit-11.md`）把判据加严成"卡上的文字必须真的出现在所引 seq 那条事件里"，读数完全不同：
+
+| 层 | 读数（重启后 10 卡 / 44 引用） | 判定 |
+|---|---|---|
+| 引用作用域（本文件 §2 的判据） | 44/44 同域、跨域 **0** | 通过（补闸真的生效） |
+| 引文可核（文字 vs 坐标） | **28/44** 对得上；15/44 只在该局别处；1/44 该局根本没有 | 不通过 |
+| 日期可核 | **10/44** 一致 | 不通过 |
+
+唯一一条"该局根本没有这段文字"的反例，坐标与事实：
+
+```
+卡   2026-11-04 07:48:03 · scope=…/DSH-GO · digest=1dabfc6a…
+行   [antipattern] Error: cannot read "…/projects/dsh/plugins/ptc-domain-presets/AGENTS.md": not found
+引用 ep-226dbf4f@783
+事实 ep-226dbf4f 的 14167 个事件里 "ptc-domain-presets" 出现 0 次；真身是 ep-fdd814b1@546（祖先域）
+```
+
+根因不在作用域闸，而在**三者脱钩**：`text ← claim.text`（claim 的 exemplar，可能来自另一局）、
+`episode/seq ← src`（作用域过滤后挑中的那条 support）、`occurredAt ← claim.occurredAt`（claim 自己的时刻）。
+库里 46 条 `u:` 层 claim **46/46** 的 support 跨多个工作区，所以这是结构性的。
+
+**所以**：本文件只对「A5 引用作用域归 0」这一条负责；A6 的与格必须在 `0.118.0` 之后用文字级判据重抽一次才作数。
+修法与代码位置见 `CHANGELOG.md` 的 0.118.0 段（`src/rooms/inject.mjs` 的 `entryFromClaim`）。
