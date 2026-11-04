@@ -166,6 +166,27 @@ function plannedDiff(store, kind, records) {
  */
 const PRESERVED_CLOCKS = Object.freeze(['createdAt', 'recordedAt', 'generatedAt']);
 
+/**
+ * T159b：归档每轮都从棋谱**重算** claim，`state` 由 R09 重新给出（通常是 `observed`）。
+ * 一旦某条被人工/脚本降级成 `stale`（带 `staleMarkedBy`），重算就会把它冲掉 ——
+ * "标一次只活到下一次归档"不是修好，是把维护成本固定下来。
+ * 所以：**带 `staleMarkedBy` 的记录，state 与全部 stale* 字段原样保留**；
+ * 其余字段（时钟、support、counters…）照旧按归档重算；没有 `staleMarkedBy` 的记录
+ * 走原来的路径，逐字节不变。
+ */
+const PRESERVED_STALE_FIELDS = Object.freeze([
+  'staleFrom', 'staleSince', 'staleReason', 'staleProbe', 'staleMarkedBy', 'staleMarkedAt',
+]);
+
+function carryStaleMarking(out, prev) {
+  if (!prev || typeof prev.staleMarkedBy !== 'string' || prev.staleMarkedBy === '') return out;
+  if (typeof prev.state === 'string' && prev.state !== '') out.state = prev.state;
+  for (const field of PRESERVED_STALE_FIELDS) {
+    if (prev[field] !== undefined) out[field] = prev[field];
+  }
+  return out;
+}
+
 function stabilizeExisting(store, kind, records) {
   const existing = new Map();
   for (const entry of store.list(kind)) if (entry.record) existing.set(entry.id, entry.record);
@@ -177,7 +198,7 @@ function stabilizeExisting(store, kind, records) {
     for (const field of PRESERVED_CLOCKS) {
       if (prev[field] !== undefined) out[field] = prev[field];
     }
-    return out;
+    return carryStaleMarking(out, prev);
   });
 }
 

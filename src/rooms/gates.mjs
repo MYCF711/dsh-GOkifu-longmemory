@@ -597,6 +597,66 @@ export function auditGovernance(text) {
 }
 
 // ---------------------------------------------------------------------------
+// 合并节点（T162b）：合并节点自己不算重复，成员也不因它而被判重复/状态不符
+// ---------------------------------------------------------------------------
+
+/** 合并节点（带 `merge.members`）的成员 id 列表；不是合并节点 ⇒ null。 */
+function mergeMemberIds(record) {
+  const members = Array.isArray(record?.merge?.members) ? record.merge.members : null;
+  if (!members) return null;
+  const ids = members.filter((x) => typeof x === 'string' && x.trim() !== '');
+  return ids.length ? ids : null;
+}
+
+/**
+ * 合并节点在闸 2 里的上限：合并节点是"成员证据并集"的产物，不能按它自己那条 support 的条数判。
+ * 上限 = 成员的允许态并集 ∪ 并集支撑（`merge.supportEpisodes`）对应的允许态。
+ * 成员一条也取不到 ⇒ `resolved: 0`，调用方按记录自身 state 放行并记 `merged-unverified`。
+ */
+function mergedStateCap(record, resolver) {
+  const members = mergeMemberIds(record);
+  if (!members) return null;
+  const kind = String(record?.id ?? '').startsWith('j-') ? 'joseki' : 'claim';
+  const allowed = new Set();
+  let resolved = 0;
+  for (const id of members) {
+    const member = resolver.get(recordKindOf(id), id);
+    if (!member) continue;
+    resolved += 1;
+    const memberKind = String(member?.id ?? '').startsWith('j-') ? 'joseki' : 'claim';
+    const verdict = allowedStates({
+      support: Array.isArray(member.support) ? member.support.length : 0,
+      counter: Array.isArray(member.counter) ? member.counter.length : 0,
+      reused: member.reused === true || Number(member.reuseCount) > 0,
+      strongCounter: member.strongCounter === true,
+      kind: memberKind,
+    });
+    for (const st of verdict.allowed) allowed.add(st);
+  }
+  const episodes = Array.isArray(record?.merge?.supportEpisodes) ? record.merge.supportEpisodes.length : 0;
+  const unionSupport = episodes > 0 ? episodes : (Array.isArray(record.support) ? record.support.length : 0);
+  const own = allowedStates({
+    support: unionSupport,
+    counter: Array.isArray(record.counter) ? record.counter.length : 0,
+    reused: record.reused === true || Number(record.reuseCount) > 0,
+    strongCounter: record.strongCounter === true,
+    kind,
+  });
+  for (const st of own.allowed) allowed.add(st);
+  return { resolved, allowed };
+}
+
+/** 两条记录是不是"合并关系"：A 是 B 的成员 / B 是 A 的成员 / 两个合并节点成员有交集。 */
+function isMergeRelated(a, b) {
+  const am = new Set(mergeMemberIds(a) ?? []);
+  const bm = new Set(mergeMemberIds(b) ?? []);
+  if (am.has(b?.id) || bm.has(a?.id)) return true;
+  if (am.size === 0 || bm.size === 0) return false;
+  for (const id of am) if (bm.has(id)) return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // 主入口
 // ---------------------------------------------------------------------------
 
@@ -661,6 +721,7 @@ export function runGates({
     provenanceChecked: 0,
     downgradeChecked: 0,
     unverified: [],
+    merged: { total: 0, skippedGate4: 0, skippedGate2: 0, unverified: 0 },
     byGate: { 0: 0, 1: 0, 2: 0, '2b': 0, 3: 0, 4: 0, 5: 0, 6: 0, '6b': 0, 7: 0, boundary: 0 },
   };
   /** 判不了的：非 strict 记 unverified（不假装合规），strict 直接失败。 */
@@ -770,6 +831,7 @@ export function runGates({
 
   // ---------------------------------------------------------------- 闸 2（支撑门槛）
   let supportUnresolved = 0;
+  const mergedSeen = new Set();
   for (let i = 0; i < claims.length; i += 1) {
     const claimId = typeof claims[i]?.claimId === 'string' ? claims[i].claimId : null;
     const record = claimId ? resolver.get(recordKindOf(claimId), claimId) : null;
@@ -778,10 +840,28 @@ export function runGates({
       continue;
     }
     checks.supportChecked += 1;
+    // T162b：合并节点的状态由成员机械决定，不按它自己那条 support 的条数判。
+    const mergedCap = mergedStateCap(record, resolver);
+    if (mergedCap) {
+      if (!mergedSeen.has(record.id)) {
+        mergedSeen.add(record.id);
+        checks.merged.total += 1;
+      }
+      if (mergedCap.resolved === 0) {
+        // 成员都取不到 ⇒ 判不了：按记录自身 state 放行，并如实记 merged-unverified（不假装核过）。
+        checks.merged.unverified += 1;
+        continue;
+      }
+      if (mergedCap.allowed.has(record.state)) {
+        checks.merged.skippedGate2 += 1;
+        continue;
+      }
+    }
     const violation = supportStateViolation(record);
     if (violation) push('2', violation.code, { index: i, ...violation.detail });
   }
   unverified('2', 'gate2/record-unresolved', supportUnresolved, '条目记录不可解析（未给 records/store）');
+  unverified('2', 'gate2/merged-unverified', checks.merged.unverified, '合并节点的成员记录不可解析（按记录自身 state 放行）');
 
   // ---------------------------------------------------------------- 闸 2b（裁决独立性）
   const adjudicationList = Array.isArray(adjudications) ? adjudications : (adjudications ? [adjudications] : []);
@@ -930,10 +1010,25 @@ export function runGates({
     const idSet = new Set(ids);
     const linked = group.some((g) => g.record.supersedes && idSet.has(g.record.supersedes))
       || group.some((g) => g.record.supersededBy && idSet.has(g.record.supersededBy));
-    if (!linked) {
-      // detail.ids 给**去重后的唯一 id 列表**（排查时不该看到同一个 id 重复两遍）
-      push('4', 'gate4/unsuperseded-duplicate', { ids, indexes: group.map((g) => g.index) });
+    if (linked) continue;
+    // T162b：合并节点与它的成员同文不算"未标覆盖"的重复；两个合并节点成员有交集同理。
+    // 其余判据（不同 id 同文且无覆盖链）一字不改：豁免只作用于**合并关系**覆盖到的那些行。
+    const exempt = new Set();
+    for (let a = 0; a < group.length; a += 1) {
+      for (let b = a + 1; b < group.length; b += 1) {
+        if (group[a].record.id === group[b].record.id) continue;
+        if (isMergeRelated(group[a].record, group[b].record)) {
+          exempt.add(group[a].record.id);
+          exempt.add(group[b].record.id);
+        }
+      }
     }
+    if (exempt.size > 0) checks.merged.skippedGate4 += exempt.size;
+    const rest = group.filter((g) => !exempt.has(g.record.id));
+    const restIds = [...new Set(rest.map((g) => g.record.id))];
+    if (restIds.length < 2) continue;
+    // detail.ids 给**去重后的唯一 id 列表**（排查时不该看到同一个 id 重复两遍）
+    push('4', 'gate4/unsuperseded-duplicate', { ids: restIds, indexes: rest.map((g) => g.index) });
   }
   unverified('4', 'gate4/record-unresolved', immutabilityUnresolved, '条目记录不可解析（未给 records/store）');
   checks.immutabilityChecked = renderedRecords.length;
