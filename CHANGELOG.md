@@ -28,6 +28,13 @@
   4. **打 tag 前必须确认新 HEAD 的 CI = success**；超时/红/推不上去一律打印手动指令并退出 1，**绝不把 tag 打在未验证的提交上**。
 - 按 AGENTS §10：**默认不直推 main**（ruleset 本来也拒），只有显式 `--push-ledger` 才尝试；被拒时打印 PR 路径。
 
+### 性能：`runH1` 接受 walk 缓存，m5 再降到 **22.2s**（T169）
+- `scripts/eval.mjs` 的 `runH1` 新增可选 `cache`：不传 ⇒ 本次调用内自建一份并复用（m5 变快的来源，`m5-report.mjs` 一行没改）；
+  传对象/工厂/`false` 均可；建不起来就退回逐次读，不抛、结果不变。缓存只在一次调用内有效，不落盘、不跨进程。
+- **对拍**：真库同一份库，`cache` 默认 vs `cache:false`，A1 的分子/分母/每个数值**逐位相同**（`injected 105 · staleInjected 8 · signals 160 · tokensTotal 26129 · gateFailures 13 · zeroInjection 32`）；
+  墙钟 11.46s vs 41.45s。六轴其余五轴与 T167 完全一致。
+- 真库 `m5-report --json`：**49.5s → 22.2s**。
+
 ### 性能顺带确认
 `metrics-guard` 现在整轮 **55.7s**（T167 之前要 10 分钟以上），六轴 PASS：A1=0.029 · A5=0 · A6=1 · **A2b 18/19** · p50 18.47ms。
 
