@@ -128,6 +128,11 @@ export async function syncLedgerTests(opts = {}) {
   const text = readText('MAINTENANCE.md');
   const result = rewriteLedgerTests(text, counts, formatStamp(now));
   if (result.error) return { changed: false, committed: false, counts, before: null, after: null, commit: null, error: result.error };
+  // 2026-11-05（T172 配套）：**测试变多不拦发布**。台账是快照，实测更大是正常进展（ledger-check 已按单向判放行），
+  // 这里就不必"提交→开 PR→再发版"折腾一轮；只有**变少**才继续走自愈（那才是要查的信号）。
+  if (result.changed && result.before && Number.isFinite(result.before.total) && counts.total > result.before.total) {
+    return { changed: false, committed: false, counts, before: result.before, after: result.before, commit: null, growthAllowed: true };
+  }
   if (!result.changed) return { changed: false, committed: false, counts, before: result.before, after: result.before, commit: null };
   if (dryRun) return { changed: true, committed: false, counts, before: result.before, after: result.after, commit: null };
 
