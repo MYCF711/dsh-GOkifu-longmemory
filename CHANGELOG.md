@@ -5,6 +5,45 @@
 > **更正记录（约定，2026-11-04 起）**：**已发布版本的段落一律不再改写**（audit-10 残留 C：连续两版覆盖式改写已发布段，产生互相矛盾的公开文本）。
 > 需要更正时，在文件**顶部**新增 `## 更正 · <日期>` 段，写「原文是什么、正确是什么、依据（审计编号/提交）」，旧段保持原样。
 
+## 更正 · 2026-11-04（`v0.116.0` tag 作废）
+
+- **原文是什么**：`v0.116.0` 这个 tag 存在（本地与远端），指向提交 `046509f`（`M4: 注入卡片留样（0.116.0）`）。
+- **正确是什么**：`046509f` 是 PR **合并之前**的分支提交，不在 `main` 历史上；它里面的 `package.json` 已经是 **0.117.0**
+  —— 因为 PR #193 把 0.116.0 与 0.117.0 的内容一起 squash 进了 `main` 的 `4376d5f`。
+  所以 `v0.116.0` 这个 tag 名与内容版本**对不上**，也没有对应的 GitHub Release。
+- **处置**：撤掉该 tag，**不补 Release**；0.116.0 的段落在本文件里保持原样（按上面的约定不改写），
+  内容视为随 `v0.117.0` 一并发布。`MAINTENANCE.md` 的「已发布」行把它记入"有段无 tag"的历史缺口。
+- **防复发**：新增 `scripts/tag-audit.mjs`（闸：tag 名必须等于该提交里的 `version`），
+  并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
+- **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
+
+## 0.118.0（2026-11-04）
+
+### A5 补闸的线上复核：跨作用域引用归 0
+- 主人重启后新宿主进程（pid 38972，07:44:05 起）加载 0.117.0，继续真实注入：到 07:50:57 已 22 次 pre-step、`inject=8`。
+- `node scripts/audit-card-samples.mjs`：全量 22 张卡 / 98 条引用 **100% 可回溯**；跨作用域 2 条，
+  **全部来自补闸前**（06:57:35 与 07:37:34，同一条 `ep-1cf2b33f@783`）；**重启后 8 张卡 / 34 条引用，跨作用域 0**。
+- 也就是说 0.117.0 那条验收判据（`crossScopeRefs` 归 0）在线上达成了，且不是"因为不再注入所以不越界"——同期仍在注入。
+- 证据 `evidence/M7-A5-live-clean.md`（含按 pid 切分重启边界的复现命令）。
+
+### 新增闸：tag 与内容版本一致性（`scripts/tag-audit.mjs`）
+- 硬红：每个 tag 的 `package.json` `version` 必须等于 tag 名（`v0.116.0` ⇒ `0.116.0`）。
+- 软警：tag 指向的提交是否在 `main` 历史上（早期 v0.16.0 及以前有一批不在，属历史遗留，只告警不阻断）。
+- `scripts/release.mjs` 发版前强制跑；单测 `test/tag-audit.test.mjs` 覆盖 5 种形态（含 0.116.0 的真实形态、取不到 version 时 fail-closed）。
+
+### 台账自证恢复可复现
+- `MAINTENANCE.md`：测试 422（418 pass / 0 fail / 4 skip）、A2 **22.69%**、A4 p50 **10.04ms**（p90 14.39 / p95 15.01 / max 26.41）、claim 1053、六轴时点刷新。
+- 台账原先写 416/412 且 A4 写成区间（`~9–16ms`）导致解析不出实测值 —— `ledger-check --full` 因此连续红；本次改成可解析的定值 + 时点。
+- 「插件」行从"两条 `disabled: true`、待重启验证"改为实况：别名包 `kifu-loader` 已挂、宿主真跑、`first-live` 报 `liveReady=true`。
+
+### 知识库：调研 33 MemoryAgentBench（四能力记忆基准）
+- [外] v4 的四项能力是 accurate retrieval / test-time learning / long-range understanding / **selective forgetting**，
+  而 v1 目录与正文写的是 **Conflict Resolution**（判据相同：面对矛盾证据时覆盖/删除旧信息）。
+- 对照：它的 SF/CR 要求**写时覆盖**，与「只增不改、原件永不删」直接冲突 ⇒ 评测骨架可借（按 AR/冲突型分桶、机械造矛盾对），写时覆盖不借。
+
+### 验证
+422 条测试（418 pass / 0 fail / 4 skip）；`check PASS`；`ledger-check --full` PASS；`tag-audit` PASS。
+
 ## 0.117.0（2026-11-04）
 
 ### M4 抽样抓到 A5 实质越界 → 补闸
