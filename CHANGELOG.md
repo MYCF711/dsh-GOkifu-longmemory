@@ -21,10 +21,42 @@
 
 ### A5 补闸的线上复核：跨作用域引用归 0
 - 主人重启后新宿主进程（pid 38972，07:44:05 起）加载 0.117.0，继续真实注入：到 07:50:57 已 22 次 pre-step、`inject=8`。
-- `node scripts/audit-card-samples.mjs`：全量 22 张卡 / 98 条引用 **100% 可回溯**；跨作用域 2 条，
+- `node scripts/audit-card-samples.mjs`：全量 22 张卡 / 98 条引用按**结构口径**100% 可回溯；跨作用域 2 条，
   **全部来自补闸前**（06:57:35 与 07:37:34，同一条 `ep-1cf2b33f@783`）；**重启后 8 张卡 / 34 条引用，跨作用域 0**。
 - 也就是说 0.117.0 那条验收判据（`crossScopeRefs` 归 0）在线上达成了，且不是"因为不再注入所以不越界"——同期仍在注入。
 - 证据 `evidence/M7-A5-live-clean.md`（含按 pid 切分重启边界的复现命令）。
+
+### A6 判据升级 + 修：卡上的字必须落在它自己标注的 (ep, seq) 上
+- 独立复核（`reports/audit-11.md`）把"可回溯"加严成"文字必须真的出现在所引 seq 附近的事件里"，读数完全不同：
+  重启后 10 张卡 / 44 条引用里，**28 条对得上、15 条只在该局别处出现、1 条该局根本没有那段文字**；日期 **34/44** 不是所引那条事件的时间。
+- 反例（唯一一条"该局没有这段文字"）：`ep-226dbf4f@783` 的卡上写着 `ptc-domain-presets/AGENTS.md: not found`，
+  而该局 14167 个事件里 `ptc-domain-presets` 出现 **0** 次；真身是 `ep-fdd814b1@546`（祖先域）。
+- 根因是**三者脱钩**：`text ← claim.text`（claim 的 exemplar，可能来自另一局）、`episode/seq ← src`（作用域过滤后挑中的那条 support）、
+  `occurredAt ← claim.occurredAt`。库里 46 条 `u:` 层 claim **46/46** 的 support 跨多个工作区，故属结构性而非偶发。
+- 修（`src/rooms/inject.mjs` 的 `entryFromClaim`，本版**行为改动**）：
+  ① 文字取 `src.quote`（该 seq 的原文；`class:<token>` 作为机械标签保留成前缀）；② 日期取 `src.occurredAt`；
+  ③ 只有旧夹具/旧数据缺 `quote` 时才退回 `claim.text` —— 那不是允许脱钩，而是让审计能把它抓成可见失败。
+- 判据同刀升级：`scripts/audit-card-samples.mjs` 默认做**文字级**核验（`at-seq` / `elsewhere` / `missing` + 日期一致），
+  `missing` 或日期不一致即退出 1（旧的"ep 存在 + seq 在闭包内"只保留在 `--no-text` 里作对照）。
+  文字层窗口默认 **±10**：实测「调用步 → 工具结果」的 seq 间隔直方为 `0×9,2×9,3×2,4×30,5×11,6×6,8/9/10 各 1`，±3 会把真引用判成 elsewhere。
+- 新增 `scripts/a6-text-level.mjs`：**离线重抽**——用与注入同一条链（`runPipeline`）为当前库现造卡，再套同一判据。
+  这样"改完的代码会产出什么卡"不必等宿主重启就能量（`audit-card-samples` 读的是线上留样）。
+- **前后对照（同一把尺子，window=±10）**：
+
+  | | 修复前（线上留样，宿主仍跑旧代码） | 修复后（离线重抽） |
+  |---|---|---|
+  | 引用 | 122 | 43 |
+  | at-seq | 70（57.4%） | **41（95.3%）** |
+  | elsewhere | 38 | **2** |
+  | missing | **14** | **0** |
+  | 日期一致 | 31/122（25.4%） | **43/43（100%）** |
+  | 判定 | FAIL | **PASS** |
+
+  证据 `evidence/M7-A6-text-level.md`；剩下 2 条 elsewhere 属抽取层（quote 由「stderr + 退出码」拼成或被截断），另开一刀。
+- 单测：`test/inject.test.mjs` 加 3 条（文字取原文不取 exemplar、日期取所引事件、类级标签保留、旧数据退回可见），
+  `test/audit-card-samples.test.mjs` 10 条（三档判定 / 日期 / 读不到原件 fail-closed / `--no-text` 回退）。
+- **口径变更声明**：六轴里 A6 的 100% 是**结构口径**；文字级读数另计（本版离线重抽 41/43，修复前线上 70/122）。
+  线上口径要等宿主下次重启、`card-samples.jsonl` 换上新卡后才更新。
 
 ### 新增闸：tag 与内容版本一致性（`scripts/tag-audit.mjs`）
 - 硬红：每个 tag 的 `package.json` `version` 必须等于 tag 名（`v0.116.0` ⇒ `0.116.0`）。
@@ -32,7 +64,7 @@
 - `scripts/release.mjs` 发版前强制跑；单测 `test/tag-audit.test.mjs` 覆盖 5 种形态（含 0.116.0 的真实形态、取不到 version 时 fail-closed）。
 
 ### 台账自证恢复可复现
-- `MAINTENANCE.md`：测试 422（418 pass / 0 fail / 4 skip）、A2 **22.69%**、A4 p50 **10.04ms**（p90 14.39 / p95 15.01 / max 26.41）、claim 1053、六轴时点刷新。
+- `MAINTENANCE.md`：测试 435（431 pass / 0 fail / 4 skip）、A2 **22.69%**、A4 p50 **10.04ms**（p90 14.39 / p95 15.01 / max 26.41）、claim 1053、六轴时点刷新。
 - 台账原先写 416/412 且 A4 写成区间（`~9–16ms`）导致解析不出实测值 —— `ledger-check --full` 因此连续红；本次改成可解析的定值 + 时点。
 - 「插件」行从"两条 `disabled: true`、待重启验证"改为实况：别名包 `kifu-loader` 已挂、宿主真跑、`first-live` 报 `liveReady=true`。
 
@@ -42,7 +74,7 @@
 - 对照：它的 SF/CR 要求**写时覆盖**，与「只增不改、原件永不删」直接冲突 ⇒ 评测骨架可借（按 AR/冲突型分桶、机械造矛盾对），写时覆盖不借。
 
 ### 验证
-422 条测试（418 pass / 0 fail / 4 skip）；`check PASS`；`ledger-check --full` PASS；`tag-audit` PASS。
+435 条测试（431 pass / 0 fail / 4 skip）；`check PASS`；`tag-audit` PASS；`ledger-check --full` PASS。
 
 ## 0.117.0（2026-11-04）
 
