@@ -17,6 +17,34 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.123.0（2026-11-04）
+
+### 擂台开打：把「至少比 Hindsight 强」从口号变成逐轴读数
+- 新脚本 `scripts/arena-report.mjs`（零模型调用、只读双方日志）：
+  **我方**读数取 `evidence/metrics-guard.json`（每轮巡检刷新）+ `live-stats.jsonl`；
+  **对方**读数由它自己的日志当场重算（`~/.hindsight/coding-agents-logs/{usage,diag}.jsonl`）。
+- 判定只有三档 `win` / `lose` / `incomparable`，**且单测禁止把"不可比"判成"我们更强"**（A2 主判据即使我方读数很好看也不许判 win）。
+- 结果（`evidence/M7-arena.md`）：**赢 3 · 输 0 · 不可比 3**
+
+  | 轴 | 判定 | 我方 | 对方 |
+  |---|---|---|---|
+  | A3 可靠性 | **win** | 线上注入 79 次、失败 0 | recall 失败 **27.9%**（299/1071）· retain 4.6% · pages 9.7%，另有 3347 次空注入 |
+  | A4 延迟 | **win** | 热路径 p50 **9.03ms** | `inject_recall` p50 **4923ms** / p90 8329ms（n=772） |
+  | A5 作用域 | **win** | 按工作区硬隔离，跨作用域 0 | 8 个 bank、269 个会话只有 1 个跨 bank，但最多轮次落在**共享**的 `coding-agent::default-workspace` |
+  | A1 / A2 / A6 | incomparable | 0% / A2b 覆盖 100%、严格 84.2% / 结构 100% | 无同口径读数（只有 1.49% 的 credited 代理） |
+
+- **阻止开打的那一条已经消失**：`docs/对标-Hindsight.md` 原写"擂台仍未开打，因为插件尚未在宿主里跑过（A3）"——A3 早已 live，本轮据实改为"已开打"。
+- **主判据 A2 仍不可比**：要在同域做「有/无记忆配对重放」才谈得上比较，那要调模型。**所以现在仍不宣称"比 Hindsight 强"**。
+
+### 更正：Hindsight 的 bank 结构（原话说过了头）
+- 原文写"所有项目共用一个 bank（不是 per-repo）"；按它的日志实测：**8 个 bank**，项目 bank 最大的是共享的
+  `coding-agent::default-workspace`（5556 轮），另有少量 per-repo bank（`zcode-glm5.3f` 175 / `主工作区` 64 / `dsh系统提示词工程` 27 …），
+  以及归档类 `archive`（11706 轮）。**269 个会话里只有 1 个跨 bank** ⇒ 准确说法是"以共享默认 bank 为主"。
+- 同源复读的其它数（2026-11-04）：注入失败 27.9%（原记 29.4%）、retain 4.6%（原记 7.5%）、pages 9.7%、credited 1.49%（原记 1.82%）。
+
+### 验证
+445 条测试（441 pass / 0 fail / 4 skip）；`check PASS`；`tag-audit PASS`。
+
 ## 0.122.0（2026-11-04）
 
 ### T111：类级 claim 的展示原文按本次信号选（针对 0.121.0 定位出的短板）
