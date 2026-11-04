@@ -252,3 +252,47 @@ test('h1 缓存: A1 的定义不变 —— perSignal 条数 = 信号数，分子
   assert.ok(r.postGateStale <= r.staleInjected);
   assert.equal(r.validityCoverage.withValidity >= 1, true, '夹具里必须有带 validity 的条目，否则覆盖率恒为空转');
 });
+
+// ---------------------------------------------------------------------------
+// ⑥ T174：records 直通（runH1 把已读的 claims/topics 喂给 createWalkCache）
+// ---------------------------------------------------------------------------
+
+test('h1 缓存: 工厂能收到 records（claims/topics 直通），且数字与默认逐位相同', async () => {
+  const { createWalkCache } = await import('../src/rooms/walk.mjs');
+  const seen = [];
+  const r = await runH1({
+    ...baseOpts(),
+    cache: (store, { records } = {}) => {
+      seen.push({ hasClaims: Array.isArray(records?.claims), hasTopics: Array.isArray(records?.topics), kinds: Object.keys(records ?? {}) });
+      return createWalkCache(store, records ? { records } : {});
+    },
+  });
+  const plain = await runH1(baseOpts());
+  assert.deepEqual(stable(r), stable(plain), '直通 records 的缓存 == 默认自建缓存');
+  assert.equal(seen.length, 1, '工厂只调一次');
+  assert.equal(seen[0].hasClaims, true, 'runH1 要把已读的 claims 传进来');
+  assert.equal(seen[0].hasTopics, true, 'runH1 要把已读的 topics 传进来');
+  assert.deepEqual(seen[0].kinds.sort(), ['claims', 'topics'], '只直通这两类（episodes/links 由缓存自己读）');
+});
+
+test('h1 缓存: 直通 records 后**磁盘读显著变少**（计数，不靠墙钟）', async () => {
+  const fsMod = (await import('node:fs')).default;
+  const base = { storeRoot: fixture.storeRoot, workspace: fixture.root, now: ARCHIVE_TS, signals: 3 };
+  const original = fsMod.readFileSync;
+  let reads = 0;
+  fsMod.readFileSync = function counted(p, o) {
+    reads += 1;
+    return original.call(fsMod, p, o);
+  };
+  try {
+    await runH1(base); // 默认：路过 read() 一次 + 缓存复用
+    const withRecords = reads;
+    reads = 0;
+    await runH1({ ...base, cache: false }); // 改动前的取数方式
+    const withoutCache = reads;
+    console.log(`[T174] 磁盘读次数：默认(含 records 直通)=${withRecords} / cache:false=${withoutCache}`);
+    assert.ok(withRecords < withoutCache, `默认路径必须比逐次读盘少：withRecords=${withRecords} withoutCache=${withoutCache}`);
+  } finally {
+    fsMod.readFileSync = original;
+  }
+});
