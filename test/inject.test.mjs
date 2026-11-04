@@ -43,6 +43,7 @@ import {
   InjectError,
 } from '../src/rooms/inject.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
+import { runGates } from '../src/rooms/gates.mjs';
 
 // ---------------------------------------------------------------------------
 // 夹具：临时目录里的最小记忆库（episodes + claims）
@@ -1196,4 +1197,155 @@ test('T162a 回归守卫: 没有 merge 字段的 claim 卡片逐字节不变', (
   const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
   assert.equal(card.section, MERGE_FREE_GOLDEN, '无 merge 的卡片必须与改动前逐字节相同');
   assert.deepEqual(card.claims.map((c) => c.claimId), ['c-0000aa01']);
+});
+
+// ---------------------------------------------------------------------------
+// T176：合并节点**只替换、不主动入选**
+//
+// 线上实证（`scripts/merge-acceptance.mjs` ④）：20 组合并组里"至少省 1 行"只有 33.3%，
+// 还有两组**反增**（c-3011f83f 1→2、c-41157b78 2→3）。
+// 根因：合并节点作为独立条目**自己命中了 topic**，而它代表的成员没被渲染 ⇒ 净 +1。
+// 规则改成：
+//   1. 合并节点不因为自己命中而单独成行；
+//   2. ≥2 个成员被命中 ⇒ 用合并节点替换这些成员行（与 T162a 一致）；
+//   3. 只有 1 个成员被命中 ⇒ 保留成员行（与 T162a 一致）；
+//   4. 没有 merge 字段的 claim 行为一字不改。
+// ---------------------------------------------------------------------------
+
+test('T177: 只有合并节点命中、成员都不命中 ⇒ 卡上是**指针行**（不是断言，也不消失）', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const hits = [mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23)];
+    const walkResult = walkOf(hits);
+    const card = buildMemoryCard({ walkResult, store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.deepEqual(ids, ['c-mrg0001'], `应当留一条指针行（claimId = 合并节点 id），实际：${JSON.stringify(ids)}`);
+    assert.equal(card.claims.length, 1);
+    assert.equal(card.claims[0].kind, 'pointer', '必须是指针行，不是断言');
+    assert.notEqual(card.section, null, '不许整行消失（内容丢失比省行更糟）');
+    // 十道闸必须全绿（尤其闸 0 出处 / 闸 5 quote）
+    const gates = runGates({ card, walkResult, store, scope: SCOPE });
+    assert.equal(gates.ok, true, `指针行必须过闸：${JSON.stringify(gates.errors)}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T176: 合并节点命中 + 仅 1 个成员命中 ⇒ 只保留成员行（合并节点仍不单独成行）', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const hits = [
+      mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23),
+      mergeHit('ep-mrg00001', 30, 'c-mem0001', 21),
+    ];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.deepEqual(ids, ['c-mem0001'], `单成员不替换，合并节点也不该成行，实际：${JSON.stringify(ids)}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T176: 合并节点排在成员之前（walk 顺序）⇒ 仍然只出现一次，且位置在首个成员处', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const hits = [
+      mergeHit('ep-mrg00001', 30, 'c-mrg0001', 21),
+      mergeHit('ep-mrg00001', 30, 'c-mem0001', 22),
+      mergeHit('ep-mrg00002', 12, 'c-mem0002', 23),
+    ];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.deepEqual(ids, ['c-mrg0001'], `合并节点只该出现一次，实际：${JSON.stringify(ids)}`);
+    assert.equal(card.claims.length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('T177: 指针行是**机械可区分**的 —— kind=pointer、[stale] 标记、行首是"合并入口"', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const hits = [mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23)];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const row = card.claims[0];
+    assert.equal(row.kind, 'pointer', 'kind 必须是 pointer（不是 fact/antipattern/...）');
+    assert.equal(row.marker, 'stale', '与既有 stale 指针行同形（[stale] 标记）');
+    assert.ok(String(row.line).startsWith('- [stale] 合并入口'), `行首必须是"合并入口"，实际：${row.line}`);
+    assert.ok(String(row.text).startsWith('合并入口'), '正文以"合并入口"开头（不是断言语气）');
+    assert.match(String(row.text), /详见 c-mrg0001/, '必须写明指向哪个合并节点');
+    assert.match(String(row.text), /代表 2 条近似记忆/, '必须写明代表几条');
+    // 断言语气的主语/结论式开场不应出现
+    for (const banned of ['- [', '事实：', '结论', '应当', '必须']) {
+      assert.equal(String(row.text).startsWith(banned), false, `指针行不该以断言式开场：${row.text}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T177: 0 成员 + 合并节点没被命中 ⇒ 卡上什么都不出现（没东西可指）', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const card = buildMemoryCard({ walkResult: walkOf([]), store, scope: SCOPE, now: T(24) });
+    assert.deepEqual(card.claims, []);
+    assert.equal(card.section, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T177 回归: ≥2 成员命中仍是断言行（不是指针），单成员仍是成员行', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const two = buildMemoryCard({
+      walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mem0001', 21), mergeHit('ep-mrg00002', 12, 'c-mem0002', 22)]),
+      store, scope: SCOPE, now: T(24),
+    });
+    assert.deepEqual(two.claims.map((c) => c.claimId), ['c-mrg0001']);
+    assert.notEqual(two.claims[0].kind, 'pointer', '≥2 成员时是替换断言行，不是指针');
+
+    const one = buildMemoryCard({
+      walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mem0001', 21)]),
+      store, scope: SCOPE, now: T(24),
+    });
+    assert.deepEqual(one.claims.map((c) => c.claimId), ['c-mem0001']);
+    assert.notEqual(one.claims[0].kind, 'pointer');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T177 守卫: 合并节点命中 + 0 成员，但卡上还有别的行 ⇒ **不**插指针行（不许净 +1）', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    // 补一条与该合并组无关的 claim，并让它被命中 ⇒ 卡上不是空的
+    store.putMany('claims', [{
+      id: 'c-out0001',
+      kind: 'fact',
+      text: '无关的另一条断言',
+      scopeKey: SCOPE,
+      threadIds: [],
+      state: 'observed',
+      support: [{ episode: 'ep-mrg00001', seq: 11, quote: '无关的另一条断言', occurredAt: T(21) }],
+      counter: [],
+      validity: { type: 'none', value: null },
+      preconditions: [],
+      occurredAt: T(21),
+      recordedAt: T(21),
+      counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null },
+      supersedes: null,
+    }]);
+    const hits = [
+      mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23),
+      mergeHit('ep-mrg00001', 11, 'c-out0001', 21),
+    ];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.deepEqual(ids, ['c-out0001'], `卡上还有别的行时不该插指针行（否则净 +1），实际：${JSON.stringify(ids)}`);
+    assert.equal(card.claims.some((c) => c.kind === 'pointer'), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
