@@ -941,3 +941,34 @@ test('T115: 同一局里没有更贴近的教训时保持原选', () => {
     assert.equal(card.claims[0]?.claimId, 'c-dddd0003');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// 无源不入（0.134.0）：seq 是 1 基的，`seq: 0` 等于"不知道在哪" ⇒ 不进卡
+// 线上实测（2026-11-04，pid 18464）：60 条引用里 2 条落在 seq 0，是"局级指针"行（fail=1 · topics=…），
+// A6 文字层因此报 missing —— 卡上文字在该局里找不到，因为它本就不是某条事件的原文。
+// ---------------------------------------------------------------------------
+
+test('R12: seq 0 的条目不许进卡（无源不入），但其它条目照常渲染', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-seq0-'));
+  try {
+    const store = createStore({ root, now: T(20) });
+    store.ensureDirs();
+    store.putMany('episodes', [episode('ep-eeee0001', 21, 2)]);
+    store.putMany('claims', [
+      claim({ id: 'c-eeee0001', kind: 'antipattern', text: 'Cannot find module yaml', day: 21, state: 'observed',
+        support: [{ episode: 'ep-eeee0001', seq: 12, quote: 'Cannot find module yaml' }] }),
+    ]);
+    // 一个"局级指针"hit：没有事件 seq（walk 给的是 0）
+    const hits = [
+      hit({ episodeId: 'ep-eeee0001', seq: 12, claimId: 'c-eeee0001' }),
+      hit({ episodeId: 'ep-eeee0001', seq: 0 }),
+    ];
+    const signal = signalFromText('Cannot find module yaml', { at: T(21) });
+    signal.scopeKey = SCOPE;
+    const card = buildMemoryCard({ signal, walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const lines = cardLines(card);
+    assert.ok(lines.some((l) => l.includes('Cannot find module yaml')), '有 seq 的照常渲染');
+    assert.ok(!lines.some((l) => l.includes('seq 0')), `seq 0 的行不许出现：${lines.join(' | ')}`);
+    assert.ok(!lines.some((l) => l.includes('fail=')), '局级指针行（fail=…）不再冒充带出处的行');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
