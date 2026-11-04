@@ -33,10 +33,45 @@ if (mainSet) {
   out.main = { n: m.n, cover: m.recall, strict: m.recallSpecific, displayed: m.recallDisplayed };
 }
 if (crossSet) {
+  const sampled = {};
   for (const flag of [false, true]) {
     const r = measureA2b({ store, report, splitAt: SPLIT, cache, limit: 60, frozen: crossSet, walkOpts: { allowCrossScopeClass: flag } });
-    out.cross[flag ? 'B' : 'A'] = { n: r.n, cover: r.recall, strict: r.recallSpecific, displayed: r.recallDisplayed };
+    const key = flag ? 'B' : 'A';
+    sampled[key] = r.sampled;
+    out.cross[key] = { n: r.n, cover: r.recall, strict: r.recallSpecific, displayed: r.recallDisplayed };
   }
+  // 2026-11-04（T117）：聚合率会掩盖"谁翻转了"。同一批考卷做**配对**比较 + 精确 McNemar。
+  if (sampled.A && sampled.B) out.cross.paired = pairedCompare(sampled.A, sampled.B);
+}
+
+/** 精确 McNemar（双侧）：只看不一致对，P = 2 * P(X ≤ min(b,c))，X~Bin(n=b+c, 0.5)。 */
+export function exactMcNemar(a, b) {
+  const n = a + b;
+  if (n === 0) return 1;
+  const k = Math.min(a, b);
+  let tail = 0;
+  let c = 1; // C(n, i) 递推
+  for (let i = 0; i <= k; i += 1) {
+    if (i > 0) c = (c * (n - i + 1)) / i;
+    tail += c;
+  }
+  const p = 2 * (tail / 2 ** n);
+  return Math.min(1, p);
+}
+
+/** 配对比较两条 sampled（同一冻结集、同顺序）：返回 2×2 与检验。 */
+export function pairedCompare(sampledA, sampledB) {
+  const n = Math.min(sampledA?.length ?? 0, sampledB?.length ?? 0);
+  let bothOk = 0; let onlyA = 0; let onlyB = 0; let bothFail = 0;
+  for (let i = 0; i < n; i += 1) {
+    const a = sampledA[i]?.specific === true;
+    const b = sampledB[i]?.specific === true;
+    if (a && b) bothOk += 1;
+    else if (a && !b) onlyA += 1;
+    else if (!a && b) onlyB += 1;
+    else bothFail += 1;
+  }
+  return { n, bothOk, onlyA, onlyB, bothFail, p: exactMcNemar(onlyA, onlyB) };
 }
 
 const lines = [];
@@ -51,6 +86,20 @@ if (out.main) lines.push(`| 主考卷（现状） | ${out.main.n} | ${pct(out.ma
 for (const key of ['A', 'B']) {
   const r = out.cross[key];
   if (r) lines.push(`| 跨项目 · Q18=${key} | ${r.n} | ${pct(r.cover)} | ${pct(r.strict)} | **${pct(r.displayed)}** |`);
+}
+if (out.cross.paired) {
+  const q = out.cross.paired;
+  lines.push('');
+  lines.push('## 配对比较（同一批考卷，逐条看谁翻转）');
+  lines.push('');
+  lines.push('| 2×2（严格口径） | 条数 |');
+  lines.push('|---|---|');
+  lines.push(`| A、B 都对 | ${q.bothOk} |`);
+  lines.push(`| 只有 A 对（开闸把它弄丢了） | **${q.onlyA}** |`);
+  lines.push(`| 只有 B 对（开闸救回来的） | **${q.onlyB}** |`);
+  lines.push(`| 都不对 | ${q.bothFail} |`);
+  lines.push('');
+  lines.push(`精确 McNemar（双侧）p = **${q.p.toFixed(4)}**（不一致对 n=${q.onlyA + q.onlyB}；n 太小时只能抓大坑，不能证小胜）。`);
 }
 lines.push('');
 lines.push('## 读法');
