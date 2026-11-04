@@ -523,21 +523,57 @@ function publicHit(hit) {
   return out;
 }
 
-function readRecords(store, kind) {
-  const rows = store.list(kind);
-  if (!Array.isArray(rows)) return [];
-  return rows
-    .map((row) => (row && typeof row === 'object' ? row.record : null))
-    .filter((record) => record && typeof record === 'object' && typeof record.id === 'string' && record.id !== '');
+/**
+ * 条目 → 记录数组的**唯一口径**（T174 抽出来，让"从 store 读"和"从已读记录建"共用同一份过滤）：
+ *   · 接受 `store.list()` 的条目（`{id, path, record}`）或裸记录；
+ *   · 只保留 `id` 为非空字符串的对象 —— 不然后者会让 walk 多出"无 id 的候选"，改变命中结果。
+ */
+function normalizeRecords(source) {
+  if (!Array.isArray(source)) return [];
+  const out = [];
+  for (const item of source) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    // store.list() 的条目**永远**带 `record` 键（坏条目是 `record: null`）⇒ 一律取它；
+    // 裸记录没有这个键 ⇒ 直接当记录。缺了这条区分，坏条目会被当成"只有 id 的记录"混进缓存。
+    const isStoreRow = Object.prototype.hasOwnProperty.call(item, 'record');
+    const record = isStoreRow ? item.record : item;
+    if (!record || typeof record !== 'object' || Array.isArray(record)) continue;
+    if (typeof record.id === 'string' && record.id !== '') out.push(record);
+  }
+  return out;
 }
+
+function readRecords(store, kind) {
+  return normalizeRecords(store.list(kind));
+}
+
+/** walk 缓存需要的四类（顺序固定，便于契约检查与测试）。 */
+export const WALK_CACHE_KINDS = Object.freeze(['topics', 'episodes', 'links', 'claims']);
 
 /**
  * 预热缓存：一次读出 walk 需要的四类记录，后续 walk 直接吃内存（M5 延迟修复）。
  * 不改变 walk 的语义；store 变化后需重建缓存（调用方负责失效）。
+ *
+ * T174：可传 `records` **从已读记录构建**，省掉调用方刚做过的那次全量读（A1 里 claims/topics 已经读过一遍）。
+ *   · 不传 `records` ⇒ 逐字节等于改动前：四类都走 `store.list()`（store 不可用则返回 null）；
+ *   · 传 `records`   ⇒ 任一 kind 给了数组就用它（**不再读盘**），没给的 kind 仍回退到 `store.list()`；
+ *   · `records` 里的每一条都过 `normalizeRecords`，与 `store.list()` 的口径**完全一致**（丢无 id 记录）。
+ * @param {object} store  R15 createStore() 的只读 store（records 覆盖四类时可传 null）
+ * @param {{records?: {topics?:object[], episodes?:object[], links?:object[], claims?:object[]}|null}} [opts]
+ * @returns {object|null} `{episodes, topics, topicsByKey, links, claims, get(kind,id)}`
  */
-export function createWalkCache(store) {
-  if (!store || typeof store.list !== 'function') return null;
-  const topics = readRecords(store, 'topics');
+export function createWalkCache(store, { records = null } = {}) {
+  const provided = records && typeof records === 'object' && !Array.isArray(records) ? records : null;
+  const given = (kind) => (provided && Array.isArray(provided[kind]) ? provided[kind] : null);
+  const coveredAll = Boolean(provided) && WALK_CACHE_KINDS.every((kind) => Array.isArray(provided[kind]));
+  const storeOk = Boolean(store && typeof store.list === 'function');
+  if (!storeOk && !coveredAll) return null;
+  const readKind = (kind) => {
+    const fromRecords = given(kind);
+    if (fromRecords) return normalizeRecords(fromRecords);
+    return storeOk ? readRecords(store, kind) : [];
+  };
+  const topics = readKind('topics');
   const topicsByKey = new Map();
   for (const t of topics) {
     if (!t || typeof t.key !== 'string') continue;
@@ -545,9 +581,9 @@ export function createWalkCache(store) {
     if (!topicsByKey.has(k)) topicsByKey.set(k, []);
     topicsByKey.get(k).push(t);
   }
-  const episodes = readRecords(store, 'episodes');
-  const links = readRecords(store, 'links');
-  const claims = readRecords(store, 'claims');
+  const episodes = readKind('episodes');
+  const links = readKind('links');
+  const claims = readKind('claims');
   const byId = new Map();
   for (const [kind, arr] of [['episodes', episodes], ['topics', topics], ['links', links], ['claims', claims]]) {
     for (const rec of arr) {

@@ -28,7 +28,7 @@ const BUDGET_TOKENS = 500;
 const ms = (n) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} s`);
 
 export function parseArgs(argv = []) {
-  const flags = { store: null, source: null, sample: 40, mergeSample: 20, json: false, help: false };
+  const flags = { store: null, source: null, sample: 40, mergeSample: 20, mergeGroups: 20, json: false, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') flags.help = true;
@@ -37,6 +37,7 @@ export function parseArgs(argv = []) {
     else if (arg === '--source') flags.source = argv[++i] ?? null;
     else if (arg === '--sample') flags.sample = Number(argv[++i] ?? 40);
     else if (arg === '--merge-sample') flags.mergeSample = Number(argv[++i] ?? 20);
+    else if (arg === '--merge-groups') flags.mergeGroups = Number(argv[++i] ?? 20);
     else return { error: `未知参数：${arg}` };
   }
   return flags;
@@ -90,18 +91,80 @@ export function sampleClaims(claims, n) {
 }
 
 /** 在某个库上渲染一张卡（只读）。 */
-export function buildCard(store, cache, claim) {
+export function buildCard(store, cache, claim, { limit = ENTRY_LIMIT, budgetTokens = BUDGET_TOKENS } = {}) {
   const signal = signalFromText(claim.text);
-  const walkResult = walkFromSignals({ signal, store, scope: claim.scopeKey, depth: 2, limit: ENTRY_LIMIT, budgetTokens: BUDGET_TOKENS, cache });
-  const card = buildMemoryCard({ cache, signal, walkResult, store, scope: claim.scopeKey, now: Date.now(), limit: ENTRY_LIMIT, budgetTokens: BUDGET_TOKENS });
+  const walkResult = walkFromSignals({ signal, store, scope: claim.scopeKey, depth: 2, limit, budgetTokens, cache });
+  const card = buildMemoryCard({ cache, signal, walkResult, store, scope: claim.scopeKey, now: Date.now(), limit, budgetTokens });
   return { signal, walkResult, card };
+}
+
+/**
+ * T173 · 定点抽样：从**影库的合并节点**里抽组，用"该组的共享正文"作信号
+ * （walkFromSignals 只吃 signal 文本，没有 episode/seq 直击入参；组正文 = 成员的 representativeText，
+ *  所以命中的就是同一组文本），分别在源库/影库走**同一条真实链路**（walk → buildMemoryCard）。
+ *
+ * 判据：源库该组本来只有 ≤1 行 ⇒ **未触发**（成员没被同时命中），不算进分母；
+ *       触发组里"影库少 ≥1 行"的占比 ≥ 80% ⇒ 通过。
+ * @param {{source:object, shadow:object, sourceCache:object, shadowCache:object,
+ *          merges:Array, limit?:number, budgetTokens?:number}} p
+ */
+export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges = [], limit = 20, budgetTokens = 2000, measure = null } = {}) {
+  const rows = [];
+  for (const merged of merges) {
+    const text = normalizeText(merged?.text);
+    const scopeKey = typeof merged?.scopeKey === 'string' ? merged.scopeKey : '';
+    if (!text || !scopeKey) {
+      rows.push({ id: merged?.id ?? null, members: 0, sourceRows: 0, shadowRows: 0, saved: 0, triggered: false, why: 'no-text-or-scope' });
+      continue;
+    }
+    const pseudo = { text, scopeKey };
+    const run = measure ?? ((store, cache) => buildCard(store, cache, pseudo, { limit, budgetTokens }));
+    let sourceRows = 0;
+    let shadowRows = 0;
+    try {
+      sourceRows = run(source, sourceCache).card.claims.length;
+    } catch {
+      sourceRows = 0;
+    }
+    try {
+      shadowRows = run(shadow, shadowCache).card.claims.length;
+    } catch {
+      shadowRows = 0;
+    }
+    rows.push({
+      id: merged.id,
+      members: Array.isArray(merged?.merge?.members) ? merged.merge.members.length : 0,
+      sourceRows,
+      shadowRows,
+      saved: sourceRows - shadowRows,
+      // 源库这一组本来只有 ≤1 行 ⇒ 成员没被同时命中，`未触发`
+      triggered: sourceRows > 1,
+      mergedRendered: shadowRows >= 1,
+    });
+  }
+  const triggered = rows.filter((r) => r.triggered);
+  const savedPositive = triggered.filter((r) => r.saved >= 1);
+  const savedTotal = triggered.reduce((n, r) => n + Math.max(0, r.saved), 0);
+  const worse = rows.filter((r) => r.saved < 0);
+  return {
+    groups: rows.length,
+    triggered: triggered.length,
+    untriggered: rows.length - triggered.length,
+    savedTotal,
+    avgSaved: triggered.length ? savedTotal / triggered.length : 0,
+    savedPositive: savedPositive.length,
+    ratio: triggered.length ? savedPositive.length / triggered.length : null,
+    pass: triggered.length > 0 && savedPositive.length / triggered.length >= 0.8,
+    worse,
+    rows,
+  };
 }
 
 /**
  * 三项验收。
  * @param {{shadowRoot:string, sourceRoot:string, sample?:number, mergeSample?:number}} p
  */
-export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample = 20 } = {}) {
+export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample = 20, mergeGroups = 20 } = {}) {
   const started = Date.now();
   const shadow = createStore({ root: shadowRoot });
   const source = createStore({ root: sourceRoot });
@@ -213,7 +276,11 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
   }
   const crossScope = { cards: cardsBuilt, violations: crossScopeViolations, pass: crossScopeViolations === 0, details: perCardCross.slice(0, 5) };
 
-  const ok = dup.notWorse && gate4.pass && crossScope.pass;
+  // ── ④ T173 定点抽样：合流到底省了几行 ───────────────────────────────────
+  const groupPick = merges.slice(0, Math.max(1, mergeGroups));
+  const groups = sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges: groupPick });
+
+  const ok = dup.notWorse && gate4.pass && crossScope.pass && groups.pass;
   return {
     shadowRoot,
     sourceRoot,
@@ -221,6 +288,7 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
     dup,
     gate4,
     crossScope,
+    groups,
     ok,
     elapsedMs: Date.now() - started,
   };
@@ -238,8 +306,20 @@ export function formatReport(r) {
   lines.push(`| ① | 同文重复行 | 源库 ${r.dup.sourceDuplicates} → 影库 ${r.dup.shadowDuplicates}（降 ${pct(r.dup.reduction)}，${r.dup.cards} 张卡） | 影库 ≤ 源库 |`);
   lines.push(`| ② | 闸 4（合并节点 vs 成员） | ${r.gate4.errors} 个错误（查 ${r.gate4.groupsChecked} 组 / 影库 ${r.gate4.mergeRecords} 个合并节点） | 必须 0 |`);
   lines.push(`| ③ | 跨作用域 | ${r.crossScope.violations} 张卡非零（共 ${r.crossScope.cards} 张） | 必须 0 |`);
+  const g = r.groups;
+  lines.push(`| ④ | 定点抽样（合并组） | ${g.groups} 组 · 触发 ${g.triggered}（未触发 ${g.untriggered}） · 平均省 **${g.avgSaved.toFixed(2)}** 行 · 至少省 1 行 **${g.ratio === null ? 'n/a' : `${(g.ratio * 100).toFixed(1)}%`}** | ≥ 80% |`);
   lines.push('');
-  lines.push(`结论：${r.ok ? '三项通过' : '有不通过项'}（① ${r.dup.notWorse ? 'ok' : 'FAIL'} · ② ${r.gate4.pass ? 'ok' : 'FAIL'} · ③ ${r.crossScope.pass ? 'ok' : 'FAIL'}）`);
+  lines.push(`结论：${r.ok ? '四项通过' : '有不通过项'}（① ${r.dup.notWorse ? 'ok' : 'FAIL'} · ② ${r.gate4.pass ? 'ok' : 'FAIL'} · ③ ${r.crossScope.pass ? 'ok' : 'FAIL'} · ④ ${r.groups.pass ? 'ok' : 'FAIL'}）`);
+  if (g.rows.length) {
+    lines.push('');
+    lines.push('| 合并组 | 成员 | 源库行数 | 影库行数 | 省下 | 触发 |');
+    lines.push('|---|---|---|---|---|---|');
+    for (const row of g.rows) {
+      lines.push(`| ${row.id} | ${row.members} | ${row.sourceRows} | ${row.shadowRows} | ${row.saved} | ${row.triggered ? '是' : '未触发'} |`);
+    }
+  }
+  if (g.worse.length) lines.push(`
+⚠ 影库比源库多行的组：${g.worse.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}`);
   if (r.dup.examples.length) lines.push(`① 样例：${r.dup.examples.map((x) => `${x.claimId} ${x.source}→${x.shadow}`).join(' · ')}`);
   if (r.gate4.details.length) lines.push(`② 明细：${JSON.stringify(r.gate4.details)}`);
   if (r.crossScope.details.length) lines.push(`③ 明细：${JSON.stringify(r.crossScope.details)}`);
@@ -256,7 +336,7 @@ export function runCli(argv = process.argv.slice(2)) {
   const sourceRoot = flags.source ? path.resolve(flags.source) : path.resolve(home, 'memory-context');
   if (!fs.existsSync(shadowRoot)) return { code: 2, stderr: `影库不存在：${shadowRoot}` };
   if (!fs.existsSync(sourceRoot)) return { code: 2, stderr: `源库不存在：${sourceRoot}` };
-  const result = runAcceptance({ shadowRoot, sourceRoot, sample: flags.sample, mergeSample: flags.mergeSample });
+  const result = runAcceptance({ shadowRoot, sourceRoot, sample: flags.sample, mergeSample: flags.mergeSample, mergeGroups: flags.mergeGroups });
   if (flags.json) return { code: result.ok ? 0 : 1, stdout: JSON.stringify(result, null, 2) };
   return { code: result.ok ? 0 : 1, stdout: formatReport(result) };
 }
@@ -269,6 +349,7 @@ export const USAGE = `棋院 merge-acceptance（T170：合流后消费侧的只�
   --source <dir>         源库（默认 <DSH_HOME>/memory-context）；只读，用来做 ① 的对照
   --sample <n>           抽多少条 claim 造卡（默认 40）
   --merge-sample <n>     抽多少个合并节点验闸 4（默认 20）
+  --merge-groups <n>     定点抽多少个合并组量"省下的行数"（默认 20；占比 ≥ 80% 才算通过）
   --json                 机器可读
 `;
 

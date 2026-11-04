@@ -816,9 +816,10 @@ export const H1_VERSION = 1;
  * @param {object} store   R15 createStore() 的只读 store
  * @param {object|null} walkRoom  `import('../src/rooms/walk.mjs')` 的结果（可能为 null ⇒ 无缓存）
  * @param {object|Function|false|null|undefined} injected  `opts.cache`
+ * @param {{claims?:object[], topics?:object[]}|null} [records] 已经读到的记录（T174：喂给 createWalkCache 省掉重复全量读）
  * @returns {object|null}  walk 缓存（`{topics, episodes, links, claims, topicsByKey, get(kind,id)}`）或 null
  */
-export function resolveWalkCache(store, walkRoom, injected) {
+export function resolveWalkCache(store, walkRoom, injected, records = null) {
   if (injected === false || injected === null) return null;
   if (typeof injected === 'object') return injected;
   const factory = typeof injected === 'function'
@@ -826,7 +827,7 @@ export function resolveWalkCache(store, walkRoom, injected) {
     : (walkRoom && typeof walkRoom.createWalkCache === 'function' ? walkRoom.createWalkCache : null);
   if (typeof factory !== 'function') return null;
   try {
-    return factory(store) ?? null;
+    return factory(store, records ? { records } : {}) ?? null;
   } catch {
     // 缓存建不起来（store 不可读/字段异常）⇒ 退回逐次读：慢，但结果不变
     return null;
@@ -857,8 +858,6 @@ export async function runH1(opts = {}) {
   const walkRoom = await import('../src/rooms/walk.mjs').catch(() => null);
 
   const store = createStore({ root: storeRoot });
-  // T169：A1 的 176 个信号共用一份 walk 缓存（不传 = 自建；false = 退回改动前的逐次读盘，供对拍）
-  const walkCache = resolveWalkCache(store, walkRoom, opts.cache);
   const read = (kind) => {
     try {
       return store.list(kind).map((x) => x?.record).filter((r) => r && typeof r === 'object');
@@ -872,7 +871,12 @@ export async function runH1(opts = {}) {
   const validityByKey = validity.results;
 
   // 信号集：主题库按 df 降序取前 N 个（去重、长度 >= 3），机械、可复算
-  const topics = read('topics').sort((a, b) => ((b.df ?? 0) - (a.df ?? 0)) || String(a.key ?? '').localeCompare(String(b.key ?? '')));
+  const topicsAll = read('topics');
+  // T169/T174：A1 的所有信号共用一份 walk 缓存；`claims`/`topics` 上面已经读过 ⇒ 直接喂给缓存，
+  // 不再让 createWalkCache 把这两类重读一遍（episodes/links 本函数没读过，仍由缓存自己读一次）。
+  // 缓存只活在这次调用里（纯内存），不落盘、不跨进程。
+  const walkCache = resolveWalkCache(store, walkRoom, opts.cache, { claims, topics: topicsAll });
+  const topics = [...topicsAll].sort((a, b) => ((b.df ?? 0) - (a.df ?? 0)) || String(a.key ?? '').localeCompare(String(b.key ?? '')));
   const signals = [];
   const seen = new Set();
   for (const topic of topics) {
