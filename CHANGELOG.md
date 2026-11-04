@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.140.0（2026-11-04）
+
+### 工具面注册的结论：宿主没把工具服务交给本插件（先如实记录，不盲改）
+- 重启后凭据文件出现，内容是**否定**的：`{ "names": [], "via": "none", "ctxHasRegister": false }` ——
+  插件拿到的 `ctx` 既没有 `ctx.tools.register`，也没有 `ctx.inject`。
+- 原因（宿主侧线索）：DSH 的插件要拿工具服务得在**模块上**声明 `export const inject = ['tools']`；
+  我们只在 `apply()` 里运行时去摸，拿到的自然是受限上下文。
+- **为什么没直接加这行**：Cordis 的 `inject` 是**必需依赖**语义 —— 服务不存在时插件**不加载**。
+  本插件首要职责是自动注入记忆（A3 正在线上跑），加错一行等于把记忆注入停掉。这个代价不能赌。
+- 记录：`evidence/M8-tools-registration-negative.md`（含两条候选修法与各自代价）。
+
+### 不受影响：PTC 里现在就能用 SDK
+```js
+import { createMemorySdk } from '<repo>/src/sdk.mjs';
+const sdk = createMemorySdk({ scope: 'w:d:/…' });
+sdk.recentFailures({ limit: 20 });
+```
+纯进程内、只读 sidecar、零模型，已实测返回真实数据。工具面是"锦上添花"，SDK 是"现在可用"。
+
 ## 0.139.0（2026-11-04）
 
 ### 工具面注册：两条路都试，且"没注册上"也留凭据
