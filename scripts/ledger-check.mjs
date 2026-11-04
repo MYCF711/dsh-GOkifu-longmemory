@@ -14,7 +14,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { execFile, execSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseTestCounts, describeFailure } from './ledger-parse.mjs';
@@ -135,7 +135,17 @@ if (invoked) {
   const actual = { version: JSON.parse(read('package.json')).version, tests: null, claim: null, threads: null, episodes: null, a2: null, a4: null };
   if (!skipTests) {
     try {
-      const { stdout } = await execFileAsync(process.execPath, ['--test'], { cwd: REPO, maxBuffer: 64 * 1024 * 1024 });
+      // 2026-11-05（0.148.0）：**只测 HEAD 里已跟踪的测试文件**。
+      // 以前是裸 `--test`（全树扫），并行队友刚写进 test/ 的未跟踪文件、以及与 tmp/ 里的旧实现副本
+      // 都会被算进来 ⇒ 台账永远对不上（今晚连撞三次）。发布的树 = HEAD，量它就对了。
+      const tracked = (() => {
+        try {
+          return execSync('git ls-tree -r --name-only HEAD test/', { cwd: REPO, encoding: 'utf8' })
+            .split('\n').filter((f) => f.endsWith('.test.mjs'));
+        } catch { return []; }
+      })();
+      const testArgs = tracked.length ? ['--test', ...tracked] : ['--test', 'test/*.test.mjs'];
+      const { stdout } = await execFileAsync(process.execPath, testArgs, { cwd: REPO, maxBuffer: 64 * 1024 * 1024 });
       const t = /\u2139 tests (\d+)[\s\S]*?\u2139 pass (\d+)[\s\S]*?\u2139 fail (\d+)[\s\S]*?\u2139 skipped (\d+)/.exec(stdout);
       if (t) actual.tests = { total: Number(t[1]), pass: Number(t[2]), fail: Number(t[3]), skip: Number(t[4]) };
       else badParseTests = true;
