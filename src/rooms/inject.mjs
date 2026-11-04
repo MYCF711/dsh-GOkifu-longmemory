@@ -401,6 +401,43 @@ function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text
   };
 }
 
+/** 信号侧的判别词（口径与 m5 A2b 同源：小写、按非字母数字切、≥4 字符、去掉 path）。 */
+export function signalTokensOf(signal) {
+  const parts = [];
+  for (const t of Array.isArray(signal?.terms) ? signal.terms : []) parts.push(String(t));
+  for (const e of Array.isArray(signal?.entities) ? signal.entities : []) parts.push(String(e?.key ?? ''));
+  const out = [];
+  for (const part of parts) {
+    for (const tok of String(part).toLowerCase().split(/[^a-z0-9一-鿿]+/)) {
+      if (tok.length >= 4 && tok !== 'path') out.push(tok);
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * 挑「展示用的那条 support」：类级 claim 把同类多条错误收在一条上、只存一个代表原文，
+ * 所以固定取 hit.seq 那条时，卡片会把「工具箱坏了」的泛教训端上来、却不点名这次是哪条错（2026-11-04 实测 2 条）。
+ * 规则：在同域 support 里挑与本次信号判别词重叠最多的那条；只有明显更好（≥2 且优于原选）才替换，
+ * 否则保持原行为（不为了换而换，避免把卡片变成"随机挑一条"）。
+ */
+function pickSourceBySignal(support, { signalTokens = [], currentSeq = null, fallback = null } = {}) {
+  if (!Array.isArray(support) || support.length < 2 || !Array.isArray(signalTokens) || signalTokens.length === 0) return fallback;
+  const scoreOf = (sup) => {
+    const q = String(sup?.quote ?? '').toLowerCase();
+    if (!q) return -1;
+    return signalTokens.filter((t) => q.includes(t)).length;
+  };
+  let best = fallback;
+  let bestScore = fallback ? scoreOf(fallback) : -1;
+  for (const sup of support) {
+    const score = scoreOf(sup);
+    if (score > bestScore) { best = sup; bestScore = score; }
+    else if (score === bestScore && Number.isFinite(currentSeq) && Number(sup?.seq) === Number(currentSeq)) { best = sup; }
+  }
+  return bestScore >= 2 ? best : fallback;
+}
+
 function entryFromClaim(hit, claim, options = {}) {
   // 2026-11-04（M4 线上抽查发现）：u:owner 类级 claim 的 support 跨多个工作区，
   // 直接取 support[0] 会把"别项目的失败原文 + ep"渲染进本项目的卡（A5 的实质越界）。
@@ -425,6 +462,8 @@ function entryFromClaim(hit, claim, options = {}) {
   let src = null;
   if (Number.isFinite(hit?.seq)) src = support.find((s) => Number(s.seq) === Number(hit.seq)) ?? null;
   if (!src) src = support.find((s) => String(s.episode) === String(hit?.episode ?? '')) ?? support[0] ?? null;
+  // T111（0.122.0）：同域 support 里若有原文更贴近本次信号，就展示那条（否则保持原选）。
+  src = pickSourceBySignal(support, { signalTokens: options.signalTokens, currentSeq: Number.isFinite(hit?.seq) ? Number(hit.seq) : null, fallback: src });
 
   const episode = typeof src?.episode === 'string' && src.episode
     ? src.episode
@@ -505,7 +544,9 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       droppedSoftPreference += 1;
       continue;
     }
-    const entry = claim ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true }) : entryFromEpisode(hit, view);
+    const entry = claim
+      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal) })
+      : entryFromEpisode(hit, view);
     if (entry && scope) {
       const rec = view.episodesById.get(String(hit?.episode ?? ''));
       const epScope = rec && typeof rec.scopeKey === 'string' ? rec.scopeKey : null;
