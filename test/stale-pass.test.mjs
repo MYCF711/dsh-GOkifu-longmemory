@@ -124,7 +124,9 @@ test('T166: 副本目录安全校验 —— 源库内 / 等于源库 / 不像库
   assert.equal(validateWorkDir({ storeRoot, workRoot: storeRoot }).code, 'work-equals-store');
   assert.equal(validateWorkDir({ storeRoot, workRoot: path.dirname(storeRoot) }).code, 'store-inside-work');
   assert.equal(validateWorkDir({ storeRoot, workRoot: 'relative/dir' }).code, 'work-not-absolute');
-  assert.equal(validateWorkDir({ storeRoot, workRoot: 'D:\\' }).code, 'work-is-root');
+  // 2026-11-05：盘根形态随平台变 —— CI 是 ubuntu，`D:\\` 在那儿不是绝对路径（会走 work-not-absolute）。
+  const rootPath = process.platform === 'win32' ? 'D:\\' : '/';
+  assert.equal(validateWorkDir({ storeRoot, workRoot: rootPath }).code, 'work-is-root');
   assert.equal(validateWorkDir({ storeRoot, workRoot: path.resolve(os_home()) }).code, 'work-is-home');
 
   // 已存在且"不像库"的非空目录：拒绝清空
