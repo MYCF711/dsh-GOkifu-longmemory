@@ -31,7 +31,11 @@ export function listFilesToScan({ cwd = process.cwd() } = {}) {
   try {
     // 2026-11-04 修：`git ls-files` 对非 ASCII 路径会加引号转义（"docs/\350..."），
     // existsSync 于是一律失败 ⇒ 本仓大量中文名文档被静默跳过。用 -z 拿 NUL 分隔的原始路径。
-    return execSync('git ls-files -z', { cwd, encoding: 'utf8' }).split('\u0000').filter(Boolean);
+    // 2026-11-04 再修（CI 脱敏闸红的那次）：只有 `--cached` 时**未跟踪的新文件根本不在列表里**，
+    // 本地扫出来永远 0 处、一提交上去 CI 就红（`47c9be3` 的「本地因未跟踪漏检」）。
+    // 加 `--others --exclude-standard` ⇒ 已跟踪 + 未忽略的未跟踪，本地与 CI 看到同一批文件。
+    return execSync('git ls-files -z --cached --others --exclude-standard', { cwd, encoding: 'utf8' })
+      .split('\u0000').filter(Boolean);
   } catch {
     const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'dist', 'coverage', '.cache', '.next', 'out']);
     const SKIP_EXT = /\.(png|jpe?g|gif|webp|ico|pdf|zst|zstd|zip|gz|tgz|woff2?|ttf|otf|mp4|mp3|wav|exe|dll|node)$/i;
