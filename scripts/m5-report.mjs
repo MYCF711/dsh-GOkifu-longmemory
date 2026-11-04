@@ -682,11 +682,78 @@ export function measureA6({ pipeline, cards }) {
 // ---------------------------------------------------------------------------
 
 /**
+ * 只读读穿缓存（性能闸，T167）。
+ *
+ * 为什么需要：`runH1`（A1）与 `runEval`（A2）**每个信号**都重新 `store.list()`；
+ * 真库 1340 claim / 3004 topic / 6402 link / 602 episode ≈ 1.02 万个小 JSON，
+ * 而 Windows 上单次 `readFileSync` ≈ 1.1 ms（`JSON.parse` 只占 0.003 ms）——
+ * A1 的 176 个信号（36 主题 + 140 条带 validity）≈ 180 万次文件读 ⇒ 实测 46 分钟。
+ *
+ * 这里只做一件事：把**本次调用期间**从 `storeRoot` 下读到的**小文本文件**缓存住。
+ * 边界（缺一条就会悄悄改变语义，故逐条写明）：
+ *   · 只拦 `typeof p === 'string'` 且**显式给了编码**的读取 —— Buffer 读取（会话日志 zstd）原样走盘，
+ *     免得把几百 MB 日志常驻内存；
+ *   · 只拦 `storeRoot` 之下的路径 —— 别的地方（仓库文件、evidence、临时目录）读什么就是什么；
+ *   · 单文件 ≤ `maxBytes`（默认 512 KB）才缓存 —— 记忆库记录都是几 KB；
+ *   · **进程退出/调用结束立刻还原原函数**，缓存随作用域丢弃：不落盘、不跨进程、不跨调用 ⇒ 不存在"陈旧结果"。
+ *
+ * 语义正确性：记忆库在评测期间是**只读**的（`store.list` 只做 readFileSync，M5 不写库），
+ * 所以同一次运行内把同一文件的字节复用，与每次重读等价。
+ *
+ * @param {string[]} roots    允许缓存的根目录（绝对路径）
+ * @param {() => any} fn      要包住的调用
+ * @param {{maxBytes?:number}} [opts]
+ */
+export async function withStoreReadCache(roots, fn, { maxBytes = 512 * 1024 } = {}) {
+  const original = fs.readFileSync;
+  const limits = (Array.isArray(roots) ? roots : [roots])
+    .filter((r) => typeof r === 'string' && r !== '')
+    .map((r) => path.resolve(r));
+  if (limits.length === 0) return fn();
+  const cache = new Map();
+  const inside = (abs) => limits.some((root) => abs === root || abs.startsWith(root + path.sep));
+  fs.readFileSync = function readFileSyncCached(p, options) {
+    if (typeof p !== 'string') return original.call(this, p, options);
+    const encoding = typeof options === 'string'
+      ? options
+      : (options && typeof options === 'object' ? options.encoding : null);
+    if (typeof encoding !== 'string') return original.call(this, p, options);
+    let abs;
+    try {
+      abs = path.resolve(p);
+    } catch {
+      return original.call(this, p, options);
+    }
+    if (!inside(abs)) return original.call(this, p, options);
+    const key = `${abs}\u0000${encoding}`;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const value = original.call(this, p, options);
+    if (typeof value === 'string' && value.length <= maxBytes) cache.set(key, value);
+    return value;
+  };
+  try {
+    return await fn();
+  } finally {
+    fs.readFileSync = original;
+    cache.clear();
+  }
+}
+
+/**
  * 跑 M5 六轴。
  * @param {{storeRoot:string, dataRoot?:string|null, workspace?:string, repoRoot?:string,
  *          runs?:number, cards?:number, now?:number, signals?:number, liveAttempts?:number}} opts
  */
 export async function runM5(opts = {}) {
+  const storeRoot = path.resolve(opts.storeRoot ?? path.join(process.env.DSH_HOME ?? '', 'memory-context'));
+  // A1/A2 每个信号都重新 store.list()（见 withStoreReadCache 注释）⇒ 整个六轴跑在一次读穿缓存里。
+  // `readCache: false`（CLI `--no-read-cache`）留作**对照测量**：同一份库的"优化前"行为，用来跑对拍。
+  if (opts.readCache === false) return runM5Body({ ...opts, storeRoot });
+  return withStoreReadCache([storeRoot], () => runM5Body({ ...opts, storeRoot }));
+}
+
+async function runM5Body(opts) {
   const started = Date.now();
   const now = Number.isFinite(opts.now) ? opts.now : Date.now();
   const storeRoot = path.resolve(opts.storeRoot ?? path.join(process.env.DSH_HOME ?? '', 'memory-context'));
@@ -893,6 +960,7 @@ export const USAGE = `棋院 m5-report（M5 六轴报告，零模型调用）
   --cards <n>        抽样卡片张数（默认 20，A5/A6）
   --json             输出 JSON（每轴 {value, unit, n, status, caveat}）
   --evidence <path>  写 markdown 证据（唯一写入口）
+  --no-read-cache    关掉只读读穿缓存（对照测量用：复现"优化前"耗时；结果应逐位相同）
   -h, --help         本帮助
 `;
 
@@ -918,6 +986,7 @@ export function parseArgs(argv = []) {
     else if (a.startsWith('--evidence=')) flags.evidence = a.slice('--evidence='.length);
     else if (a === '--now') flags.now = Number(args.shift());
     else if (a.startsWith('--now=')) flags.now = Number(a.slice('--now='.length));
+    else if (a === '--no-read-cache') flags.readCache = false;
     else if (a.startsWith('--')) flags[a.slice(2)] = true;
     else positional.push(a);
   }
@@ -935,6 +1004,7 @@ export async function runCli(argv = []) {
       runs: flags.runs,
       cards: flags.cards,
       now: flags.now,
+      readCache: flags.readCache !== false,
     });
     let evidence = null;
     if (typeof flags.evidence === 'string' && flags.evidence !== '') {
