@@ -894,12 +894,26 @@ export function apply(ctx, rawConfig = {}) {
   try {
     const storeRoot = resolveStoreRoot(config);
     const dshHome = storeRoot ? path.dirname(storeRoot) : null;
-    const names = registerMemoryTools(ctx, {
-      createSdk: (opts) => createMemorySdk({ ...opts, dshHome: opts?.dshHome || dshHome || null }),
-      warn,
-    });
-    // 2026-11-04：留一条「到底注册上没有」的凭据 —— 工具在插件加载时注册，从会话里看不出来。
-    if (storeRoot && names.length) recordToolRegistration(storeRoot, names, { host: 'dsh' });
+    const createSdk = (opts) => createMemorySdk({ ...opts, dshHome: opts?.dshHome || dshHome || null });
+    const ctxHasRegister = typeof ctx?.tools?.register === 'function';
+    let names = registerMemoryTools(ctx, { createSdk, warn });
+    let via = names.length ? 'direct' : 'none';
+    // 2026-11-04（重启后实测：凭据文件没出现 ⇒ 直接访问 ctx.tools 没拿到）：宿主可能要求先声明服务依赖。
+    // 与 webServer 同一条路子：ctx.inject(['tools'], host => …)。两条都试，结果如实写进凭据。
+    if (!names.length && typeof ctx?.inject === 'function') {
+      try {
+        ctx.inject(['tools'], (host) => {
+          const got = registerMemoryTools(host, { createSdk, warn });
+          if (storeRoot) recordToolRegistration(storeRoot, got, { host: 'dsh', via: 'inject', ctxHasRegister });
+        });
+        via = 'inject';
+      } catch (error) {
+        warn(ctx, `ctx.inject(['tools']) 失败：${String(error?.message ?? error)}`);
+        via = 'inject-failed';
+      }
+    }
+    // 凭据**无论成没成都写**：文件里没有工具名本身就是"没注册上"的证据（否则只能靠猜）。
+    if (storeRoot) recordToolRegistration(storeRoot, names, { host: 'dsh', via, ctxHasRegister });
   } catch (error) {
     warn(ctx, `工具面注册整体失败（不影响注入）：${String(error?.message ?? error)}`);
   }

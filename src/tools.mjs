@@ -119,11 +119,12 @@ export function registerMemoryTools(ctx, { createSdk = createMemorySdk, warn = (
  * 2026-11-04 重启后我们只能猜。有了这条凭据，重启一次就能确定：宿主是否把 `ctx.tools` 交给了插件、
  * 五个工具是否都进去了。写盘用 tmp + rename（崩了也不会留半截 JSON），失败只返回 false（不影响注入）。
  */
-export function recordToolRegistration(dir, names, { at = Date.now(), host = null } = {}) {
+export function recordToolRegistration(dir, names, { at = Date.now(), host = null, via = null, ctxHasRegister = null } = {}) {
   try {
     if (typeof dir !== 'string' || dir === '') return false;
     const target = `${dir}/tools-registered.json`;
-    const payload = JSON.stringify({ at, names: Array.isArray(names) ? names : [], count: Array.isArray(names) ? names.length : 0, host }, null, 2);
+    const list = Array.isArray(names) ? names : [];
+    const payload = JSON.stringify({ at, names: list, count: list.length, host, via, ctxHasRegister }, null, 2);
     const tmp = `${target}.tmp`;
     fs.writeFileSync(tmp, payload);
     fs.renameSync(tmp, target);

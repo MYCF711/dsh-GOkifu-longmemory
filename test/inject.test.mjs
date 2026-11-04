@@ -24,6 +24,7 @@ import {
   PROVENANCE_LINE_RE,
   TIGHT_CLIP,
   assertSafeShadowDir,
+  auditImperatives,
   buildMemoryCard,
   clipLine,
   defaultShadowDir,
@@ -971,4 +972,28 @@ test('R12: seq 0 的条目不许进卡（无源不入），但其它条目照常
     assert.ok(!lines.some((l) => l.includes('seq 0')), `seq 0 的行不许出现：${lines.join(' | ')}`);
     assert.ok(!lines.some((l) => l.includes('fail=')), '局级指针行（fail=…）不再冒充带出处的行');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------------------------------
+// 边界闸的误伤（0.138.0）：`请求` 不是祈使句、`我记得` 不是指令
+// 线上实测：全库 1192 条 claim 里 29 条被判"含指令"（其中 `请` 51 次命中大半是 `请求`），
+// 加最小排除集后降到 13 条 —— 而这些被误判的 claim，原本会让**整张卡**被边界闸拦下。
+// ---------------------------------------------------------------------------
+
+test('R13: 祈使句判定的误伤排除（请求/申请/我记得 不算指令）', () => {
+  const cases = [
+    ['你应该先备份', true],
+    ['请先跑测试', true],
+    ['下一步要做什么', true],
+    ['建议先看日志', true],
+    ['务必先备份', true],
+    ['申请权限', false],
+    ['这个请求超时了', false],
+    ['我记得是这样', false],
+    ['邀请你参加', false],
+  ];
+  for (const [text, want] of cases) {
+    const got = auditImperatives(text).length > 0;
+    assert.equal(got, want, `${text} ⇒ ${want ? '应判指令' : '不该判指令'}`);
+  }
 });
