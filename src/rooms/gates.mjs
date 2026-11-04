@@ -841,11 +841,17 @@ export function runGates({
   }
   for (const group of byBody.values()) {
     if (group.length < 2) continue;
-    const ids = new Set(group.map((g) => g.record.id));
-    const linked = group.some((g) => g.record.supersedes && ids.has(g.record.supersedes))
-      || group.some((g) => g.record.supersededBy && ids.has(g.record.supersededBy));
+    // 兜底去重（T155）：按 record.id 先去重。**同一个 id 在一张卡里出现两次不是"重复条目"** ——
+    // 那是同一条断言的两个出处（R12 侧 T154 已按 claimId 去重，这里再兜一层）；
+    // 去重后不足 2 个不同 id ⇒ 不构成"未标 supersedes 的重复"。
+    const ids = [...new Set(group.map((g) => g.record.id))];
+    if (ids.length < 2) continue;
+    const idSet = new Set(ids);
+    const linked = group.some((g) => g.record.supersedes && idSet.has(g.record.supersedes))
+      || group.some((g) => g.record.supersededBy && idSet.has(g.record.supersededBy));
     if (!linked) {
-      push('4', 'gate4/unsuperseded-duplicate', { ids: group.map((g) => g.record.id), indexes: group.map((g) => g.index) });
+      // detail.ids 给**去重后的唯一 id 列表**（排查时不该看到同一个 id 重复两遍）
+      push('4', 'gate4/unsuperseded-duplicate', { ids, indexes: group.map((g) => g.index) });
     }
   }
   unverified('4', 'gate4/record-unresolved', immutabilityUnresolved, '条目记录不可解析（未给 records/store）');

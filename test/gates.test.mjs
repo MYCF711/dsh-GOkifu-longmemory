@@ -928,3 +928,60 @@ test('R13 闸3: 真探针端到端 —— 文件在 ⇒ 过；文件不在 ⇒ �
   assert.equal(badRes.ok, false);
   assert.ok(hasCode(badRes, 'gate3/stale-not-marked'));
 });
+
+// ---------------------------------------------------------------- 闸 4 去重（T155）
+
+test('R13 闸4 T155: 同一 id 渲染两次 ⇒ 不判"未标 supersedes 的重复"', () => {
+  const record = rec({ text: '同一条断言（同一 id 两个出处）', state: 'observed' });
+  const { card, records } = cardFrom({ record });
+
+  // 修复前的 R12 产物：同一行出现两次（同一个 claimId、同一段文字）
+  const dup = clone(card);
+  dup.claims.push(clone(dup.claims[0]));
+  dup.section = dup.section.replace('</memory-ledger>', `${dup.claims[0].line}\n</memory-ledger>`);
+  retoken(dup);
+
+  const res = runWith({ card: dup, records });
+  assert.equal(res.ok, true, `同一 id 不该判重复：${JSON.stringify(res.errors)}`);
+  assert.equal(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'), false);
+});
+
+test('R13 闸4 T155: 两个**不同** id 同文且无 supersedes ⇒ 仍然 gate4/unsuperseded-duplicate（且 detail.ids 去重）', () => {
+  const a = rec({ id: 'c-aaaa0001', text: '同一段文字，两条不同 claim', state: 'observed' });
+  const b = rec({ id: 'c-aaaa0002', text: '同一段文字，两条不同 claim', state: 'observed' });
+  const { card, records } = cardFrom({ record: a });
+  records.claims[b.id] = b;
+
+  const two = clone(card);
+  const rowB = { ...clone(two.claims[0]), claimId: b.id };
+  two.claims.push(rowB);
+  two.section = two.section.replace('</memory-ledger>', `${rowB.line}\n</memory-ledger>`);
+  retoken(two);
+
+  const res = runWith({ card: two, records });
+  assert.equal(res.ok, false, '不同 id 同文仍必须报重复');
+  const err = res.errors.find((e) => e.code === 'gate4/unsuperseded-duplicate');
+  assert.ok(err, '应当报 gate4/unsuperseded-duplicate');
+  assert.deepEqual([...err.detail.ids].sort(), ['c-aaaa0001', 'c-aaaa0002']);
+  assert.equal(new Set(err.detail.ids).size, err.detail.ids.length, 'detail.ids 必须是去重后的唯一 id 列表');
+});
+
+test('R13 闸4 T155: [A, A, B] 同文 ⇒ 报重复，detail.ids 只有 A、B 两个', () => {
+  const a = rec({ id: 'c-bbbb0001', text: '同文三行', state: 'observed' });
+  const b = rec({ id: 'c-bbbb0002', text: '同文三行', state: 'observed' });
+  const { card, records } = cardFrom({ record: a });
+  records.claims[b.id] = b;
+
+  const three = clone(card);
+  three.claims.push(clone(three.claims[0])); // A 出现两次
+  three.claims.push({ ...clone(three.claims[0]), claimId: b.id }); // 再加一条 B
+  three.section = three.section.replace('</memory-ledger>', `${three.claims[0].line}\n${three.claims[0].line}\n${three.claims[0].line}\n</memory-ledger>`);
+  retoken(three);
+
+  const res = runWith({ card: three, records });
+  assert.equal(res.ok, false);
+  const err = res.errors.find((e) => e.code === 'gate4/unsuperseded-duplicate');
+  assert.ok(err);
+  assert.deepEqual([...err.detail.ids].sort(), ['c-bbbb0001', 'c-bbbb0002']);
+  assert.equal(err.detail.ids.length, 2, '同一 id 出现两次只该计一次');
+});
