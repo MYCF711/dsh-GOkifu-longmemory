@@ -151,7 +151,7 @@ function makeDeps(over = {}) {
     writeFile: () => {},
     mkdtemp: () => 'C:\\tmp\\kifuin-rel-test',
     fileExists: () => true,
-    collectCounts: () => counts(613, 609, 0, 4),
+    collectCounts: () => counts(610, 606, 0, 4),  // 2026-11-05：默认走**变少**（610 < 612）—— 变多现在放行，不再触发自愈
     ...over,
   };
   return { deps, files, state };
@@ -162,11 +162,11 @@ test('T168 ①: 数字不一致 ⇒ 只改那一行 + 一个 commit（走完整�
   const result = await performRelease({ deps, now: NOW });
   assert.equal(result.code, 0, result.reason);
   assert.equal(state.commits.length, 1, '必须恰好一个 commit');
-  assert.equal(state.commits[0], 'R00 ledger: 自动同步测试数 613/609/0/4');
+  assert.equal(state.commits[0], 'R00 ledger: 自动同步测试数 610/606/0/4');
   assert.deepEqual(state.writes, ['MAINTENANCE.md'], '只写 MAINTENANCE.md');
   const after = files['MAINTENANCE.md'].split('\n');
   const idx = after.findIndex((l) => LEDGER_TEST_LINE_RE.test(l));
-  assert.equal(after[idx], '| 测试 | **613 条**（609 pass / 0 fail / 4 skip）[本] 2026-11-05 05:20 |');
+  assert.equal(after[idx], '| 测试 | **610 条**（606 pass / 0 fail / 4 skip）[本] 2026-11-05 05:20 |');
   // golden：其它行逐字节不变
   const golden = LEDGER_TEXT.split('\n').map((l, i) => (i === idx ? '<T>' : l)).join('\n');
   assert.equal(after.map((l, i) => (i === idx ? '<T>' : l)).join('\n'), golden);
@@ -361,4 +361,13 @@ test('T168: syncLedgerTests 的 dryRun 分支不写盘', async () => {
   assert.equal(out.commit, null);
   assert.equal(state.commits.length, 0);
   assert.deepEqual(state.writes, []);
+});
+
+
+test('T172 配套: 实测 > 台账 ⇒ 放行、不提交、不改台账（新加测试是正常进展）', async () => {
+  const { deps, state } = makeDeps({ collectCounts: () => counts(700, 696, 0, 4) });
+  const result = await performRelease({ deps, now: NOW });
+  assert.equal(result.code, 0, `不该失败：${result.reason}`);
+  assert.equal(state.commits.length, 0, '变大时不许产生提交');
+  assert.equal(state.writes.length, 0, '变大时不许改台账');
 });
