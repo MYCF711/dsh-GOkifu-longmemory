@@ -191,3 +191,25 @@ test('pickCurrentPid: 空/垃圾输入 ⇒ null（不编一个 pid 出来）', (
   assert.equal(pickCurrentPid([{ at: 'x' }, {}, null]), null);
   assert.equal(pickCurrentPid(null), null);
 });
+
+// ---------------------------------------------------------------------------
+// joined 档（0.132.0）：同一事件里多段字符串被抽取拼成一行 ⇒ 记 joined，不冒充 at-seq，也不算 missing
+// ---------------------------------------------------------------------------
+
+test('classifyTextByEvents: 严格版没命中、空格拼接版命中 ⇒ joined', () => {
+  const events = eventsToBlobs([
+    { seq: 10, data: { text: ['go build github.com/x: copying', 'C:/tmp/a.out: permission denied'] } },
+  ]);
+  const r = classifyTextByEvents({ text: 'go build github.com/x: copying C:/tmp/a.out', seq: 10, events, window: 3 });
+  assert.equal(r.verdict, 'joined', '跨段拼成一行 ⇒ joined（同一局里的片段，但不是逐字子串）');
+});
+
+test('classifyTextByEvents: 单段逐字命中仍是 at-seq（joined 不许抢功）', () => {
+  const events = eventsToBlobs([{ seq: 10, data: { text: 'Cannot find module yaml' } }]);
+  assert.equal(classifyTextByEvents({ text: 'Cannot find module yaml', seq: 10, events, window: 3 }).verdict, 'at-seq');
+});
+
+test('classifyTextByEvents: 哪都不存在 ⇒ missing（不做无根据的宽容）', () => {
+  const events = eventsToBlobs([{ seq: 10, data: { text: 'Cannot find module yaml' } }]);
+  assert.equal(classifyTextByEvents({ text: '完全不相干的一句话', seq: 10, events, window: 3 }).verdict, 'missing');
+});

@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.132.0（2026-11-04）
+
+### 心跳补上「被哪几道闸拦的」——线上两次 `gates-failed` 之前查不出原因
+- 线上真事故：`live-stats.jsonl` 里有 2 次 `reason=gates-failed`，但 `gateIds` 都是 `null`。
+  根因：代码只读 `gates.failed`，而 `runGates()` 返回的是 `{ok, errors, checks}` —— **根本没有 `failed` 字段**。
+- 修（`src/plugin.mjs`）：抽出 `gateIdsFromGates()` / `gateCodesFromGates()`（纯函数、可单测），
+  **两条来源都认**（`failed` 优先，缺了就从 `errors` 推出闸 id），并把错误码一起写进心跳（如 `claim/validity`）。
+  心跳里仍然只有闸 id / 错误码，**不写卡内容**。
+- 单测 3 条钉住：只给 `errors` 时也要说出闸 id（正是线上 null 的根因）、`failed` 优先、错误码去重截断。
+
+### A6 文字级：把「同一事件里多段被拼成一行」单列成 `joined`
+- 巡检发现当前宿主有 1 条 `missing`。查清后是**抽取把多段拼成一句**（抬头 `ok <pkg>: go build …` + 原文），
+  逐字子串当然不存在 —— 判 `missing` 是对的，但它和"真错位/编造"应该分开看。
+- `audit-card-samples` 新增 `joined` 档：严格版没命中时再看"段间以空格连接"的版本，命中记 `joined`，
+  **不冒充 at-seq、也不算 missing**，汇总里单独报数。当前宿主这条连 joined 都命中不了（拼接引入了事件里没有的字符），
+  说明是真·组装 —— 记进 `evidence/M7-A6-assembled-line.md`，修法（T123）另记，不擅自改抽取口径。
+
+### 验证
+487 条测试（483 pass / 0 fail / 4 skip）；`check PASS`；
+当前宿主读数：34 张样本 / 65 引用 · at-seq 63 · elsewhere 1 · missing 1（已解释）· 日期 65/65 · 跨作用域 0。
+
 ## 0.131.0（2026-11-04）
 
 ### 巡检的第一句不再要人解释：`audit-card-samples --current` 自动切「当前宿主」

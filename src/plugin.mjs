@@ -386,6 +386,26 @@ function probeCardValidity({ card, store, deps, fallbackWorkspace = null, now = 
  * @returns {{decision:object, action:string, reason:string|null, card?:object, gates?:object, digest?:string}}
  *   action: `inject` | `shadow` | `skip`
  */
+/**
+ * 从 `runGates()` 的返回里取「被哪几道闸拦下」。
+ * 2026-11-04（0.132.0）：之前只读 `gates.failed`，但 `runGates()` 返回的是 `{ok, errors, checks}` —— 没有 `failed`，
+ * 于是线上两次 `gates-failed` 的心跳都是 `gateIds: null`，事后查不出原因。现在**两条来源都认**，并补错误码。
+ * 只读闸 id / 错误码，不碰卡内容（心跳里不许写记忆）。
+ */
+export function gateIdsFromGates(gates) {
+  if (Array.isArray(gates?.failed)) {
+    const ids = gates.failed.map((g) => (typeof g === 'string' ? g : g?.id)).filter(Boolean);
+    if (ids.length) return [...new Set(ids)];
+  }
+  const fromErrors = (Array.isArray(gates?.errors) ? gates.errors : []).map((e) => String(e?.gate ?? '')).filter(Boolean);
+  return [...new Set(fromErrors)];
+}
+
+export function gateCodesFromGates(gates, limit = 5) {
+  const codes = (Array.isArray(gates?.errors) ? gates.errors : []).map((e) => String(e?.code ?? '')).filter(Boolean);
+  return [...new Set(codes)].slice(0, limit);
+}
+
 async function decidePreStep({ ctx, config, deps, payload, decision }) {
   const session = payload?.agent?.session ?? payload?.session ?? null;
   const text = lastUserText(payload?.messages);
@@ -474,9 +494,12 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   if (!config.enabled) return { decision, action: 'skip', reason: 'disabled', card, gates, digest };
   if (!gates?.ok) {
     warn(ctx, `闸门未通过（本轮不注入）：${(gates?.errors ?? []).map((e) => e.code).slice(0, 5).join(', ')}`);
-    // 2026-11-04：记下是哪几道闸拦的（只写闸 id，不写卡内容，避免把记忆写进心跳）。
-    const failedIds = Array.isArray(gates?.failed) ? gates.failed.map((g) => (typeof g === 'string' ? g : g?.id)).filter(Boolean) : [];
-    return { decision, action: 'skip', reason: 'gates-failed', card, gates, digest, gateIds: failedIds };
+    // 2026-11-04：记下是哪几道闸拦的（只写闸 id 与错误码，不写卡内容，避免把记忆写进心跳）。
+    // 修（0.132.0）：之前只读 `gates.failed`，但 `runGates()` 返回的是 `{ok, errors, checks}` —— 没有 `failed` 字段，
+    // 于是线上两次 `gates-failed` 的心跳都是 `gateIds: null`，事后根本查不出被哪道闸拦的（"红了但不知道是谁"的同类问题）。
+    const failedIds = gateIdsFromGates(gates);
+    const gateCodes = gateCodesFromGates(gates);
+    return { decision, action: 'skip', reason: 'gates-failed', card, gates, digest, gateIds: failedIds, gateCodes };
   }
   if (!card?.section || !text2) return { decision, action: 'skip', reason: 'no-hit', card, gates, digest };
 
@@ -974,6 +997,8 @@ export function apply(ctx, rawConfig = {}) {
           scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
           action: result.action ?? 'skip',
           gateIds: Array.isArray(result.gateIds) && result.gateIds.length ? result.gateIds : null,
+          // 只有被闸拦下时才有意义：写错误码（如 card/imperative、claim/validity），仍不含卡内容。
+          gateCodes: Array.isArray(result.gateCodes) && result.gateCodes.length ? result.gateCodes : null,
           reason: result.reason ?? null,
           digest: result.digest ?? null,
           tokens: result.card?.tokens ?? null,

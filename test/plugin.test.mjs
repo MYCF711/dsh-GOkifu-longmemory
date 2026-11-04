@@ -794,3 +794,29 @@ test('M4: 注入抽样只写 sidecar，且 8MB 上限后停止', async () => {
   assert.equal(existsSync(path.join(missing, 'card-samples.jsonl')), false);
   rmSync(dir, { recursive: true, force: true });
 });
+
+
+// ---------------------------------------------------------------------------
+// gates-failed 的诊断（0.132.0）：心跳必须能说出"被哪几道闸拦的"
+// 线上真事故：两次 gates-failed 的心跳都是 gateIds: null —— 因为只读了不存在的 gates.failed。
+// ---------------------------------------------------------------------------
+
+test('R13: gateIdsFromGates 只认 errors 时也能说出闸 id（线上 null 的根因）', async () => {
+  const { gateIdsFromGates } = await import('../src/plugin.mjs');
+  const ids = gateIdsFromGates({ ok: false, errors: [{ gate: '3', code: 'claim/validity' }, { gate: '2', code: 'claim/scope' }, { gate: '3', code: 'claim/validity' }] });
+  assert.deepEqual(ids, ['3', '2'], '去重保序；不许因为缺 gates.failed 就返回空');
+});
+
+test('R13: gateIdsFromGates 优先用 gates.failed，没有就从 errors 兜底', async () => {
+  const { gateIdsFromGates } = await import('../src/plugin.mjs');
+  assert.deepEqual(gateIdsFromGates({ failed: [{ id: '5' }, '6'], errors: [{ gate: '9' }] }), ['5', '6']);
+  assert.deepEqual(gateIdsFromGates({}), []);
+  assert.deepEqual(gateIdsFromGates(null), []);
+});
+
+test('R13: gateCodesFromGates 去重、截断、只给码不给卡内容', async () => {
+  const { gateCodesFromGates } = await import('../src/plugin.mjs');
+  assert.deepEqual(gateCodesFromGates({ errors: [{ code: 'a' }, { code: 'a' }, { code: 'b' }] }), ['a', 'b']);
+  assert.deepEqual(gateCodesFromGates({ errors: Array.from({ length: 9 }, (_, i) => ({ code: `c${i}` })) }), ['c0', 'c1', 'c2', 'c3', 'c4']);
+  assert.deepEqual(gateCodesFromGates({}), []);
+});
