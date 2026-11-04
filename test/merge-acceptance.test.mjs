@@ -11,7 +11,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { sampleMergeGroups, parseArgs, normalizeText, countDuplicateRows } from '../scripts/merge-acceptance.mjs';
+import { sampleMergeGroups, parseArgs, normalizeText, countDuplicateRows, wilsonInterval, selectMergeGroups } from '../scripts/merge-acceptance.mjs';
 
 /** 造一个合并组：成员 id 为 `<id>-m0..m{n-1}`。 */
 const group = (id, members = 2, text = `合并组 ${id} 的共享正文`) => ({
@@ -146,7 +146,7 @@ test('T173: 没有合并组 / 组缺正文 ⇒ 不误判通过（fail-closed）'
 
 test('T173: --merge-groups 参数与既有参数解析', () => {
   assert.equal(parseArgs(['--store', 'a', '--merge-groups', '7']).mergeGroups, 7);
-  assert.equal(parseArgs([]).mergeGroups, 20, '默认 20 组');
+  assert.equal(parseArgs([]).mergeGroups, null, 'T185：默认全量（null），不再默认 20 组');
   assert.equal(parseArgs([]).sample, 40);
   assert.equal(parseArgs(['--merge-sample', '3']).mergeSample, 3);
 });
@@ -161,4 +161,58 @@ test('T173: 归一化与重复行计数（合流收益的两个原子）', () =>
   ]);
   assert.equal(dup.duplicates, 1, 'c1/c2 同文 ⇒ 多出来 1 行');
   assert.equal(dup.groups, 1);
+});
+
+// ── T185：统计功效（Wilson 区间 + 样本量门槛）────────────────────────────────
+test('T185 ①: Wilson 对 3/3 给出下界 < 1（不许报 100%）', () => {
+  const w = wilsonInterval(3, 3);
+  assert.equal(w.phat, 1);
+  assert.ok(w.lower < 1, `下界必须 <1，实际 ${w.lower}`);
+  assert.ok(Math.abs(w.lower - 3 / (3 + 1.96 * 1.96)) < 1e-9, 'p̂=1 时下界 = n/(n+z²)');
+  assert.ok(Math.abs(w.lower - 0.4385) < 0.001, `3/3 的下界 ≈ 43.85%，实际 ${(w.lower * 100).toFixed(2)}%`);
+  assert.equal(w.upper, 1);
+  // n=10 全中 ⇒ 下界 ≈ 72.3%（已过 0.5）
+  const ten = wilsonInterval(10, 10);
+  assert.ok(ten.lower > 0.5 && ten.lower < 1, `10/10 下界应 >0.5，实际 ${ten.lower}`);
+  assert.ok(Math.abs(ten.lower - 10 / (10 + 1.96 * 1.96)) < 1e-9);
+  // 边界：0 样本 ⇒ null（不编 0）
+  const none = wilsonInterval(0, 0);
+  assert.equal(none.lower, null);
+  assert.equal(none.ratio, undefined);
+});
+
+test('T185 ②: 全组遍历 —— 组数与影库合并节点一致（默认不抽样）', () => {
+  const merges = mergesOf(39, 2);
+  assert.equal(selectMergeGroups(merges, null).length, 39, '默认全量');
+  assert.equal(selectMergeGroups(merges, undefined).length, 39);
+  assert.equal(selectMergeGroups(merges, 0).length, 39, '0 = 全量（不是 0 组）');
+  assert.equal(selectMergeGroups(merges, 5).length, 5, '显式给了才抽样');
+  assert.equal(parseArgs([]).mergeGroups, null, 'CLI 默认全量');
+  // 全量喂给 sampleMergeGroups ⇒ groups 等于合并组数
+  const measure = measureFrom(merges.map(() => ({ src: 2, shadow: 1, members: 2 })));
+  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges: selectMergeGroups(merges, null), measure });
+  assert.equal(res.groups, 39, '总组数 = 影库合并节点数');
+  assert.equal(res.c.total, 39);
+});
+
+test('T185 ③: 可折组 <10 ⇒ 结论写"证据不足"（哪怕全中）', () => {
+  const merges = mergesOf(3);
+  const measure = measureFrom([{ src: 3, shadow: 2, members: 2 }, { src: 4, shadow: 2, members: 2 }, { src: 2, shadow: 1, members: 2 }]);
+  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure });
+  assert.equal(res.c.foldable, 3);
+  assert.equal(res.c.ratio, 1, '3/3 全中');
+  assert.ok(res.c.wilson.lower < 1, '下界不是 100%');
+  assert.equal(res.c.evidence.verdict, '证据不足');
+  assert.match(res.c.evidence.reason, /可折组 3 < 10/);
+  assert.equal(res.c.evidence.minFoldable, 10);
+  assert.equal(res.c.evidence.threshold, 0.5);
+  assert.equal(res.pass, true, '④c 仍不参与退出码');
+
+  // 可折 ≥10 且全中 ⇒ 有证据
+  const many = mergesOf(10);
+  const measureMany = measureFrom(Array.from({ length: 10 }, () => ({ src: 3, shadow: 2, members: 2 })));
+  const resMany = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges: many, measure: measureMany });
+  assert.equal(resMany.c.foldable, 10);
+  assert.equal(resMany.c.evidence.verdict, '有证据');
+  assert.ok(resMany.c.wilson.lower > 0.5);
 });
