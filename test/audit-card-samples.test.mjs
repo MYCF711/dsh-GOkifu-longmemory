@@ -11,6 +11,7 @@ import {
   eventsToBlobs,
   normalizeCardText,
   parseCardLines,
+  pickCurrentPid,
 } from '../scripts/audit-card-samples.mjs';
 
 const DAY = (y, m, d, h = 0) => Date.UTC(y, m - 1, d, h);
@@ -157,4 +158,36 @@ test('auditRows --no-text: 退回弱判据（文字层 skipped，退出码只看
   assert.equal(out.details[0].verdicts.every((v) => v.verdict === 'skipped'), true);
   assert.equal(out.exitCode, 0);            // 旧口径：5/5 可回溯 ⇒ 绿（这正是本次升级要堵的假绿）
   assert.equal(out.crossScopeRefs, 1);      // 弱判据下跨作用域照样计得出来
+});
+
+
+// ---------------------------------------------------------------------------
+// --current（2026-11-04）：从心跳里自动挑"当前宿主"，把旧进程的账切出去
+// ---------------------------------------------------------------------------
+
+const T0 = Date.UTC(2026, 10, 4, 6, 0, 0);
+
+test('pickCurrentPid: 取最后一条心跳所在的 pid，并给出该进程的心跳条数', () => {
+  const rows = [
+    { at: T0, pid: 111 },
+    { at: T0 + 1000, pid: 111 },
+    { at: T0 + 5000, pid: 222 },
+    { at: T0 + 2000, pid: 111 },
+  ];
+  const cur = pickCurrentPid(rows, { nowMs: T0 + 60_000 });
+  assert.equal(cur.pid, 222);
+  assert.equal(cur.count, 1);
+  assert.equal(cur.stale, false);
+  assert.equal(cur.ageMs, 55_000);
+});
+
+test('pickCurrentPid: 超过 30 分钟没心跳 ⇒ 标 stale（宿主可能没在跑）', () => {
+  const cur = pickCurrentPid([{ at: T0, pid: 7 }], { nowMs: T0 + 31 * 60 * 1000 });
+  assert.equal(cur.stale, true);
+});
+
+test('pickCurrentPid: 空/垃圾输入 ⇒ null（不编一个 pid 出来）', () => {
+  assert.equal(pickCurrentPid([]), null);
+  assert.equal(pickCurrentPid([{ at: 'x' }, {}, null]), null);
+  assert.equal(pickCurrentPid(null), null);
 });
