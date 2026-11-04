@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 // 棋院 · 工具面（PTC / run_code）：把 SDK 的能力注册成**工具**，让代码块里能直接调用、循环、聚合。
 //
 // 为什么需要这一层（主人的原话）："要做成 SDK 化 PTC 运行时，不依赖会话的本身模式" ——
@@ -109,4 +110,25 @@ export function registerMemoryTools(ctx, { createSdk = createMemorySdk, warn = (
     warn(ctx, `工具面不可用（不影响注入）：${String(error?.message ?? error)}`);
   }
   return registered;
+}
+
+/**
+ * 记一条「本次插件加载把哪些工具注册到宿主」的凭据（`<storeRoot>/tools-registered.json`）。
+ *
+ * 为什么要这个文件：工具是在**插件加载时**注册的，而"注册到底成没成"从会话里看不出来 ——
+ * 2026-11-04 重启后我们只能猜。有了这条凭据，重启一次就能确定：宿主是否把 `ctx.tools` 交给了插件、
+ * 五个工具是否都进去了。写盘用 tmp + rename（崩了也不会留半截 JSON），失败只返回 false（不影响注入）。
+ */
+export function recordToolRegistration(dir, names, { at = Date.now(), host = null } = {}) {
+  try {
+    if (typeof dir !== 'string' || dir === '') return false;
+    const target = `${dir}/tools-registered.json`;
+    const payload = JSON.stringify({ at, names: Array.isArray(names) ? names : [], count: Array.isArray(names) ? names.length : 0, host }, null, 2);
+    const tmp = `${target}.tmp`;
+    fs.writeFileSync(tmp, payload);
+    fs.renameSync(tmp, target);
+    return true;
+  } catch {
+    return false;
+  }
 }
