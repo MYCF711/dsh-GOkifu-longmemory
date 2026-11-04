@@ -17,6 +17,32 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.135.0（2026-11-04）
+
+### 知识库到 38 篇：调研 37 · AWS AgentCore Memory（"遗忘"的工程形态）
+- [外] 原文已核：默认 **"long-term memory records do not expire"**；可选 `recordExpirySpecification`
+  （`recordExpiryDurationDays` **最短 31 天**，或 `action: REMOVE`）；
+  **"Changing or removing a TTL affects only records that are created after the change. Previously stored records
+  keep their original expiration, and expired records cannot be recovered."**
+- [外] 删除是**后台近似**：到期后 "can typically take a few days…removes expired records as a background process…
+  During that window, an expired record can still be returned by read operations"；要立刻消失得显式删。
+- [外] 因为"设个很短的 TTL"等于删除能力，配 TTL 需要**独立权限**（`UpdateMemoryRecordExpirySpecification`）。
+- 对照本仓：他们只做 **TTL + 后台巩固**（**没有**重要性打分衰减），而且承认"到期 ≠ 读不到" ——
+  这反证我们把**可见性判在读侧**（注入前遮蔽）是对的。可借：TTL 契约里"不追溯"的措辞、
+  可见性在读侧判的硬约束、改可见性=独立权限的治理范例。不借：自动删除、模型抽取/合并、语义检索、打分衰减。
+
+### A2b 严格口径复核（0.134.0 的 `seq<1` 改动之后）
+- `metrics-guard PASS`：**A2b 严格 0.8947（17/19，n=19）、覆盖 19/19** —— 与改动前**逐位相同**，
+  说明"丢弃 seq<1 的局级指针"没有动到任何一条被计分的注入；
+- 同批：A1=0 · A5=0 · A6=1 · p50 19.60ms（负载抖动，仍远低于门槛）。
+
+### 线上 A6 续记（同日 19:30）
+样本 30 张 / 66 条引用：at-seq 64、elsewhere 0、missing 2（即 seq-0 指针，已修待重启生效）、日期 66/66、跨作用域 0。
+证据：`evidence/M8-A6-live-2026-11-04.md` 的「续记 2」。
+
+### 验证
+494 条测试（490 pass / 0 fail / 4 skip）；`check PASS`（调研清单 **38 篇**）；不发 npm。
+
 ## 0.134.0（2026-11-04）
 
 ### 无源不入：`seq: 0` 的条目不再进卡（线上 A6 那 2 条 missing 的根因）
