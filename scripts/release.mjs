@@ -51,6 +51,15 @@ try {
   process.exit(1);
 }
 
+// tag 审计（2026-11-04 教训，0.118.0）：`v0.116.0` 曾指到 PR 前的分支提交 —— 那个提交的内容已是 0.117.0。
+// tag 名 / 内容版本 / Release 标题三者互不对应，而 check / ledger-check / CI 全都只看工作树，看不见 tag。
+try {
+  out('node scripts/tag-audit.mjs --quiet');
+} catch {
+  console.error('release: tag 审计未通过（有 tag 与内容版本错位）。先跑 node scripts/tag-audit.mjs 看明细，修好再发版。');
+  process.exit(1);
+}
+
 // 从 CHANGELOG 抽出当前版本段落作为 release notes
 const lines = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8').split('\n');
 const start = lines.findIndex((l) => l.startsWith(`## ${pkg.version}`));

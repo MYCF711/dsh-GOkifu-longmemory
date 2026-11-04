@@ -19,22 +19,24 @@
 ```
 分支         main = 0.117.0；功能分支 → PR → CI → 合并 → release（--require-ci）
 里程碑       M6 记忆质量收口：D1/D2/D3/D5/N10 已发布；A1/A5 回归已修；类级主卷 + volumes/audit 已上线
-插件         `cordis.patch.yml` 里两条 `disabled: true`；新版 `scripts/re-enable.mjs` 先 `--dry-run` 看「摘除 3 条」，再退出 DSH 执行，重开后 `install-doctor` 应显示「未见 disabled」（该行需重启才能实测；未重启时可先看 `re-enable --dry-run` 的「摘除 3 条」）
+插件         **已启用并在宿主里真跑**：`kifu-loader` 别名包挂进 profile，加载 `dsh-gokifu-longmemory@0.117.0`；
+             宿主心跳 `live-stats.jsonl` 累计 11699 次 pre-step / `inject=62` / `failed=0`；
+             重启后的新宿主 pid 38972（2026-11-04 07:44:05 起）继续注入，A5 线上复核跨作用域 **0**（`evidence/M7-A5-live-clean.md`）
 ```
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | **416 条**（412 pass / 0 fail / 4 skip）[本] 2026-11-04 07:12 |
-| 六轴 | A1 **0.00%** · A2 **23.04%** · **A2b 84.2%（16/19，A5 补闸后重基线；旧 89.5% 作废）** · A3 **live** · A4 p50 **~9–16ms（负载抖动）** · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-04` |
-| 语料 | 382 局 / **381 卷** / **claim 1028**（有效期已止 106；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-04 07:12 · node scripts/cli.mjs audit + store` |
+| 测试 | **422 条**（418 pass / 0 fail / 4 skip）[本] 2026-11-04 07:55 |
+| 六轴 | A1 **0.00%** · A2 **22.69%** · **A2b 84.2%（16/19，A5 补闸后重基线；旧 89.5% 作废）** · A3 **live** · A4 p50 **10.04ms（p90 14.39 / p95 15.01 / max 26.41，负载抖动）** · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-04 07:55` |
+| 语料 | 382 局 / **381 卷** / **claim 1053**（有效期已止 106；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-04 07:55 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
-| 已发布 | **0.15.0 → 0.117.0 的 CHANGELOG 段齐全**；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。 |
-| 证据 | `M6-acceptance.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
-| 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG`、`20-RAPTOR`、`21-CRAG`、`22-LongMemEval`、`23-Self-RAG`、`24-MemoRAG`、`25-LLM-Agent-记忆综述`、`26-Reflexion`、`27-Zep-时序知识图`、`28-Mem0`、`29-MemGPT`、`30-GenerativeAgents`、`31-GraphRAG`、`32-A-MEM`、`00-索引与机制对照` |
+| 已发布 | **0.15.0 → 0.117.0 的 CHANGELOG 段齐全**；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。**0.116.0 归入"无 tag"**：原 `v0.116.0` tag 指在 PR 前的分支提交（`046509f`，其 `package.json` 已是 0.117.0）⇒ 版本与内容错位，撤 tag、不补 Release，内容随 0.117.0 同一提交（`4376d5f`）落地；`scripts/release.mjs` 自此加「tag↔版本一致性」闸防复发。 |
+| 证据 | `M6-acceptance.md`、`M7-A5-live-clean.md`（A5 补闸后线上复核）、`M7-A5-live-leak.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
+| 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG`、`20-RAPTOR`、`21-CRAG`、`22-LongMemEval`、`23-Self-RAG`、`24-MemoRAG`、`25-LLM-Agent-记忆综述`、`26-Reflexion`、`27-Zep-时序知识图`、`28-Mem0`、`29-MemGPT`、`30-GenerativeAgents`、`31-GraphRAG`、`32-A-MEM`、`33-MemoryAgentBench`、`00-索引与机制对照` |
 
 ## 三、下一步（2026-11-02 23:40 修订）
 
-> **当前唯二未决项**：① Q18 开闸裁定（A/B；设计见 `docs/Q18-开闸设计.md`，A2b 最后 2 条的唯一开关）；② 首次注入后的**失败率分母积累**（当前 14 次、失败 0，样本还小，继续观察）；
+> **当前唯二未决项**：① Q18 开闸裁定（A/B；设计见 `docs/Q18-开闸设计.md`，A2b 最后 2 条的唯一开关）；② 首次注入后的**失败率分母积累**（当前 62 次、失败 0，样本还小，继续观察）；
 > ② Q18（A 维持同域 / B 类级章节跨项目，预演 0%→41.7%）。审计侧已收敛：六轮独立审计 → 活文档 10/10（`reports/audit-06.md`）。
 
 1. **N2 BM25：暂缓（有明确理由）**。`walk` 的契约是**零依赖**（文件头写明「不 import 任何模块」），
@@ -46,7 +48,7 @@
 3. **Q18 待裁定**：`class:*` 主卷是否允许跨工作区展示。**开关已实现但默认关**（0.49.0）：`crossScopeClass=true` 才放开，卡片标 `[跨项目]`，A5 分桶统计；选 A 则永久关闭。
 4. ~~N9 卷首摘要~~ **已完成**（0.41.0）：`headline` 机械拼接、`cli volumes` 展示；进注入前需 A2b 对照。
 5. **D5 线上观察**：遥测已就位（0.45.0）——真注入后跑 `node scripts/repeat-report.mjs`，看触发率/类别/token，并人工抽 10 条看误报。
-6. **主人动作**：按 `docs/安装指南.md` §1 三步启用；装完跑 `node scripts/first-live.mjs` 生成首份上线复盘（当前 `liveReady=false`）。
+6. ~~**主人动作**：按 `docs/安装指南.md` §1 三步启用~~ **已完成**：插件已在宿主里跑，`node scripts/first-live.mjs` 报 `liveReady=true`（disabled=0 / guard=PASS），上线复盘在 `evidence/first-live.md`。
 7. **claim 类表对齐**（0.34.0）：历史 claim 只增不改，旧库不回溯合并，只对后续归档生效。
 8. **已知取舍**：`u:` 层 claim 必须有同域证据棋谱才进卡片（换 A5=0）。
 
