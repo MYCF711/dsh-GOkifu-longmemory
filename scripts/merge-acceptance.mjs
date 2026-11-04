@@ -28,7 +28,7 @@ const BUDGET_TOKENS = 500;
 const ms = (n) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} s`);
 
 export function parseArgs(argv = []) {
-  const flags = { store: null, source: null, sample: 40, mergeSample: 20, mergeGroups: 20, json: false, help: false };
+  const flags = { store: null, source: null, sample: 40, mergeSample: 20, mergeGroups: null, json: false, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') flags.help = true;
@@ -37,7 +37,7 @@ export function parseArgs(argv = []) {
     else if (arg === '--source') flags.source = argv[++i] ?? null;
     else if (arg === '--sample') flags.sample = Number(argv[++i] ?? 40);
     else if (arg === '--merge-sample') flags.mergeSample = Number(argv[++i] ?? 20);
-    else if (arg === '--merge-groups') flags.mergeGroups = Number(argv[++i] ?? 20);
+    else if (arg === '--merge-groups') flags.mergeGroups = Number(argv[++i] ?? 0) || null;
     else return { error: `未知参数：${arg}` };
   }
   return flags;
@@ -99,6 +99,55 @@ export function buildCard(store, cache, claim, { limit = ENTRY_LIMIT, budgetToke
 }
 
 /**
+ * T185 · Wilson score interval（**不是**正态近似）。
+ *
+ * 为什么不用 Wald（`p ± z·√(p(1-p)/n)`）：p=1 或 p=0 时方差为 0，区间会退化成 [1,1]，
+ * 恰好在"全中"这种最需要打折的地方给出 100% —— 这正是 n=3 全中却宣称 100% 的谬误来源。
+ *
+ * Wilson 公式（z=1.96 为 95%）：
+ *   ŝ = (p̂ + z²/(2n)) / (1 + z²/n)
+ *   h  = z·√( p̂(1-p̂)/n + z²/(4n²) ) / (1 + z²/n)
+ *   区间 = [ŝ - h, ŝ + h]，再截断到 [0,1]
+ *
+ * 性质（本项目要用到的两条）：
+ *   · p̂=1 时下界 = n/(n+z²)（n=3 ⇒ 43.8%，n=10 ⇒ 72.3%）⇒ 小样本全中不会报 100%；
+ *   · 想让"全中"的下界 ≥ 0.5，需 n ≥ z² ≈ 3.84（取 4 是数学下限；项目纪律另加 ≥10 的门槛）。
+ * @param {number} successes 成功数
+ * @param {number} n 样本量
+ * @param {number} [z] 分位数（双侧 95% ⇒ 1.96）
+ */
+export function wilsonInterval(successes, n, z = 1.96) {
+  const k = Number(successes);
+  const total = Number(n);
+  if (!Number.isFinite(k) || !Number.isFinite(total) || total <= 0) {
+    return { phat: null, lower: null, upper: null, n: Number.isFinite(total) ? total : 0, z };
+  }
+  const phat = Math.min(1, Math.max(0, k / total));
+  const z2 = z * z;
+  const denom = 1 + z2 / total;
+  const center = (phat + z2 / (2 * total)) / denom;
+  const half = (z * Math.sqrt((phat * (1 - phat)) / total + z2 / (4 * total * total))) / denom;
+  return {
+    phat,
+    lower: Math.max(0, center - half),
+    upper: Math.min(1, center + half),
+    n: total,
+    z,
+  };
+}
+
+/**
+ * 选合并组：`limit` 不是正数（null/undefined/0）⇒ **全量**（T185：默认跑遍影库所有合并组）。
+ * @param {Array} merges
+ * @param {number|null} limit
+ */
+export function selectMergeGroups(merges = [], limit = null) {
+  const list = Array.isArray(merges) ? merges : [];
+  if (!Number.isFinite(limit) || limit <= 0) return list.slice();
+  return list.slice(0, Math.floor(limit));
+}
+
+/**
  * T173 · 定点抽样：从**影库的合并节点**里抽组，用"该组的共享正文"作信号
  * （walkFromSignals 只吃 signal 文本，没有 episode/seq 直击入参；组正文 = 成员的 representativeText，
  *  所以命中的就是同一组文本），分别在源库/影库走**同一条真实链路**（walk → buildMemoryCard）。
@@ -108,6 +157,11 @@ export function buildCard(store, cache, claim, { limit = ENTRY_LIMIT, budgetToke
  *   · ④b 不许丢内容：`源库行数 ≥1` 的组，影库行数必须 `≥1`；
  *   · ④c 参考：**可折组**（源库卡片里**本组成员行 ≥2**）中"影库省行"的占比 —— 只展示、不参与退出码。
  *   成员行数 = 卡片渲染行的 `claimId` 与本组 `merge.members` 求交集的个数（源/影各算一次，不解析正文）。
+ *
+ * T185（统计功效）：n=3 的 100% 什么也证明不了（真实收益 50% 时，3 组全中的概率仍有 12.5%）。
+ * 所以 ④c 必须带**区间**与**样本量门槛**：
+ *   · Wilson 95% 置信区间（见 `wilsonInterval` 的推导注释）；
+ *   · 判据：Wilson **下界 ≥ 0.5 且可折组 ≥ 10** 才算"有证据"，否则如实写**证据不足**。
  * @param {{source:object, shadow:object, sourceCache:object, shadowCache:object,
  *          merges:Array, limit?:number, budgetTokens?:number, measure?:Function}} p
  */
@@ -192,15 +246,53 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
   const foldable = rows.filter((r) => r.foldable);
   const savedPositive = foldable.filter((r) => r.shadowRows < r.sourceRows);
   const savedTotal = foldable.reduce((n, r) => n + Math.max(0, r.sourceRows - r.shadowRows), 0);
+  // T185：④c 带 Wilson 95% 区间 + 样本量门槛，小样本的 100% 不许当结论用。
+  const wilson = wilsonInterval(savedPositive.length, foldable.length);
+  const MIN_FOLDABLE = 10;
+  const THRESHOLD = 0.5;
+  // 全校正下界：随机取一个合并组，既"可折"又"真省行"的概率下界
+  // = 可折率（点估计）× 可折组里省行率的 Wilson 下界（保守：两个量都往下取）
+  const foldableShare = rows.length ? foldable.length / rows.length : 0;
+  const layerLowerBound = foldableShare * (wilson.lower ?? 0);
+  const nNeededPerfect = Math.ceil(wilson.z * wilson.z); // p̂=1 时下界 ≥0.5 的数学下限（n ≥ z²）
+  let evidence;
+  if (rows.length === 0) {
+    evidence = { verdict: '证据不足', reason: '没有可评估的合并组（影库里没有 merge.members）' };
+  } else if (foldable.length === 0) {
+    evidence = { verdict: '证据不足', reason: '没有可折组（成员从不同时出现在同一张卡里，④c 无定义）' };
+  } else if (foldable.length < MIN_FOLDABLE) {
+    evidence = {
+      verdict: '证据不足',
+      reason: `可折组 ${foldable.length} < ${MIN_FOLDABLE}（当前 ${savedPositive.length}/${foldable.length} 省行；Wilson 下界 ${(wilson.lower * 100).toFixed(1)}%）`
+        + `—— 若真实收益只有 50%，${foldable.length} 组全中的概率仍有 ${((0.5 ** foldable.length) * 100).toFixed(1)}%；`
+        + `若后续仍全中，至少 ${nNeededPerfect} 个可折组（数学下限 z²≈${(wilson.z * wilson.z).toFixed(2)}）才能让下界 ≥0.5，项目门槛取 ${MIN_FOLDABLE}`,
+    };
+  } else if (wilson.lower < THRESHOLD) {
+    evidence = { verdict: '证据不足', reason: `Wilson 下界 ${(wilson.lower * 100).toFixed(1)}% < ${THRESHOLD * 100}%（可折 ${foldable.length} 组）` };
+  } else {
+    evidence = { verdict: '有证据', reason: `Wilson 下界 ${(wilson.lower * 100).toFixed(1)}% ≥ ${THRESHOLD * 100}% 且可折组 ${foldable.length} ≥ ${MIN_FOLDABLE}` };
+  }
   const c = {
     id: '④c',
     name: '参考：可折组里"影库省行"的占比',
+    total: rows.length,
     foldable: foldable.length,
     notFoldable: rows.length - foldable.length,
     savedPositive: savedPositive.length,
     ratio: foldable.length ? savedPositive.length / foldable.length : null,
     avgSaved: foldable.length ? savedTotal / foldable.length : 0,
     savedTotal,
+    wilson,
+    layerLowerBound,
+    evidence: {
+      ...evidence,
+      verdict: evidence.verdict,
+      threshold: THRESHOLD,
+      minFoldable: MIN_FOLDABLE,
+      lower: wilson.lower,
+      upper: wilson.upper,
+      n: foldable.length,
+    },
     membersSourceRows: rows.map((r) => ({
       id: r.id,
       membersSourceRows: r.membersSourceRows,
@@ -237,7 +329,7 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
  * 三项验收。
  * @param {{shadowRoot:string, sourceRoot:string, sample?:number, mergeSample?:number}} p
  */
-export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample = 20, mergeGroups = 20 } = {}) {
+export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample = 20, mergeGroups = null } = {}) {
   const started = Date.now();
   const shadow = createStore({ root: shadowRoot });
   const source = createStore({ root: sourceRoot });
@@ -350,7 +442,8 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
   const crossScope = { cards: cardsBuilt, violations: crossScopeViolations, pass: crossScopeViolations === 0, details: perCardCross.slice(0, 5) };
 
   // ── ④ T173 定点抽样：合流到底省了几行 ───────────────────────────────────
-  const groupPick = merges.slice(0, Math.max(1, mergeGroups));
+  // T185：默认**跑遍影库里所有合并组**（不再抽 20 组）——n 太小时 100% 没有统计意义。
+  const groupPick = selectMergeGroups(merges, mergeGroups);
   const groups = sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges: groupPick });
 
   // ④ 只由 ④a/④b 决定（④c 是参考指标，不参与退出码）
@@ -383,9 +476,11 @@ export function formatReport(r) {
   const g = r.groups;
   lines.push(`| ④a | 不许变差（定点抽样） | 反增 **${g.a.worse.length}** 组 / 共 ${g.a.groups} 组${g.a.worse.length ? `（${g.a.worse.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
   lines.push(`| ④b | 不许丢内容 | 丢内容 **${g.b.losses.length}** 组 / 源库 ≥1 行的 ${g.b.groups} 组${g.b.losses.length ? `（${g.b.losses.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
-  lines.push(`| ④c | 参考：**可折组**里"影库省行"的占比 | 可折 **${g.c.foldable}** 组 / 不可折 ${g.c.notFoldable} 组 · 占比 **${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}** · 平均省 ${g.c.avgSaved.toFixed(2)} 行 | 只展示 |`);
+  const w = g.c.wilson;
+  lines.push(`| ④c | 参考：可折组里"影库省行"的占比 | 总 **${g.c.total}** 组 · 可折 **${g.c.foldable}** · 不可折 ${g.c.notFoldable} · 省行 ${g.c.savedPositive}/${g.c.foldable} = **${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}** · Wilson 95% **${w.lower === null ? 'n/a' : `[${(w.lower * 100).toFixed(1)}%, ${(w.upper * 100).toFixed(1)}%]`}** · 全校正下界 ${(g.c.layerLowerBound * 100).toFixed(1)}% · 平均省 ${g.c.avgSaved.toFixed(2)} 行 | 只展示 |`);
+  lines.push(`| ④c′ | 统计结论 | **${g.c.evidence.verdict}** —— ${g.c.evidence.reason} | 只展示 |`);
   lines.push('');
-  lines.push(`结论：${r.ok ? '通过' : '有不通过项'}（① ${r.dup.notWorse ? 'ok' : 'FAIL'} · ② ${r.gate4.pass ? 'ok' : 'FAIL'} · ③ ${r.crossScope.pass ? 'ok' : 'FAIL'} · ④a ${g.a.pass ? 'ok' : 'FAIL'} · ④b ${g.b.pass ? 'ok' : 'FAIL'} · ④c 参考 ${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}）`);
+  lines.push(`结论：${r.ok ? '通过' : '有不通过项'}（① ${r.dup.notWorse ? 'ok' : 'FAIL'} · ② ${r.gate4.pass ? 'ok' : 'FAIL'} · ③ ${r.crossScope.pass ? 'ok' : 'FAIL'} · ④a ${g.a.pass ? 'ok' : 'FAIL'} · ④b ${g.b.pass ? 'ok' : 'FAIL'} · ④c 参考 ${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}（${g.c.evidence.verdict}））`);
   if (g.rows.length) {
     lines.push('');
     lines.push('| 合并组 | 成员 | 成员行数（源/影） | 源库行数 | 影库行数 | 省下 | 可折 | 闸门 |');
@@ -426,7 +521,7 @@ export const USAGE = `棋院 merge-acceptance（T170：合流后消费侧的只�
   --source <dir>         源库（默认 <DSH_HOME>/memory-context）；只读，用来做 ① 的对照
   --sample <n>           抽多少条 claim 造卡（默认 40）
   --merge-sample <n>     抽多少个合并节点验闸 4（默认 20）
-  --merge-groups <n>     定点抽多少个合并组量"省下的行数"（默认 20；占比 ≥ 80% 才算通过）
+  --merge-groups <n>     定点抽多少个合并组（**默认全量**：影库里所有合并组）；④c 只展示、不参与退出码
   --json                 机器可读
 `;
 
