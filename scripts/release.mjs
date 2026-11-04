@@ -203,6 +203,19 @@ export function realDeps() {
         };
       }
     },
+    pushBranch: () => {
+      try {
+        execSync('git push origin HEAD:refs/heads/ledger-sync', { cwd: REPO_ROOT, stdio: 'inherit' });
+        return { ok: true };
+      } catch (error) {
+        return {
+          ok: false,
+          error: String(error?.stderr ?? error?.message ?? error).split(String.fromCharCode(10)).filter(Boolean).slice(-2).join(' | ').slice(0, 240),
+        };
+      }
+    },
+    findPr: () => JSON.parse(execSync('gh pr list --head ledger-sync --state all --json number,url,state', { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })),
+    createPr: () => String(execSync('gh pr create --fill --base main --head ledger-sync', { cwd: REPO_ROOT, encoding: 'utf8' })).trim().split(String.fromCharCode(10)).filter(Boolean).pop() ?? null,
     ghRuns: (sha) => JSON.parse(execSync(`gh run list --commit ${sha} --limit 1 --json conclusion,status,workflowName`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })),
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     now: () => Date.now(),
@@ -274,10 +287,40 @@ export async function performRelease(opts = {}) {
       console.log(`release: 已提交台账自愈：${ledger.message}`);
       const pushed = deps.push();
       if (!pushed.ok) {
-        console.error('release: 台账提交推不上去（分支保护？）。手动继续：');
-        console.error('  1) git push origin HEAD:refs/heads/ledger-sync && gh pr create --fill --base main');
-        console.error(`  2) 合并后重跑 node scripts/release.mjs${requireCi ? ' --require-ci' : ''}`);
-        return { code: 1, reason: 'push-failed', tag };
+        // T172：main 有 ruleset（必须 PR）⇒ 推不进去是**常态**，不是失败。
+        // 自动把提交推到 `ledger-sync` 分支并开 PR；已有同分支的 open PR 就复用（不重复开）。
+        // **仍然不自动合并**（不绕 main 的保护）：合并由人点，然后重跑 release。
+        console.error(`release: 台账提交推不进 main（${pushed.error ? String(pushed.error).slice(0, 120) : '分支保护'}），改走 PR：`);
+        const branch = deps.pushBranch ? deps.pushBranch() : { ok: false, error: 'no pushBranch' };
+        if (!branch.ok) {
+          console.error('release: `ledger-sync` 分支也推不上去，手动继续：');
+          console.error('  1) git push origin HEAD:refs/heads/ledger-sync && gh pr create --fill --base main --head ledger-sync');
+          console.error(`  2) 合并后重跑 node scripts/release.mjs${requireCi ? ' --require-ci' : ''}`);
+          return { code: 1, reason: 'push-failed', tag };
+        }
+        let existing = [];
+        try {
+          existing = (deps.findPr ? deps.findPr() : []).filter((pr) => String(pr?.state ?? '').toUpperCase() === 'OPEN');
+        } catch {
+          existing = [];
+        }
+        if (existing.length) {
+          console.log(`release: 复用已存在的 PR #${existing[0].number} ${existing[0].url ?? ''}（不重复开）`);
+          console.error(`release: 合并 PR #${existing[0].number} 后重跑 node scripts/release.mjs${requireCi ? ' --require-ci' : ''}（台账已同步，不会再提交）`);
+          return { code: 1, reason: 'pr-exists', tag, pr: existing[0].url ?? null };
+        }
+        let url = null;
+        try {
+          url = deps.createPr ? deps.createPr() : null;
+        } catch (error) {
+          console.error(`release: 开 PR 失败（${String(error?.message ?? error).slice(0, 160)}）。手动继续：`);
+          console.error('  1) gh pr create --fill --base main --head ledger-sync');
+          console.error(`  2) 合并后重跑 node scripts/release.mjs${requireCi ? ' --require-ci' : ''}`);
+          return { code: 1, reason: 'push-failed', tag };
+        }
+        if (url) console.log(`release: 已开 PR ${url}`);
+        console.error(`release: 合并后重跑 node scripts/release.mjs${requireCi ? ' --require-ci' : ''}（台账已同步，不会再提交）`);
+        return { code: 1, reason: 'pr-opened', tag, pr: url };
       }
       const head = deps.out('git rev-parse HEAD');
       console.log(`release: 已推送台账提交 ${head.slice(0, 8)}，等待它的 CI …`);

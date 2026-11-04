@@ -220,8 +220,38 @@ test('T168 ③b: CI 一直查不到结论（超时）⇒ 不打 tag', async () =
   assert.deepEqual(state.tags, []);
 });
 
-test('T168: 自愈提交推不上去（分支保护）⇒ 不打 tag，打印手动 PR 路径', async () => {
+test('T172: 推不进 main ⇒ 自动推分支 + 开 PR（不自动合并、不打 tag）', async () => {
+  const state = { prs: 0, branchPushes: 0 };
+  const { deps, state: s } = makeDeps({ push: () => ({ ok: false, error: 'protected branch' }) });
+  deps.pushBranch = () => { state.branchPushes += 1; return { ok: true }; };
+  deps.findPr = () => [];
+  deps.createPr = () => { state.prs += 1; return 'https://github.com/MYCF711/dsh-kifuin/pull/999'; };
+  const result = await performRelease({ deps, now: NOW });
+  assert.equal(result.code, 1);
+  assert.equal(result.reason, 'pr-opened');
+  assert.equal(state.branchPushes, 1, '必须把提交推到 ledger-sync');
+  assert.equal(state.prs, 1, '必须开一个 PR');
+  assert.equal(result.pr, 'https://github.com/MYCF711/dsh-kifuin/pull/999');
+  assert.deepEqual(s.tags, [], '绝不自动打 tag');
+});
+
+test('T172: 已存在 open 的 ledger-sync PR ⇒ 复用，不重复开', async () => {
+  const state = { prs: 0 };
+  const { deps, state: s } = makeDeps({ push: () => ({ ok: false, error: 'protected branch' }) });
+  deps.pushBranch = () => ({ ok: true });
+  deps.findPr = () => [{ number: 42, url: 'https://github.com/MYCF711/dsh-kifuin/pull/42', state: 'OPEN' }];
+  deps.createPr = () => { state.prs += 1; return 'https://example/new'; };
+  const result = await performRelease({ deps, now: NOW });
+  assert.equal(result.code, 1);
+  assert.equal(result.reason, 'pr-exists');
+  assert.equal(state.prs, 0, '有 open PR 就不许再开一个');
+  assert.equal(result.pr, 'https://github.com/MYCF711/dsh-kifuin/pull/42');
+  assert.deepEqual(s.tags, []);
+});
+
+test('T172: 分支也推不上去 ⇒ 打印手动路径、不打 tag', async () => {
   const { deps, state } = makeDeps({ push: () => ({ ok: false, error: 'protected branch' }) });
+  deps.pushBranch = () => ({ ok: false, error: 'rejected' });
   const result = await performRelease({ deps, now: NOW });
   assert.equal(result.code, 1);
   assert.equal(result.reason, 'push-failed');
