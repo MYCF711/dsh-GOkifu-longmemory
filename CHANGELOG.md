@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.151.0（2026-11-05）
+
+### 合流写真库前的三块拼图（T170，仍然不写真库）
+- **`--all` 完整镜像**：`consolidate-apply --all` 把源库所有 kind 都搬进影子库（原来只复制 claim 层）。
+  真库实跑：**claims 1379（1340 + 39 合并节点）· links 6402 · 2m03s**。
+- **可校验备份 + 一条命令回滚**：`scripts/consolidate-backup.mjs`（`--backup` / `--verify` 逐文件 sha256 / `--restore`），回滚幂等。
+- **消费侧验收脚本**：`scripts/merge-acceptance.mjs` 在影子库上验三项 ——
+  真库 → 影库实测：**① 同文重复行 源 1 → 影 1（不增）· ② 闸 4 错误 0（查 20 组 / 39 个合并节点）· ③ 跨作用域 0（40 张卡）**，三项通过。
+
+### 知识库到 41 篇：Memobase 的读侧折叠（T171）
+- [外] 原文已核：`context()` 是**组装器 + 预算**（`max_tokens` / `profile_event_ratio` / `max_subtopic_size` /
+  `time_range_in_days` / `prefer_topics`），且 "`max_tokens` limit applies to the profile and event content,
+  **not the final formatted string**"；检索粒度是**单事实 gist**，折叠输出只留 `[mentioned at 2025-01]`（无 episode/seq/原话）。
+- 对照本仓：它在**写侧覆盖**（一个槽位只留一个值），所以读侧不折叠、也**没有反指针** —— 这反证了我们的三件套
+  （存储保留成员 + 读侧折叠 ⇒ 才必须有 `mergedInto`）。可借「预算算内容不算外壳」「一行一事实」「槽位被更新过 = 机械相关性指针」。
+
+### 验证
+640 条测试（636 pass / 0 fail / 4 skip）；`check PASS`（调研清单 41 篇）；`metrics-guard PASS`（A1=0.029 · A5=0 · A6=1 · A2b 18/19 · p50 14.21ms，26 秒跑完）。
+
 ## 0.150.0（2026-11-05）
 
 ### 发版不再靠人肉改台账：打 tag 前自动同步测试数（T168）
