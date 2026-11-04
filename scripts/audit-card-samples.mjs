@@ -85,6 +85,10 @@ export function eventsToBlobs(events) {
       // 每个字符串先 singleLine：多行错误原文（含换行/缩进）不归一的话，卡片正文（已单行化）会假阳成 missing。
       // 不同字符串之间用换行分隔 —— 一条正文不会跨两个字符串，所以拼接不会制造假阳。
       blob: collectStrings(ev?.data ?? ev ?? {}).map((s) => singleLine(s)).filter(Boolean).join('\n'),
+      // 2026-11-04（0.132.0）：抽取会把同一事件里的**多段字符串**拼成一行（如 stdout+stderr），
+      // 单行化后段间只剩一个空格，而 blob 用换行连接 ⇒ 会假阳成 missing。这里并存一份空格连接的版本，
+      // 只用来把这类拼接单独记成 joined（**不冒充 at-seq**，汇总里单独报数）。
+      blobJoined: collectStrings(ev?.data ?? ev ?? {}).map((s) => singleLine(s)).filter(Boolean).join(' '),
     }))
     .filter((ev) => Number.isFinite(ev.seq));
 }
@@ -99,7 +103,17 @@ export function classifyTextByEvents({ text, seq, events, window = DEFAULT_WINDO
     const distance = Math.abs(Number(ev.seq) - Number(seq));
     if (!best || distance < best.distance) best = { nearestSeq: ev.seq, distance };
   }
-  if (!best) return { verdict: 'missing', nearestSeq: null, distance: null };
+  if (!best) {
+    // 严格版没命中 ⇒ 看空格拼接版：命中的话记 joined（同一局里的片段被拼成一行），不冒充 at-seq
+    for (const ev of events) {
+      const joined = ev.blobJoined ?? '';
+      if (!joined || !joined.includes(needle)) continue;
+      const distance = Math.abs(Number(ev.seq) - Number(seq));
+      if (!best || distance < best.distance) best = { nearestSeq: ev.seq, distance, joined: true };
+    }
+    if (!best) return { verdict: 'missing', nearestSeq: null, distance: null };
+    return { verdict: 'joined', nearestSeq: best.nearestSeq, distance: best.distance };
+  }
   return {
     verdict: best.distance <= Math.max(0, Number(window) || 0) ? 'at-seq' : 'elsewhere',
     nearestSeq: best.nearestSeq,
@@ -186,6 +200,7 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
       textAtSeq: count((v) => v.verdict === 'at-seq'),
       textElsewhere: count((v) => v.verdict === 'elsewhere'),
       textMissing: count((v) => v.verdict === 'missing'),
+      textJoined: count((v) => v.verdict === 'joined'),
       dateOk: count((v) => v.dateVerdict === 'ok'),
       dateBad: count((v) => v.dateVerdict === 'mismatch' || v.dateVerdict === 'no-event'),
       verdicts,
@@ -207,6 +222,7 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
     textAtSeq: sum('textAtSeq'),
     textElsewhere: sum('textElsewhere'),
     textMissing: sum('textMissing'),
+    textJoined: sum('textJoined'),
     dateOk: sum('dateOk'),
     dateBad: sum('dateBad'),
     textCheck,
@@ -303,7 +319,7 @@ async function main(argv = process.argv.slice(2)) {
   } else {
     const pct = (n) => (out.refs ? `${((n / out.refs) * 100).toFixed(1)}%` : '-');
     if (textCheck) {
-      console.log(`样本 ${out.samples} 张 · 引用 ${out.refs} 条 · at-seq ${out.textAtSeq} · elsewhere ${out.textElsewhere} · missing ${out.textMissing} · 日期一致 ${out.dateOk}/${out.refs}${pidNote ? ' ' + pidNote : ''}`);
+      console.log(`样本 ${out.samples} 张 · 引用 ${out.refs} 条 · at-seq ${out.textAtSeq} · elsewhere ${out.textElsewhere} · missing ${out.textMissing} · joined ${out.textJoined ?? 0} · 日期一致 ${out.dateOk}/${out.refs}${pidNote ? ' ' + pidNote : ''}`);
       console.log(`（引用层：可回溯 ${out.okRefs}/${out.refs}（${pct(out.okRefs)}，弱判据）· 同作用域 ${out.sameScopeRefs} · 跨作用域 ${out.crossScopeRefs} · window=±${out.window}）`);
       const gap = out.details.flatMap((d) => d.verdicts)
         .filter((v) => v.distance != null && v.distance > out.window && v.distance <= 10).length;
@@ -315,7 +331,7 @@ async function main(argv = process.argv.slice(2)) {
     }
     for (const d of out.details) {
       const extra = textCheck
-        ? ` at-seq=${d.textAtSeq} elsewhere=${d.textElsewhere} missing=${d.textMissing} 日期ok=${d.dateOk}/${d.refs}`
+        ? ` at-seq=${d.textAtSeq} elsewhere=${d.textElsewhere} joined=${d.textJoined ?? 0} missing=${d.textMissing} 日期ok=${d.dateOk}/${d.refs}`
         : '';
       console.log(`- ${new Date(d.at).toLocaleString()} ${String(d.scope).slice(-24)} tokens=${d.tokens} refs=${d.refs} ok=${d.ok}${extra}`);
     }
