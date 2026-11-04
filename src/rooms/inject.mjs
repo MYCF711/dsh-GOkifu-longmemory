@@ -647,7 +647,14 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       droppedImperative += 1;
       continue;
     }
-    const key = `${entry.source.episode}\u0000${entry.source.seq}\u0000${entry.rawText}`;
+    // 去重键（T154）：**有 claim 的条目按 claimId 去重** —— 同一条 claim 常常有多个出处
+    // （support[0] / support[1] ……线上 146/1232 条 claim 如此），按 (episode, seq, 原文) 去重
+    // 会把同一条断言渲染成两行；闸 4 按"归一化全文"判等，看到同一个 id 出现两次就当成
+    // "未标 supersedes 的重复"，整张卡被打回（线上两次 gate4/unsuperseded-duplicate 的根因）。
+    // 棋谱指针行（无 claim）保持原键：不同出处是**不同事实**，必须都保留。
+    const key = entry.claimId
+      ? `claim:${entry.claimId}`
+      : `${entry.source.episode}\u0000${entry.source.seq}\u0000${entry.rawText}`;
     if (seen.has(key)) continue;
     seen.add(key);
     entries.push(entry);

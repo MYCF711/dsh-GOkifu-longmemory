@@ -997,3 +997,58 @@ test('R13: 祈使句判定的误伤排除（请求/申请/我记得 不算指令
     assert.equal(got, want, `${text} ⇒ ${want ? '应判指令' : '不该判指令'}`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// T154：同一条 claim 的两个不同出处 ⇒ 卡上只能出现一次
+//
+// 线上（0.14x）两次 `gate4/unsuperseded-duplicate` 的根因：R12 的去重键是
+// `episode\0seq\0rawText`，**不含 claimId** —— 于是同一条 claim 被两个不同出处
+// （support[0] / support[1]）各渲染一次；闸 4 按"归一化全文"判等，看到同一个 id
+// 出现两次，就当成"未标 supersedes 的重复"，整张卡被打回。
+// 修复：有 claim 的条目用 `claimId` 作去重主键；棋谱指针（无 claim）保持原键。
+// ---------------------------------------------------------------------------
+
+test('R12 T154: 同一条 claim 的两个不同出处 ⇒ 只渲染一次（去重键含 claimId）', () => {
+  const { store } = fixture();
+  // c-0000aa02 的 support 有两条：ep-aaaaaaa2/seq 12 与 ep-aaaaaaa1/seq 30
+  const hits = [
+    hit({ episodeId: 'ep-aaaaaaa2', seq: 12, claimId: 'c-0000aa02' }),
+    hit({ episodeId: 'ep-aaaaaaa1', seq: 30, claimId: 'c-0000aa02' }),
+  ];
+  const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+  const rows = card.claims.filter((c) => c.claimId === 'c-0000aa02');
+  assert.equal(rows.length, 1, `同一条 claim 只该出现一次，实际出现 ${rows.length} 次：${JSON.stringify(rows.map((r) => r.source))}`);
+  assert.equal(card.claims.length, 1);
+});
+
+test('R12 T154: 不同 claim / 不同指针各自保留（去重不能把不同条目也并掉）', () => {
+  // 用轻量夹具（短文本）：避免被 500 tokens 预算截断干扰这条断言
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t154-'));
+  const store = createStore({ root, now: T(20) });
+  store.ensureDirs();
+  store.putMany('episodes', [
+    { id: 'ep-aaaaaaa1', sessionId: 's1', scopeKey: SCOPE, startedAt: T(21), firstEventAt: T(21), lastEventAt: T(21), closure: { seqFrom: 11 }, l0: '', signals: { failures: 3 }, state: 'archived' },
+    { id: 'ep-aaaaaaa2', sessionId: 's2', scopeKey: SCOPE, startedAt: T(22), firstEventAt: T(22), lastEventAt: T(22), closure: { seqFrom: 11 }, l0: '', signals: { failures: 1 }, state: 'archived' },
+  ]);
+  store.putMany('claims', [
+    { id: 'c-t1540001', kind: 'fact', text: '甲', scopeKey: SCOPE, state: 'observed', support: [{ episode: 'ep-aaaaaaa1', seq: 30, quote: '甲' }], counter: [], occurredAt: T(21) },
+    { id: 'c-t1540002', kind: 'fact', text: '乙', scopeKey: SCOPE, state: 'observed', support: [{ episode: 'ep-aaaaaaa2', seq: 12, quote: '乙' }], counter: [], occurredAt: T(22) },
+  ]);
+  try {
+    const hits = [
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 30, claimId: 'c-t1540001' }),
+      hit({ episodeId: 'ep-aaaaaaa2', seq: 12, claimId: 'c-t1540002' }),
+      // 棋谱指针行（无 claim）：两条不同出处必须都保留
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 41 }),
+      hit({ episodeId: 'ep-aaaaaaa2', seq: 42 }),
+    ];
+    const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId ?? '(pointer)');
+    assert.equal(ids.filter((x) => x === 'c-t1540001').length, 1, JSON.stringify(card.claims.map((c) => c.line)));
+    assert.equal(ids.filter((x) => x === 'c-t1540002').length, 1);
+    assert.equal(ids.filter((x) => x === '(pointer)').length, 2, '指针行按原键去重，两条不同出处都保留');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
