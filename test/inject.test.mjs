@@ -885,3 +885,54 @@ test('T111: 没有更贴近的原文时保持原选（不为换而换）', () =>
     assert.ok(line.includes('unknown command'), `原文也不换：${line}`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// T115（0.124.0）：同一局里有更贴近信号的教训时，别拿那条无关的类级泛教训
+// ---------------------------------------------------------------------------
+
+test('T115: 同一局内按信号挑 claim —— 更贴近的那条胜出（出处随之）', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t115-'));
+  try {
+    const store = createStore({ root, now: T(20) });
+    store.ensureDirs();
+    store.putMany('episodes', [episode('ep-ddddd001', 21, 4)]);
+    store.putMany('claims', [
+      // 锚定在 hit 的 seq 上，但与本次信号无关（"工具坏了"的泛教训）
+      claim({ id: 'c-dddd0001', kind: 'antipattern', text: 'class:sandbox-limit · Error: tool call aborted', day: 21, state: 'semantic',
+        support: [{ episode: 'ep-ddddd001', seq: 10, quote: 'Error: tool call aborted', day: 21 }] }),
+      // 同一局的另一个 seq，才是本次真正对得上的那条
+      claim({ id: 'c-dddd0002', kind: 'antipattern', text: 'SyntaxError: invalid or unexpected token at checkSyntax (node:internal/main/check_syntax:1)', day: 21, state: 'observed',
+        support: [{ episode: 'ep-ddddd001', seq: 99, quote: 'SyntaxError: invalid or unexpected token at checkSyntax', day: 21 }] }),
+    ]);
+    const hits = [hit({ episodeId: 'ep-ddddd001', seq: 10, claimId: 'c-dddd0001' })];
+    const signal = signalFromText('SyntaxError: invalid or unexpected token at checkSyntax (node:internal/main/check_syntax:1)', { at: T(21) });
+    signal.scopeKey = SCOPE;
+    const card = buildMemoryCard({ signal, walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const line = cardLines(card)[0] ?? '';
+    assert.ok(line.includes('checkSyntax'), `应挑同局里贴近信号的那条：${line}`);
+    assert.ok(!line.includes('tool call aborted'), `不该拿无关的泛教训：${line}`);
+    assert.equal(card.claims[0]?.claimId, 'c-dddd0002', 'claimId 也要跟着换');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T115: 同一局里没有更贴近的教训时保持原选', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t115b-'));
+  try {
+    const store = createStore({ root, now: T(20) });
+    store.ensureDirs();
+    store.putMany('episodes', [episode('ep-ddddd002', 21, 2)]);
+    store.putMany('claims', [
+      claim({ id: 'c-dddd0003', kind: 'antipattern', text: 'class:sandbox-limit · Error: tool call aborted', day: 21, state: 'semantic',
+        support: [{ episode: 'ep-ddddd002', seq: 10, quote: 'Error: tool call aborted', day: 21 }] }),
+      claim({ id: 'c-dddd0004', kind: 'fact', text: 'package.json 的 engines.node 是 >=23.8', day: 21, state: 'observed',
+        support: [{ episode: 'ep-ddddd002', seq: 99, quote: 'engines.node >=23.8', day: 21 }] }),
+    ]);
+    const hits = [hit({ episodeId: 'ep-ddddd002', seq: 10, claimId: 'c-dddd0003' })];
+    const signal = signalFromText('TypeError: x is not a function', { at: T(21) });
+    signal.scopeKey = SCOPE;
+    const card = buildMemoryCard({ signal, walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const line = cardLines(card)[0] ?? '';
+    assert.ok(line.includes('tool call aborted'), `没有更好候选就别换：${line}`);
+    assert.equal(card.claims[0]?.claimId, 'c-dddd0003');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
