@@ -17,7 +17,7 @@
 ## 二、当前状态（2026-11-02 20:40 · 整点巡检）
 
 ```
-分支         main = 0.155.0；功能分支 → PR → CI → 合并 → release（--require-ci）
+分支         main = 0.156.0；功能分支 → PR → CI → 合并 → release（--require-ci）
 里程碑       M7 线上验收：A3 live / A5 跨作用域 0 **已达成**；A6 判据升级为「引文可核」；**擂台已开打**（赢 3 / 输 0 / 不可比 3，主判据 A2 仍不可比）
 插件         **已启用并在宿主里真跑**：`kifu-loader` 别名包挂进 profile，且 `dsh-gokifu-longmemory` 是指向本工作区的**软链**，
              所以源码改动 **下次重启即生效、无需安装步骤**；宿主心跳 `live-stats.jsonl` 累计 11699 次 pre-step / `inject=62` / `failed=0`；
@@ -30,7 +30,7 @@
 | 六轴 | A1 **0.00%**（闸后；闸前候选暴露 20.20%，见 S16） · A2 **23.04%** · **A2b 覆盖 19/19 · 严格 94.74%（18/19，claim.text 口径；0.138.0 边界闸行级化后升 1 条）· 卡片可读性 18/19** · A3 **live**（inject=81 / failed=0） · A4 p50 **9.69ms**（p90 13.67 / p95 16.26 / max 33.67） · A5 **0.00%** · A6 **100.00%（结构口径：行带 ep+日期+seq）**；**文字级可核＝41/43（95.3%，missing 0，日期 43/43）离线重抽**，修复前线上留样是 70/122 at-seq、14 missing、日期 31/122（`evidence/M7-A6-text-level.md`） `[本] 2026-11-04 08:22` |
 | 语料 | 475 局 / **447 卷** / **claim 1192**（有效期已止 106；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-04 08:22 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
-| 已发布 | **0.15.0 → 0.155.0 的 CHANGELOG 段齐全**；v0.116.0 见下方缺口说明，v0.117.0 已补发 tag + Release；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。**0.116.0 归入"无 tag"**：原 `v0.116.0` tag 指在 PR 前的分支提交（`046509f`，其 `package.json` 已是 0.117.0）⇒ 版本与内容错位，撤 tag、不补 Release，内容随 0.117.0 同一提交（`4376d5f`）落地；`scripts/release.mjs` 自此加「tag↔版本一致性」闸防复发。 |
+| 已发布 | **0.15.0 → 0.156.0 的 CHANGELOG 段齐全**；v0.116.0 见下方缺口说明，v0.117.0 已补发 tag + Release；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。**0.116.0 归入"无 tag"**：原 `v0.116.0` tag 指在 PR 前的分支提交（`046509f`，其 `package.json` 已是 0.117.0）⇒ 版本与内容错位，撤 tag、不补 Release，内容随 0.117.0 同一提交（`4376d5f`）落地；`scripts/release.mjs` 自此加「tag↔版本一致性」闸防复发。 |
 | 证据 | `M6-acceptance.md`、`a2-pair-set.json`（A2 配对冻结集 20 条）、`M7-arena.md`（擂台实测：赢 3 / 输 0 / 不可比 3）、`M7-a2b-misses.md`（A2b 三条失分归因）、`M7-patrol-2026-11-04-0900.md`（整点巡检）、`M7-A6-text-level.md`（A6 文字级前后对照）、`M7-A5-live-clean.md`（A5 补闸后线上复核）、`M7-A5-live-leak.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
 | 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG`、`20-RAPTOR`、`21-CRAG`、`22-LongMemEval`、`23-Self-RAG`、`24-MemoRAG`、`25-LLM-Agent-记忆综述`、`26-Reflexion`、`27-Zep-时序知识图`、`28-Mem0`、`29-MemGPT`、`30-GenerativeAgents`、`31-GraphRAG`、`32-A-MEM`、`33-MemoryAgentBench`、`34-Obsolete-Facts`、`35-Mem0-v3-ADD-only`、`36-Letta-MemFS`、`37-AWS-AgentCore-Memory`、`38-Cognee-检索排序`、`39-Cognee-去重与冲突`、`41-Memobase-读侧折叠`、`42-Retrieval-Bottleneck`、`00-索引与机制对照` |
 
