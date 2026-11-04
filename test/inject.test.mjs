@@ -616,6 +616,11 @@ test('R12: estimateTokens/clipLine 口径稳定（CJK 1.5 字/token、ASCII 4 �
   assert.equal(singleLine('很长的句子'.repeat(50)).length, 250, 'singleLine 不截断');
   assert.ok(clipLine('字'.repeat(400)).length <= 160);
   assert.ok(clipLine('字'.repeat(400), TIGHT_CLIP).length <= TIGHT_CLIP);
+  // 2026-11-04（0.133.0）：截断落在空白边界，别把词切一半（线上实测切出 `….ou…`）
+  assert.equal(clipLine('aaaaaaaaaa bbbbbbbbbb cccccccccc', 18), 'aaaaaaaaaa…', '回退到最近的空白边界');
+  assert.equal(clipLine('a'.repeat(40), 10), `${'a'.repeat(9)}…`, '没有空白就硬截（不为了边界丢掉一半内容）');
+  assert.equal(clipLine('短文本', 100), '短文本', '没超限就原样返回');
+  assert.ok(clipLine('x y z '.repeat(40), 20).endsWith('…'), '超限一定带省略号');
   assert.equal(formatCardDate(T(22)), '2026-10-22');
   assert.equal(formatCardDate(Number.NaN), '????-??-??');
 });

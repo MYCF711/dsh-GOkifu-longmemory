@@ -117,7 +117,13 @@ export function singleLine(text) {
 export function clipLine(text, max = TEXT_CLIP) {
   const s = singleLine(text);
   if (s.length <= max) return s;
-  return `${s.slice(0, Math.max(0, max - 1))}…`;
+  const cut = Math.max(0, max - 1);
+  const head = s.slice(0, cut);
+  // 2026-11-04（0.133.0）：截断尽量落在**空白边界**上。原来的硬截会把词切一半（线上实测切出 `….ou…`），
+  // 卡上文字就不再是"原文的连续前缀"，A6 的文字层核对只能靠宽容匹配。保留 ≥60% 内容才回退到边界，否则硬截。
+  const ws = Math.max(head.lastIndexOf(' '), head.lastIndexOf(String.fromCharCode(9)));
+  const base = ws > 0 && ws >= Math.floor(cut * 0.6) ? head.slice(0, ws) : head;
+  return `${base}…`;
 }
 
 // ---------------------------------------------------------------------------
