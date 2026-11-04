@@ -17,7 +17,7 @@
 ## 二、当前状态（2026-11-02 20:40 · 整点巡检）
 
 ```
-分支         main = 0.118.0；功能分支 → PR → CI → 合并 → release（--require-ci）
+分支         main = 0.119.0；功能分支 → PR → CI → 合并 → release（--require-ci）
 里程碑       M7 线上验收：A3 live / A5 跨作用域 0 **已达成**；A6 判据升级为「引文可核」（audit-11 抓到文字与坐标脱钩，0.118.0 修）
 插件         **已启用并在宿主里真跑**：`kifu-loader` 别名包挂进 profile，且 `dsh-gokifu-longmemory` 是指向本工作区的**软链**，
              所以源码改动 **下次重启即生效、无需安装步骤**；宿主心跳 `live-stats.jsonl` 累计 11699 次 pre-step / `inject=62` / `failed=0`；
@@ -30,13 +30,14 @@
 | 六轴 | A1 **0.00%** · A2 **22.38%** · **A2b 84.2%（16/19，A5 补闸后重基线；旧 89.5% 作废）** · A3 **live**（inject=67 / failed=0） · A4 p50 **9.84ms**（p90 16.55 / p95 18.74 / max 32.24，负载抖动） · A5 **0.00%** · A6 **100.00%（结构口径：行带 ep+日期+seq）**；**文字级可核＝41/43（95.3%，missing 0，日期 43/43）离线重抽**，修复前线上留样是 70/122 at-seq、14 missing、日期 31/122（`evidence/M7-A6-text-level.md`） `[本] 2026-11-04 08:22` |
 | 语料 | 392 局 / **385 卷** / **claim 1053**（有效期已止 106；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-04 08:22 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
-| 已发布 | **0.15.0 → 0.117.0 的 CHANGELOG 段齐全**；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。**0.116.0 归入"无 tag"**：原 `v0.116.0` tag 指在 PR 前的分支提交（`046509f`，其 `package.json` 已是 0.117.0）⇒ 版本与内容错位，撤 tag、不补 Release，内容随 0.117.0 同一提交（`4376d5f`）落地；`scripts/release.mjs` 自此加「tag↔版本一致性」闸防复发。 |
+| 已发布 | **0.15.0 → 0.119.0 的 CHANGELOG 段齐全**；v0.116.0 见下方缺口说明，v0.117.0 已补发 tag + Release；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。**0.116.0 归入"无 tag"**：原 `v0.116.0` tag 指在 PR 前的分支提交（`046509f`，其 `package.json` 已是 0.117.0）⇒ 版本与内容错位，撤 tag、不补 Release，内容随 0.117.0 同一提交（`4376d5f`）落地；`scripts/release.mjs` 自此加「tag↔版本一致性」闸防复发。 |
 | 证据 | `M6-acceptance.md`、`M7-A6-text-level.md`（A6 文字级前后对照）、`M7-A5-live-clean.md`（A5 补闸后线上复核）、`M7-A5-live-leak.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
 | 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG`、`20-RAPTOR`、`21-CRAG`、`22-LongMemEval`、`23-Self-RAG`、`24-MemoRAG`、`25-LLM-Agent-记忆综述`、`26-Reflexion`、`27-Zep-时序知识图`、`28-Mem0`、`29-MemGPT`、`30-GenerativeAgents`、`31-GraphRAG`、`32-A-MEM`、`33-MemoryAgentBench`、`00-索引与机制对照` |
 
 ## 三、下一步（2026-11-02 23:40 修订）
 
-> **当前唯二未决项**：① Q18 开闸裁定（A/B；设计见 `docs/Q18-开闸设计.md`，A2b 最后 2 条的唯一开关）；② 首次注入后的**失败率分母积累**（当前 62 次、失败 0，样本还小，继续观察）；
+> **当前唯一未决项**：注入失败率的**分母积累**（当前 67 次注入、失败 0，样本还小，继续观察）。
+> ① Q18 已于 2026-11-04 裁定 **A（维持关闸）**，依据 `evidence/q18-preview.md`（开闸展示 +2/12 但严格 −1 条）；复核触发条件写在 `docs/拷问记录.md` 的自裁 S15。
 > ② Q18（A 维持同域 / B 类级章节跨项目，预演 0%→41.7%）。审计侧已收敛：六轮独立审计 → 活文档 10/10（`reports/audit-06.md`）。
 
 1. **N2 BM25：暂缓（有明确理由）**。`walk` 的契约是**零依赖**（文件头写明「不 import 任何模块」），
