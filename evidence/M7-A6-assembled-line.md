@@ -13,9 +13,9 @@
 
 | 项 | 值 |
 |---|---|
-| 卡上原文 | `ok github.com/MYCF711/dsh-ui/cmd/app: go build …: copying C:\Users\ADMINI~1\…\a.ou…` |
+| 卡上原文 | `ok github.com/MYCF711/dsh-ui/cmd/app: go build …: copying <user-home>\…\a.ou…` |
 | 出处 | `ep-226dbf4f` @ `seq 3670`（2026-11-03） |
-| 判定 | `missing` —— 该局事件里**找不到**这段逐字文本 |
+| 判定 | `missing` —— 该局事件里**找不到**这段逐字文本（本档里的路径已脱敏成 `<user-home>`） |
 
 ## 结论：不是错位、也不是编造，是**抽取把多段拼成了一句**
 
