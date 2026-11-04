@@ -145,17 +145,52 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
   const triggered = rows.filter((r) => r.triggered);
   const savedPositive = triggered.filter((r) => r.saved >= 1);
   const savedTotal = triggered.reduce((n, r) => n + Math.max(0, r.saved), 0);
-  const worse = rows.filter((r) => r.saved < 0);
+  // ④a：**不许变差** —— 任何组影库行数都不得多于源库（反增 = 合流把卡片撑大了）
+  const worse = rows.filter((r) => r.shadowRows > r.sourceRows);
+  // ④b：**不许丢内容** —— 源库能渲染出行的组，影库不能一行都不剩（曾经出现过 1 行 → 0 行）
+  const losses = rows.filter((r) => r.sourceRows >= 1 && r.shadowRows === 0);
+  const a = {
+    id: '④a',
+    name: '不许变差',
+    pass: rows.length > 0 && worse.length === 0,
+    worse: worse.map((r) => ({ id: r.id, sourceRows: r.sourceRows, shadowRows: r.shadowRows })),
+    groups: rows.length,
+    criterion: '反增组 = 0',
+  };
+  const b = {
+    id: '④b',
+    name: '不许丢内容',
+    pass: rows.length > 0 && losses.length === 0,
+    losses: losses.map((r) => ({ id: r.id, sourceRows: r.sourceRows, shadowRows: r.shadowRows })),
+    groups: rows.filter((r) => r.sourceRows >= 1).length,
+    criterion: '源库 ≥1 行的组里，影库 0 行 = 0 组',
+  };
+  // ④c：**参考指标**（只展示，不参与退出码）—— 收益有多大，由人按上线判据取舍
+  const c = {
+    id: '④c',
+    name: '参考：至少省 1 行的组占比',
+    savedPositive: savedPositive.length,
+    triggered: triggered.length,
+    ratio: triggered.length ? savedPositive.length / triggered.length : null,
+    avgSaved: triggered.length ? savedTotal / triggered.length : 0,
+    savedTotal,
+    criterion: '只展示（不参与退出码）',
+  };
   return {
     groups: rows.length,
     triggered: triggered.length,
     untriggered: rows.length - triggered.length,
     savedTotal,
-    avgSaved: triggered.length ? savedTotal / triggered.length : 0,
-    savedPositive: savedPositive.length,
-    ratio: triggered.length ? savedPositive.length / triggered.length : null,
-    pass: triggered.length > 0 && savedPositive.length / triggered.length >= 0.8,
+    avgSaved: c.avgSaved,
+    savedPositive: c.savedPositive,
+    ratio: c.ratio,
+    a,
+    b,
+    c,
+    // ④ 的整体结论只看 a/b；c 是参考，不许偷偷并进来
+    pass: a.pass && b.pass,
     worse,
+    losses,
     rows,
   };
 }
@@ -280,6 +315,7 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
   const groupPick = merges.slice(0, Math.max(1, mergeGroups));
   const groups = sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges: groupPick });
 
+  // ④ 只由 ④a/④b 决定（④c 是参考指标，不参与退出码）
   const ok = dup.notWorse && gate4.pass && crossScope.pass && groups.pass;
   return {
     shadowRoot,
@@ -307,15 +343,18 @@ export function formatReport(r) {
   lines.push(`| ② | 闸 4（合并节点 vs 成员） | ${r.gate4.errors} 个错误（查 ${r.gate4.groupsChecked} 组 / 影库 ${r.gate4.mergeRecords} 个合并节点） | 必须 0 |`);
   lines.push(`| ③ | 跨作用域 | ${r.crossScope.violations} 张卡非零（共 ${r.crossScope.cards} 张） | 必须 0 |`);
   const g = r.groups;
-  lines.push(`| ④ | 定点抽样（合并组） | ${g.groups} 组 · 触发 ${g.triggered}（未触发 ${g.untriggered}） · 平均省 **${g.avgSaved.toFixed(2)}** 行 · 至少省 1 行 **${g.ratio === null ? 'n/a' : `${(g.ratio * 100).toFixed(1)}%`}** | ≥ 80% |`);
+  lines.push(`| ④a | 不许变差（定点抽样） | 反增 **${g.a.worse.length}** 组 / 共 ${g.a.groups} 组${g.a.worse.length ? `（${g.a.worse.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
+  lines.push(`| ④b | 不许丢内容 | 丢内容 **${g.b.losses.length}** 组 / 源库 ≥1 行的 ${g.b.groups} 组${g.b.losses.length ? `（${g.b.losses.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
+  lines.push(`| ④c | 参考：至少省 1 行的组占比 | ${g.c.savedPositive}/${g.c.triggered} = **${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}** · 平均省 ${g.c.avgSaved.toFixed(2)} 行 · 触发 ${g.triggered}（未触发 ${g.untriggered}） | 只展示 |`);
   lines.push('');
-  lines.push(`结论：${r.ok ? '四项通过' : '有不通过项'}（① ${r.dup.notWorse ? 'ok' : 'FAIL'} · ② ${r.gate4.pass ? 'ok' : 'FAIL'} · ③ ${r.crossScope.pass ? 'ok' : 'FAIL'} · ④ ${r.groups.pass ? 'ok' : 'FAIL'}）`);
+  lines.push(`结论：${r.ok ? '通过' : '有不通过项'}（① ${r.dup.notWorse ? 'ok' : 'FAIL'} · ② ${r.gate4.pass ? 'ok' : 'FAIL'} · ③ ${r.crossScope.pass ? 'ok' : 'FAIL'} · ④a ${g.a.pass ? 'ok' : 'FAIL'} · ④b ${g.b.pass ? 'ok' : 'FAIL'} · ④c 参考 ${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}）`);
   if (g.rows.length) {
     lines.push('');
-    lines.push('| 合并组 | 成员 | 源库行数 | 影库行数 | 省下 | 触发 |');
-    lines.push('|---|---|---|---|---|---|');
+    lines.push('| 合并组 | 成员 | 源库行数 | 影库行数 | 省下 | 触发 | 闸门 |');
+    lines.push('|---|---|---|---|---|---|---|');
     for (const row of g.rows) {
-      lines.push(`| ${row.id} | ${row.members} | ${row.sourceRows} | ${row.shadowRows} | ${row.saved} | ${row.triggered ? '是' : '未触发'} |`);
+      const flag = row.shadowRows > row.sourceRows ? '⚠ 反增' : (row.sourceRows >= 1 && row.shadowRows === 0 ? '⚠ 丢内容' : '');
+      lines.push(`| ${row.id} | ${row.members} | ${row.sourceRows} | ${row.shadowRows} | ${row.saved} | ${row.triggered ? '是' : '未触发'} | ${flag} |`);
     }
   }
   if (g.worse.length) lines.push(`

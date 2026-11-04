@@ -744,16 +744,46 @@ function entryFromMergeNode(mergeClaim, options = {}) {
 }
 
 /**
- * 卡片选取条目的最后一道：**合并节点优先，成员不再各占一行**。
+ * T177（方案 C）：合并节点抢到命中位、而卡上没有任何成员行时，渲染一条**指针行**。
  *
- * 规则（T162a，必须与合流侧的 `merge` 契约一致）：
- *   1. 合并节点被命中 ⇒ 渲染它；它的成员即使也被命中，也不再单独成行（同一张卡内）。
- *   2. 合并节点没被直接命中、但**≥2 个成员**被命中 ⇒ 用合并节点替换这些成员行
- *      （只命中 1 个成员时不动：单条成员没有"合并"可省，替换反而丢出处）。
- *   3. 没有 `merge` 字段的 claim **一字不改** —— 不建索引、不碰顺序。
+ * 为什么要有它：T176 让合并节点"只替换、不主动入选"，但当它自己命中、成员又没被渲染时，
+ * 整条记忆会从 1 行变成 0 行（线上 c-091e6917 / c-415e7002 / c-4a7e6c4b 三组）——
+ * "不丢记忆"优先于"省行"，所以这里退化成**入口指针**：
+ *   · 形状与既有的 stale 指针行一致：`kind: 'pointer'` + `[stale]` 标记（闸 3/4/5/7 都按"非断言"处理）；
+ *   · 正文以"合并入口"开头、写明代表了几条、指向合并节点 id —— **不复述断言**，
+ *     也不把 representative 的引文当成事实来陈述（只作为"原文入口"给出可追溯的一小段）。
+ * 出处仍取合并节点自己的 support 锚点 ⇒ 闸 0 的 (episode, seq, 日期) 与闸 5 的 quote 规则照旧满足。
+ */
+function entryFromMergePointer(mergeClaim, options = {}) {
+  const base = entryFromMergeNode(mergeClaim, options);
+  if (!base) return null;
+  const members = Array.isArray(mergeClaim?.merge?.members) ? mergeClaim.merge.members.filter((x) => typeof x === 'string' && x) : [];
+  const body = `合并入口 · 代表 ${members.length} 条近似记忆 · 详见 ${mergeClaim.id} · 原文入口：${base.rawText}`;
+  return {
+    ...base,
+    rawText: singleLine(body),
+    kind: 'pointer',
+    marker: 'stale',
+    state: 'stale',
+  };
+}
+
+/**
+ * 卡片选取条目的最后一道：**合并节点只替换、不主动入选**。
  *
- * 顺序：合并节点插在它**第一个出现的成员**的位置（保持 walk 的相关性排序），
- * 成员行整体删除；被删的行不计入 omitted（它们没有丢，只是被合并节点代表了）。
+ * 规则（T176 收紧；T162a 的"合并节点被命中就渲染它"是线上反增的根因）：
+ *   1. 合并节点**不因为自己命中而单独成行** —— 它只作为"成员的替代行"出现；
+ *   2. **≥2 个成员**被命中 ⇒ 用合并节点替换这些成员行（合并节点插在第一个成员的位置）；
+ *   3. 只有 1 个成员被命中 ⇒ 保留成员行（单条成员没有"合并"可省，替换反而丢出处）；
+ *   4. 没有 `merge` 字段的 claim **一字不改** —— 不建索引、不碰顺序。
+ *
+ * 为什么改（实测）：`scripts/merge-acceptance.mjs` ④ 上"至少省 1 行"只有 33.3%，
+ * 还有两组**反增**（c-3011f83f 1→2、c-41157b78 2→3）：合并节点自己命中 topic、
+ * 而它代表的成员没被渲染 ⇒ 净 +1。改成"只替换"后，合并节点要么替代成员（省行），
+ * 要么根本不出现（不增行）。
+ *
+ * 被折叠的成员行不计入 omitted（它们没丢，只是被合并节点代表了）；
+ * 造不出替代行（无锚点/无出处）时**不动** —— 宁可多一行，也不丢信息。
  */
 function collapseMergeNodes({ entries, view, options = {} }) {
   const list = Array.isArray(entries) ? entries : [];
@@ -761,8 +791,13 @@ function collapseMergeNodes({ entries, view, options = {} }) {
   const byMember = mergeIndexByMember(view);
   if (!byMember.size) return list; // 库里没有合并节点：零成本直通
 
-  const renderedIds = new Set(list.filter((e) => typeof e?.claimId === 'string' && e.claimId).map((e) => e.claimId));
-  // 每个合并节点：卡片里出现了它哪几个成员
+  // 合并节点自身（带 merge.members 的 claim）：它们的行**一律不单独出现**（规则 1）。
+  const mergeNodeIds = new Set();
+  for (const claim of Array.isArray(view?.claims) ? view.claims : []) {
+    if (claim?.id && claim.merge && typeof claim.merge === 'object' && Array.isArray(claim.merge.members)) mergeNodeIds.add(claim.id);
+  }
+
+  // 每个合并节点：卡片里出现了它哪几个**成员**（成员 ≠ 合并节点自己）
   const groups = new Map();
   for (const entry of list) {
     const mergeClaim = entry?.claimId ? byMember.get(entry.claimId) : null;
@@ -771,19 +806,40 @@ function collapseMergeNodes({ entries, view, options = {} }) {
     group.members.add(entry.claimId);
     groups.set(mergeClaim.id, group);
   }
-  if (!groups.size) return list;
 
-  const dropped = new Set(); // 要删掉的成员行
-  const replacement = new Map(); // memberId（首个）→ 合并节点 entry
-  for (const [mergeId, group] of groups) {
-    const renderedDirectly = renderedIds.has(mergeId);
-    if (!renderedDirectly && group.members.size < 2) continue; // 规则 2 的"≥2 个成员"
-    for (const memberId of group.members) dropped.add(memberId);
-    if (renderedDirectly) continue; // 规则 1：合并节点本来就在卡上
+  const dropped = new Set();
+  const replacement = new Map(); // 首个成员 id → 合并节点 entry（替换行）
+  const pointer = new Map(); // 合并节点 id → 指针行（方案 C）
+  const pointerCandidates = []; // 候选指针行（按出现顺序；只有"卡上再无别的行"时才真正插入）
+
+  // 规则 2：≥2 个成员被命中 ⇒ 用合并节点替换这些成员行
+  for (const group of groups.values()) {
+    if (group.members.size < 2) continue; // 规则 3：单成员不替换
     const entry = entryFromMergeNode(group.claim, options);
-    if (entry) replacement.set([...group.members][0], entry);
+    if (!entry) continue; // 造不出替代行 ⇒ 不动（宁可多一行，也不丢信息）
+    for (const memberId of group.members) dropped.add(memberId);
+    replacement.set([...group.members][0], entry);
   }
-  if (!dropped.size && !replacement.size) return list;
+
+  // 合并节点**自己**的行：三态（T176 + T177 方案 C）
+  for (const entry of list) {
+    const id = entry?.claimId;
+    if (!id || !mergeNodeIds.has(id)) continue;
+    const group = groups.get(id);
+    if (group && group.members.size >= 2) { dropped.add(id); continue; } // 已由替换行代表
+    if (group && group.members.size === 1) { dropped.add(id); continue; } // 保留成员行（规则 3）
+    // 0 个成员行 ⇒ **候选**指针行（T177 方案 C）：先记下，等外层看"卡上是不是真的空了"再决定。
+    // 为什么不当场插：若卡上还有别的行，多插一条指针行就是"净 +1"（线上 c-3011f83f 1→2、
+    // c-41157b78 2→3 就是这样）。只有"不插就整卡空掉"时才插 —— 不丢记忆，也不增行。
+    const mergeClaim = view?.claimsById?.get?.(id) ?? null;
+    const pointerEntry = mergeClaim ? entryFromMergePointer(mergeClaim, options) : null;
+    if (pointerEntry) {
+      dropped.add(id);
+      pointer.set(pointerEntry.claimId ?? id, pointerEntry);
+      pointerCandidates.push(pointerEntry);
+    }
+  }
+  if (!dropped.size) return list;
 
   const out = [];
   const placed = new Set();
@@ -798,6 +854,11 @@ function collapseMergeNodes({ entries, view, options = {} }) {
       continue;
     }
     out.push(entry);
+  }
+  // T177：只有"卡上一条行都不剩"时才用指针行兜底（不丢记忆，且不制造净 +1）
+  if (out.length === 0 && pointerCandidates.length > 0) {
+    out.push(pointerCandidates[0]);
+    placed.add(pointerCandidates[0].claimId);
   }
   return out;
 }
