@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.141.0（2026-11-04）
+
+### 工具面拆成**独立插件**：把风险关在一个格子里
+- 上一版实测：主插件拿不到 `ctx.tools`（凭据 `{names:[], via:"none", ctxHasRegister:false}`）。
+  根因是宿主只把工具服务交给**在模块上声明了 `inject`** 的插件，而 Cordis 的 `inject` 是**必需依赖**语义 ——
+  加在主插件上，一旦服务缺失就等于把记忆注入整个停掉。
+- 新增 `src/tools-plugin.mjs`（导出为 `dsh-gokifu-longmemory/tools`）：自己声明 `export const inject = ['tools']`，
+  只做一件事 —— 把五个 `kifu_*` 只读工具注册进宿主并写凭据（`via: "tools-plugin"` / `"tools-plugin-none"`）。
+  服务缺失时**只有它不加载**，主插件的自动注入完全不受影响。
+- 新增 `scripts/print-tools-plugin-entry.mjs`：**只打印**要粘进 profile 的那几行 YAML（`--write` 另存到 `tmp/`）。
+  不写任何配置文件 —— `profiles/*/cordis.patch.yml` 是热重载开关，运行中写它会整树重载（本机有过真机事故）。
+- `package.json` 增 `"./tools"` 子路径导出，profile 里写 `name: dsh-gokifu-longmemory/tools` 即可。
+
+### 怎么启用（一步，由人执行）
+1. `node scripts/print-tools-plugin-entry.mjs` 打印片段；
+2. 粘进 `$DSH_HOME/profiles/<profile>/cordis.patch.yml` 的插件列表；
+3. 重启一次；`cat "$DSH_HOME/memory-context/tools-registered.json"` 看到 `"via": "tools-plugin"`、`"count": 5` 即成功。
+
+### 验证
+501 条测试（497 pass / 0 fail / 4 skip）：新增 4 条覆盖独立插件（`inject` 声明 / 五个工具注册 / 无工具面不抛 / 凭据 `via` 字段）；
+`check PASS`。
+
 ## 0.140.0（2026-11-04）
 
 ### 工具面注册的结论：宿主没把工具服务交给本插件（先如实记录，不盲改）
