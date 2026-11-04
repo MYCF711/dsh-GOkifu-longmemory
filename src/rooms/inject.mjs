@@ -390,7 +390,10 @@ function stateTokenOf(claim) {
 }
 
 function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null }) {
-  if (!episode || !Number.isFinite(seq) || !Number.isFinite(occurredAt)) return null;
+  // 2026-11-04（0.134.0，线上实测）：seq 是 **1 基**的；`seq: 0` 等于「不知道在哪」，不是合法出处。
+  // 当前宿主 60 条引用里就有 2 条落在 seq 0，卡上文字在该局里找不到 ⇒ A6 文字层报 missing。
+  // 回到根本规矩：无源不入 —— seq < 1 的条目不进卡（计入 omitted，而不是渲染一条查无实据的行）。
+  if (!episode || !Number.isFinite(seq) || seq < 1 || !Number.isFinite(occurredAt)) return null;
   const rawText = singleLine(`${prefix}${text}`);
   if (!rawText) return null;
   const date = formatCardDate(occurredAt);
