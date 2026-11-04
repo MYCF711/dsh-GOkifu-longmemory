@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.155.0（2026-11-05）
+
+### R11 可达性：合并节点的命中能把**成员**带进卡（T179）
+- `src/rooms/walk.mjs` 新增 `expandMergeMembers()`：命中的 claim 若 `merge.members` 非空，把成员作为**同一跳**展开进 `claimHits`（**不增加 depth**）。
+- 守卫：成员与节点 `scopeKey` **逐字节相同**；`support` 必须有 `(episode, seq, quote)`；无 `occurredAt` 不带；
+  同一 claimId 只出现一次；成员排在节点之后按 `occurredAt` 升序；每条节点最多 8 个，超出计入既有 `dropped.mergeMembersCapped`。
+- **对现有读数零伤害**：④a 反增 0 组 · ④b 丢内容 0 组（真库 + 影库实测）。
+
+### 如实交代：④c 仍是 50%，瓶颈不在 R11
+- 12 个"触发"组里，**源库卡片"该组成员行 ≥2"的只有 3 组** —— 其余组的"源库行数 > 1"是**与该组无关的通用失败 claim**。
+  也就是说 ④c 现在的"触发"定义把无关行算进了分母，**这些组本来就不可能省行**。
+- 真正的折叠瓶颈在 R12 消费侧：`pickClaim` 会把"成员命中"升级成"合并节点命中"，再被 `collectEntries` 按 claimId 去重，
+  而折叠规则 1 又"合并节点不单独成行" ⇒ 卡里既无成员行也无节点行，折叠无从发生。
+- 已派 T181：把 ④c 的"可折组"重新定义成"该组成员行 ≥2"，把不可折组单列 `notFoldable`（口径修正，不是放宽）。
+
+### 验证
+29 条 walk 测试全绿；671 条测试（667 pass / 0 fail / 4 skip）；`check PASS`。
+
 ## 0.154.0（2026-11-05）
 
 ### 合流的安全判据：不许变差、不许丢内容（T178）

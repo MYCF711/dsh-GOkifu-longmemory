@@ -888,3 +888,112 @@ test('Q18: allowCrossScopeClass 关闭时类级 claim 不用跨域证据；打�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// 9 · 合并节点（T179）：命中合并节点 ⇒ 成员 claim 同一跳展开（R12 折叠需要成员行）
+// ---------------------------------------------------------------------------
+
+// 注意：kind=tool 的主题按 S9 不能起跳（只认 entity），夹具用 term ✓
+const MERGE_TOPIC = { id: 't:term:merge0001', kind: 'term', key: 'bash', df: 3, idfNorm: 0.7 };
+const MERGE_SIGNAL = Object.freeze({ kind: 'root-message', terms: ['bash'], entities: [], at: T0 + 9_000 });
+
+/** 成员：出处挂在 ep-foreign（不命中任何主题的局）⇒ 只有"合并节点展开"这条通路能带出它们。 */
+function mergeMember(id, text, seqNo, occurredAt, scopeKey = SCOPE) {
+  return claimRecord({
+    id, kind: 'antipattern', text, scopeKey,
+    support: [{ episode: 'ep-foreign', seq: seqNo, quote: `成员原文 ${seqNo}`, occurredAt }],
+    occurredAt,
+  });
+}
+
+function mergeStore({ memberCount = 3 } = {}) {
+  const target = createStore({ root: path.join(tmp, `merge-store-${(seq += 1)}`), now: T0 });
+  target.ensureDirs();
+  target.putMany('episodes', [
+    episodeRecord({ id: 'ep-merge1', topics: [epTopic(MERGE_TOPIC)], failures: 1, at: T0 + 1_000, l0: 'bash 退出码被吞' }),
+    episodeRecord({ id: 'ep-foreign', topics: [], at: T0 + 3_000, l0: '不命中任何主题的局' }),
+  ], { at: T0 });
+  target.putMany('topics', [topicRecord(MERGE_TOPIC, { episodes: ['ep-merge1'] })], { at: T0 });
+
+  const members = [];
+  for (let i = 1; i <= memberCount; i += 1) {
+    members.push(mergeMember(`c-mem-${String(i).padStart(2, '0')}`, `成员 ${i}：管道退出码`, 20 + i, T0 + 1_000 + i * 100));
+  }
+  const node = claimRecord({
+    id: 'c-merge01', kind: 'antipattern', text: 'bash 退出码被吞（合并节点）',
+    support: [{ episode: 'ep-merge1', seq: 10, quote: 'bash exit 1', occurredAt: T0 + 1_100 }], occurredAt: T0 + 1_100,
+  });
+  node.merge = {
+    members: members.map((m) => m.id),
+    representative: { claimId: members[0].id, episode: 'ep-foreign', seq: 21, quote: '成员原文 21' },
+  };
+  target.putMany('claims', [
+    node,
+    ...members,
+    mergeMember('c-mem-cross', '成员：另一个工作区', 90, T0 + 1_150, OTHER_SCOPE), // 跨作用域
+    claimRecord({ // 缺 quote ⇒ 无源不入
+      id: 'c-mem-noproof', kind: 'antipattern', text: '成员：没有 quote 的出处',
+      support: [{ episode: 'ep-foreign', seq: 91 }], occurredAt: T0 + 1_160,
+    }),
+  ], { at: T0 });
+  return target;
+}
+
+function mergeWalk(target, opts = {}) {
+  return walkFromSignals({
+    signal: MERGE_SIGNAL, store: target, scope: SCOPE, depth: 2, limit: 30, budgetTokens: 100_000, ...opts,
+  });
+}
+
+test('R11 合并节点：命中 ⇒ 成员同一跳展开（去重、depth 不变、why 沿用、按 occurredAt 升序）', () => {
+  const target = mergeStore({ memberCount: 3 });
+  const result = mergeWalk(target);
+  assertInvariants(result);
+  const ids = claimIds(result);
+  const node = result.hits.find((hit) => hit.claim === 'c-merge01');
+  assert.ok(node, '合并节点本身要命中（否则展开无从谈起）');
+  for (const id of ['c-mem-01', 'c-mem-02', 'c-mem-03']) assert.ok(ids.includes(id), `${id} 应作为成员被带出`);
+  assert.equal(ids.filter((id) => id === 'c-mem-01').length, 1, '同一 claimId 只出现一次');
+  for (const id of ['c-mem-01', 'c-mem-02', 'c-mem-03']) {
+    const hit = result.hits.find((h) => h.claim === id);
+    assert.equal(hit.depth, node.depth, '成员算同一跳，不增加 depth');
+    assert.deepEqual(hit.why, node.why, 'why 沿用节点的证据路径');
+    assert.ok(Number.isFinite(hit.occurredAt) && Number.isFinite(hit.seq), '成员带 (episode, seq, 日期)');
+    assert.equal(hit.claimKind, 'antipattern');
+  }
+  // 节点之后、按 occurredAt 升序（01=1100+100 < 02 < 03）
+  const order = ids.filter((id) => ['c-merge01', 'c-mem-01', 'c-mem-02', 'c-mem-03'].includes(id));
+  assert.deepEqual(order, ['c-merge01', 'c-mem-01', 'c-mem-02', 'c-mem-03']);
+  assert.ok(result.path.some((hop) => hop.kind === 'merge' && hop.to === 'c-mem-02'), 'path 里能查到「合并节点 → 成员」这一跳');
+});
+
+test('R11 合并节点：跨作用域成员不带（逐字节同域），缺出处成员也不带（无源不入）', () => {
+  const target = mergeStore({ memberCount: 2 });
+  const result = mergeWalk(target);
+  const ids = claimIds(result);
+  assert.ok(ids.includes('c-mem-01') && ids.includes('c-mem-02'), '同域成员照常带出');
+  assert.ok(!ids.includes('c-mem-cross'), '跨作用域成员不带（A5）');
+  assert.ok(!ids.includes('c-mem-noproof'), 'support 里没有 quote ⇒ 无可核出处 ⇒ 不带');
+  // 反证：这两条在 store 里确实存在（不是夹具漏了）
+  assert.ok(target.get('claims', 'c-mem-cross'));
+  assert.ok(target.get('claims', 'c-mem-noproof'));
+  // 同一份夹具换成另一个作用域看：合并节点自己就越界 ⇒ 整组（含"同域成员"）都进不来
+  const other = mergeWalk(target, { scope: OTHER_SCOPE });
+  const otherIds = claimIds(other);
+  assert.ok(!otherIds.includes('c-merge01'), '合并节点跨域 ⇒ 不命中');
+  assert.ok(!otherIds.includes('c-mem-01'), '节点不命中 ⇒ 展开不发生，组内成员也进不来');
+  assert.ok(!otherIds.includes('c-mem-cross'));
+});
+
+test('R11 合并节点：展开有上限（min(成员数, 8)），被砍掉的计入 dropped.mergeMembersCapped', () => {
+  const target = mergeStore({ memberCount: 10 });
+  const result = mergeWalk(target);
+  const members = claimIds(result).filter((id) => id.startsWith('c-mem-') && id !== 'c-mem-cross' && id !== 'c-mem-noproof');
+  assert.equal(members.length, 8, '每条合并节点最多带 8 个成员');
+  assert.equal(result.dropped.mergeMembersCapped, 2, '多出来的 2 个如实计入 dropped');
+  // 只带最早的前 8 个（occurredAt 升序截断）
+  assert.deepEqual(members.sort(), ['c-mem-01', 'c-mem-02', 'c-mem-03', 'c-mem-04', 'c-mem-05', 'c-mem-06', 'c-mem-07', 'c-mem-08']);
+  // 没有 merge 字段的 claim：行为一字不改（这条 claim 有自己的出处、照常命中；不受展开影响）
+  const plain = mergeWalk(mergeStore({ memberCount: 2 }));
+  assert.ok(claimIds(plain).includes('c-mem-noproof') === false, '缺出处的普通 claim 仍然不入');
+});
