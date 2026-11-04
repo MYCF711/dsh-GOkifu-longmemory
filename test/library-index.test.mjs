@@ -21,10 +21,13 @@ import {
   clipChars,
   parseArgs,
   main,
+  createTopicResolver,
   LIBRARY_ID,
+  EDGE_KIND,
   INDEX_NOTE,
   MAX_FIRST_LINE,
 } from '../scripts/build-library-index.mjs';
+import { createStore } from '../src/rooms/persist.mjs';
 
 const LONG = '长'.repeat(200);
 
@@ -178,8 +181,10 @@ test('T144: 可复算 —— 同输入两次同输出；不写盘', () => {
 });
 
 test('T144: CLI —— 默认打印摘要，--json 打印完整结构；目录不存在 ⇒ 非零', () => {
-  assert.deepEqual(parseArgs(['--json', '--docs', 'x']), { json: true, docs: 'x' });
-  assert.deepEqual(parseArgs(['--docs=y']), { json: false, docs: 'y' });
+  assert.deepEqual(parseArgs(['--json', '--docs', 'x']), { json: true, docs: 'x', store: null });
+  assert.deepEqual(parseArgs(['--docs=y']), { json: false, docs: 'y', store: null });
+  assert.deepEqual(parseArgs(['--store', 's']), { json: false, docs: null, store: 's' });
+  assert.deepEqual(parseArgs(['--store=s2']), { json: false, docs: null, store: 's2' });
 
   const out = [];
   const errs = [];
@@ -210,6 +215,90 @@ test('T144: CLI —— 默认打印摘要，--json 打印完整结构；目录�
   });
   assert.equal(missing, 2);
   assert.match(errs.join(''), /读取失败/);
+});
+
+test('T150: resolveTopic 注入后 —— 边指向真实 topic id，未解析进 orphans，counts 恒等式成立', () => {
+  const real = new Map([
+    ['mem0', 't:term:939ed81a'],
+    ['agent', 't:tool:1c423785'],
+  ]);
+  const resolveTopic = (name) => real.get(name) ?? null;
+
+  const result = buildLibraryIndex({ docsDir: fixture.docs, resolveTopic });
+  const mem0 = result.edges.filter((e) => e.topicName === 'mem0');
+  assert.equal(mem0.length, 2, '01 与 03 都提到 mem0');
+  assert.deepEqual(new Set(mem0.map((e) => e.to)), new Set(['t:term:939ed81a']), 'to 是真实 topic id');
+  assert.equal(mem0[0].kind, EDGE_KIND);
+  assert.equal(mem0[0].from, LIBRARY_ID);
+
+  // 未解析的主题**不建边**（不许编造节点），只进 orphans
+  const unresolvedNames = new Set(result.orphans.map((o) => o.name));
+  assert.ok(result.orphans.length > 0);
+  assert.ok(!result.edges.some((e) => e.to === 't:letta'), '解析不到 ⇒ 不产生 t:letta 这种假节点');
+  for (const orphan of result.orphans) {
+    assert.ok(orphan.name && typeof orphan.why === 'string' && orphan.why.length > 0);
+    assert.ok(!result.edges.some((e) => e.topicName === orphan.name), '同一主题不能既解析又孤儿');
+  }
+
+  const { counts } = result;
+  assert.equal(counts.notes, 3);
+  assert.equal(counts.resolvedEdges, result.edges.length);
+  assert.equal(counts.orphans, result.orphans.length);
+  assert.equal(counts.edges, counts.resolvedEdges + counts.orphans, 'edges = resolvedEdges + orphans');
+  assert.ok(counts.orphans > 0 && unresolvedNames.size > 0);
+});
+
+test('T150: 不传 resolveTopic —— 行为与 T144 完全一致（向后兼容）', () => {
+  const legacy = buildLibraryIndex({ docsDir: fixture.docs });
+  assert.deepEqual(legacy.edges.map((e) => e.to), legacy.edges.map((e) => `t:${e.topicName}`));
+  assert.deepEqual(legacy.orphans, []);
+  assert.equal(legacy.counts.resolvedEdges, legacy.counts.edges);
+  assert.equal(legacy.counts.orphans, 0);
+
+  const explicitNull = buildLibraryIndex({ docsDir: fixture.docs, resolveTopic: null });
+  assert.deepEqual(explicitNull, legacy);
+});
+
+test('T150: CLI --store —— 用 sidecar 的 topics 解析，只读；缺目录 ⇒ 非零', () => {
+  const storeDir = path.join(fixture.root, 'memory-context');
+  mkdirSync(storeDir, { recursive: true });
+  const store = createStore({ root: storeDir });
+  store.ensureDirs();
+  store.put('topics', { id: 't:term:939ed81a', kind: 'term', key: 'Mem0', df: 2 });
+  store.put('topics', { id: 't:tool:1c423785', kind: 'tool', key: 'agent', df: 1 });
+
+  // 只读：跑完 store 目录里文件一个都不多
+  const before = readdirSync(path.join(storeDir, 'topics')).sort();
+
+  const out = [];
+  const errs = [];
+  const code = main(['--store', storeDir, '--docs', fixture.docs], {
+    stdout: { write: (s) => out.push(s) },
+    stderr: { write: (s) => errs.push(s) },
+  });
+  assert.equal(code, 0, errs.join(''));
+  const text = out.join('');
+  assert.match(text, /主题库：.*（只读）/);
+  assert.match(text, /边数：\d+ = resolvedEdges \d+ \+ orphans \d+/);
+
+  const jsonOut = [];
+  main(['--store', storeDir, '--docs', fixture.docs, '--json'], {
+    stdout: { write: (s) => jsonOut.push(s) },
+    stderr: { write: () => {} },
+  });
+  const parsed = JSON.parse(jsonOut.join(''));
+  assert.ok(parsed.edges.some((e) => e.to === 't:term:939ed81a'), 'key 大小写不敏感（Mem0 → mem0）');
+  assert.equal(parsed.counts.edges, parsed.counts.resolvedEdges + parsed.counts.orphans);
+  assert.ok(parsed.counts.resolvedEdges >= 2);
+
+  assert.deepEqual(readdirSync(path.join(storeDir, 'topics')).sort(), before, '只读：不写库');
+
+  const missing = main(['--store', path.join(fixture.root, 'no-store'), '--docs', fixture.docs], {
+    stdout: { write: () => {} },
+    stderr: { write: (s) => errs.push(s) },
+  });
+  assert.equal(missing, 2);
+  assert.match(errs.join(''), /--store 目录不存在/);
 });
 
 test('T144: 截断工具按「字」算（emoji/代理对不会被切半）', () => {

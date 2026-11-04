@@ -23,12 +23,17 @@
 //      从 `00-索引与机制对照.md` 表里读到的系统名（读不到就跳过）。
 //   5. edges：一条边一个主题；why = `第 <n> 篇 · <title 前 20 字>`；同一主题在 N 篇出现就 N 条边。
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { createStore } from '../src/rooms/persist.mjs';
+
 /** 巨型节点 id（主人裁定，固定字符串）。 */
 export const LIBRARY_ID = 'lib:docs/调研';
+
+/** 「知识库 → 主题」边的 kind（契约 §4.3 的边表里新增的一类）。 */
+export const EDGE_KIND = 'library-mentions-topic';
 
 /** 索引文件（它不是笔记，跳过）。 */
 export const INDEX_NOTE = '00-索引与机制对照.md';
@@ -188,9 +193,15 @@ export function listNotes(docsDir) {
 
 /**
  * 生产者入口：扫一遍 docsDir，产出「巨型节点 + 子节点 + 主题边」。
- * @param {{docsDir?: string, maxNotes?: number}} [options]
+ *
+ * `resolveTopic`（可选、纯函数、由调用方注入）把**主题名**解析成**真实 topic id**：
+ *   - 传了：解析成功 ⇒ 边指向真实 id（`t:term:…` / `t:tool:…`）；解析不到 ⇒ 进 `orphans`
+ *     （"知识库提到、但记忆里从没出现过"的主题——**不许编造节点**，所以不建边）。
+ *   - 不传：退化成旧行为（`to: 't:<name>'`，没有孤儿），保持向后兼容。
+ *
+ * @param {{docsDir?: string, maxNotes?: number, resolveTopic?: ((name: string) => string|null)|null}} [options]
  */
-export function buildLibraryIndex({ docsDir = DEFAULT_DOCS_DIR, maxNotes = 500 } = {}) {
+export function buildLibraryIndex({ docsDir = DEFAULT_DOCS_DIR, maxNotes = 500, resolveTopic = null } = {}) {
   const dir = path.resolve(docsDir);
   const files = listNotes(dir);
   const systemNames = readSystemNames(path.join(dir, INDEX_NOTE));
@@ -213,15 +224,23 @@ export function buildLibraryIndex({ docsDir = DEFAULT_DOCS_DIR, maxNotes = 500 }
     };
   });
 
+  const hasResolver = typeof resolveTopic === 'function';
   const edges = [];
+  const orphans = [];
   notes.forEach((note, i) => {
-    for (const topic of note.topics) {
-      edges.push({
-        kind: 'library-mentions-topic',
-        from: LIBRARY_ID,
-        to: `t:${topic}`,
-        why: `第 ${i + 1} 篇 · ${clipChars(note.title, WHY_TITLE_CHARS)}`,
-      });
+    const why = `第 ${i + 1} 篇 · ${clipChars(note.title, WHY_TITLE_CHARS)}`;
+    for (const topicName of note.topics) {
+      if (!hasResolver) {
+        // 向后兼容：没有解析器时沿用旧形态，边指向 `t:<name>`
+        edges.push({ kind: EDGE_KIND, from: LIBRARY_ID, to: `t:${topicName}`, topicName, why });
+        continue;
+      }
+      const target = resolveTopic(topicName);
+      if (typeof target === 'string' && target !== '') {
+        edges.push({ kind: EDGE_KIND, from: LIBRARY_ID, to: target, topicName, why });
+      } else {
+        orphans.push({ name: topicName, why });
+      }
     }
   });
 
@@ -234,18 +253,46 @@ export function buildLibraryIndex({ docsDir = DEFAULT_DOCS_DIR, maxNotes = 500 }
     },
     notes,
     edges,
+    orphans,
+    counts: {
+      notes: notes.length,
+      // 总提及数 = 解析成功的边 + 解析不到的孤儿；三者永远满足这条恒等式
+      edges: edges.length + orphans.length,
+      resolvedEdges: edges.length,
+      orphans: orphans.length,
+    },
     clamped,
   };
 }
 
-/** CLI 参数：`[--json] [--docs <dir>]`。 */
+/**
+ * 从 sidecar 的 `topics` 里建「主题名（小写、去空白）→ 真实 topic id」解析器。
+ * **只读**：`createStore` 只用来 list，不写库。
+ * @param {{storeDir: string}} options
+ */
+export function createTopicResolver({ storeDir } = {}) {
+  const store = createStore({ root: storeDir });
+  const byName = new Map();
+  for (const entry of store.list('topics')) {
+    const key = entry?.record?.key;
+    if (typeof key !== 'string') continue;
+    const name = key.trim().toLowerCase();
+    if (!name || byName.has(name)) continue; // 同名 topic 取先出现的一条，保证可复算
+    byName.set(name, entry.id);
+  }
+  return (name) => byName.get(String(name ?? '').trim().toLowerCase()) ?? null;
+}
+
+/** CLI 参数：`[--json] [--docs <dir>] [--store <dir>]`。 */
 export function parseArgs(argv = []) {
-  const flags = { json: false, docs: null };
+  const flags = { json: false, docs: null, store: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--json') flags.json = true;
-    else if (arg === '--docs') flags.docs = argv[i + 1] ?? null, i += 1;
+    else if (arg === '--docs') (flags.docs = argv[i + 1] ?? null), (i += 1);
     else if (arg.startsWith('--docs=')) flags.docs = arg.slice('--docs='.length);
+    else if (arg === '--store') (flags.store = argv[i + 1] ?? null), (i += 1);
+    else if (arg.startsWith('--store=')) flags.store = arg.slice('--store='.length);
   }
   return flags;
 }
@@ -254,9 +301,25 @@ export function parseArgs(argv = []) {
 export function main(argv = [], { stdout = process.stdout, stderr = process.stderr } = {}) {
   const flags = parseArgs(argv);
   const docsDir = flags.docs ?? DEFAULT_DOCS_DIR;
+
+  let resolveTopic = null;
+  if (flags.store) {
+    const storeDir = path.resolve(flags.store);
+    if (!existsSync(storeDir)) {
+      stderr.write(`build-library-index: --store 目录不存在 ${storeDir}\n`);
+      return 2;
+    }
+    try {
+      resolveTopic = createTopicResolver({ storeDir });
+    } catch (error) {
+      stderr.write(`build-library-index: 读主题库失败 ${storeDir}：${String(error?.message ?? error)}\n`);
+      return 2;
+    }
+  }
+
   let result;
   try {
-    result = buildLibraryIndex({ docsDir });
+    result = buildLibraryIndex({ docsDir, resolveTopic });
   } catch (error) {
     stderr.write(`build-library-index: 读取失败 ${path.resolve(docsDir)}：${String(error?.message ?? error)}\n`);
     return 2;
@@ -265,11 +328,13 @@ export function main(argv = [], { stdout = process.stdout, stderr = process.stde
     stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     return 0;
   }
-  const topicCount = new Set(result.edges.map((e) => e.to)).size;
+  const { counts } = result;
+  const names = new Set([...result.edges.map((e) => e.topicName), ...result.orphans.map((o) => o.name)]);
   stdout.write('调研知识库索引（生产者 · 不写盘）\n');
-  stdout.write(`篇数：${result.notes.length}\n`);
-  stdout.write(`主题数：${topicCount}\n`);
-  stdout.write(`边数：${result.edges.length}\n`);
+  if (flags.store) stdout.write(`主题库：${path.resolve(flags.store)}（只读）\n`);
+  stdout.write(`篇数：${counts.notes}\n`);
+  stdout.write(`主题数：${names.size}\n`);
+  stdout.write(`边数：${counts.edges} = resolvedEdges ${counts.resolvedEdges} + orphans ${counts.orphans}\n`);
   stdout.write(`clamped：${result.clamped ? '是' : '否'}\n`);
   return 0;
 }
