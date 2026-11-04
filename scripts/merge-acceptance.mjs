@@ -103,10 +103,13 @@ export function buildCard(store, cache, claim, { limit = ENTRY_LIMIT, budgetToke
  * （walkFromSignals 只吃 signal 文本，没有 episode/seq 直击入参；组正文 = 成员的 representativeText，
  *  所以命中的就是同一组文本），分别在源库/影库走**同一条真实链路**（walk → buildMemoryCard）。
  *
- * 判据：源库该组本来只有 ≤1 行 ⇒ **未触发**（成员没被同时命中），不算进分母；
- *       触发组里"影库少 ≥1 行"的占比 ≥ 80% ⇒ 通过。
+ * 判据（T181 定稿）：
+ *   · ④a 不许变差：任何组 `影库行数 ≤ 源库行数`；
+ *   · ④b 不许丢内容：`源库行数 ≥1` 的组，影库行数必须 `≥1`；
+ *   · ④c 参考：**可折组**（源库卡片里**本组成员行 ≥2**）中"影库省行"的占比 —— 只展示、不参与退出码。
+ *   成员行数 = 卡片渲染行的 `claimId` 与本组 `merge.members` 求交集的个数（源/影各算一次，不解析正文）。
  * @param {{source:object, shadow:object, sourceCache:object, shadowCache:object,
- *          merges:Array, limit?:number, budgetTokens?:number}} p
+ *          merges:Array, limit?:number, budgetTokens?:number, measure?:Function}} p
  */
 export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges = [], limit = 20, budgetTokens = 2000, measure = null } = {}) {
   const rows = [];
@@ -114,37 +117,55 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
     const text = normalizeText(merged?.text);
     const scopeKey = typeof merged?.scopeKey === 'string' ? merged.scopeKey : '';
     if (!text || !scopeKey) {
-      rows.push({ id: merged?.id ?? null, members: 0, sourceRows: 0, shadowRows: 0, saved: 0, triggered: false, why: 'no-text-or-scope' });
+      rows.push({
+        id: merged?.id ?? null,
+        members: 0,
+        sourceRows: 0,
+        shadowRows: 0,
+        saved: 0,
+        triggered: false,
+        membersSourceRows: 0,
+        membersShadowRows: 0,
+        foldable: false,
+        why: 'no-text-or-scope',
+      });
       continue;
     }
     const pseudo = { text, scopeKey };
     const run = measure ?? ((store, cache) => buildCard(store, cache, pseudo, { limit, budgetTokens }));
-    let sourceRows = 0;
-    let shadowRows = 0;
+    // T181：④c 的分母只认"卡片里出现的是**本组**成员"
+    const memberIds = new Set(Array.isArray(merged?.merge?.members) ? merged.merge.members.map(String) : []);
+    let sourceClaims = [];
+    let shadowClaims = [];
     try {
-      sourceRows = run(source, sourceCache).card.claims.length;
+      sourceClaims = run(source, sourceCache).card.claims ?? [];
     } catch {
-      sourceRows = 0;
+      sourceClaims = [];
     }
     try {
-      shadowRows = run(shadow, shadowCache).card.claims.length;
+      shadowClaims = run(shadow, shadowCache).card.claims ?? [];
     } catch {
-      shadowRows = 0;
+      shadowClaims = [];
     }
+    // "成员行数" = 卡片渲染行里 claimId ∈ 本组 merge.members 的行数（机械数集合交集，不解析正文）
+    const membersSourceRows = sourceClaims.filter((entry) => memberIds.has(String(entry?.claimId ?? ''))).length;
+    const membersShadowRows = shadowClaims.filter((entry) => memberIds.has(String(entry?.claimId ?? ''))).length;
     rows.push({
       id: merged.id,
-      members: Array.isArray(merged?.merge?.members) ? merged.merge.members.length : 0,
-      sourceRows,
-      shadowRows,
-      saved: sourceRows - shadowRows,
-      // 源库这一组本来只有 ≤1 行 ⇒ 成员没被同时命中，`未触发`
-      triggered: sourceRows > 1,
-      mergedRendered: shadowRows >= 1,
+      members: memberIds.size,
+      sourceRows: sourceClaims.length,
+      shadowRows: shadowClaims.length,
+      saved: sourceClaims.length - shadowClaims.length,
+      // 可折组 = 源库卡片里**本组成员行 ≥2**（只有这样才能靠折叠省行）；
+      // `triggered` 保留旧含义（源库总行数 > 1）仅作对照，不再当分母。
+      foldable: membersSourceRows >= 2,
+      triggered: sourceClaims.length > 1,
+      membersSourceRows,
+      membersShadowRows,
+      mergedRendered: shadowClaims.length >= 1,
     });
   }
-  const triggered = rows.filter((r) => r.triggered);
-  const savedPositive = triggered.filter((r) => r.saved >= 1);
-  const savedTotal = triggered.reduce((n, r) => n + Math.max(0, r.saved), 0);
+
   // ④a：**不许变差** —— 任何组影库行数都不得多于源库（反增 = 合流把卡片撑大了）
   const worse = rows.filter((r) => r.shadowRows > r.sourceRows);
   // ④b：**不许丢内容** —— 源库能渲染出行的组，影库不能一行都不剩（曾经出现过 1 行 → 0 行）
@@ -165,21 +186,38 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
     groups: rows.filter((r) => r.sourceRows >= 1).length,
     criterion: '源库 ≥1 行的组里，影库 0 行 = 0 组',
   };
-  // ④c：**参考指标**（只展示，不参与退出码）—— 收益有多大，由人按上线判据取舍
+  // ④c：**参考指标**（只展示，不参与退出码）
+  // T181：分母改成"**可折组**"（源库本组成员行 ≥2）。旧口径（`sourceRows > 1`）会把
+  // "卡片里碰巧有无关行"的组也算进分母，那些组永远省不了行（除非砍无关行，而那是 ④b 禁止的）。
+  const foldable = rows.filter((r) => r.foldable);
+  const savedPositive = foldable.filter((r) => r.shadowRows < r.sourceRows);
+  const savedTotal = foldable.reduce((n, r) => n + Math.max(0, r.sourceRows - r.shadowRows), 0);
   const c = {
     id: '④c',
-    name: '参考：至少省 1 行的组占比',
+    name: '参考：可折组里"影库省行"的占比',
+    foldable: foldable.length,
+    notFoldable: rows.length - foldable.length,
     savedPositive: savedPositive.length,
-    triggered: triggered.length,
-    ratio: triggered.length ? savedPositive.length / triggered.length : null,
-    avgSaved: triggered.length ? savedTotal / triggered.length : 0,
+    ratio: foldable.length ? savedPositive.length / foldable.length : null,
+    avgSaved: foldable.length ? savedTotal / foldable.length : 0,
     savedTotal,
+    membersSourceRows: rows.map((r) => ({
+      id: r.id,
+      membersSourceRows: r.membersSourceRows,
+      membersShadowRows: r.membersShadowRows,
+      sourceRows: r.sourceRows,
+      shadowRows: r.shadowRows,
+      foldable: r.foldable,
+      saved: r.sourceRows - r.shadowRows,
+    })),
     criterion: '只展示（不参与退出码）',
   };
   return {
     groups: rows.length,
-    triggered: triggered.length,
-    untriggered: rows.length - triggered.length,
+    triggered: rows.filter((r) => r.triggered).length,
+    untriggered: rows.filter((r) => !r.triggered).length,
+    foldable: foldable.length,
+    notFoldable: rows.length - foldable.length,
     savedTotal,
     avgSaved: c.avgSaved,
     savedPositive: c.savedPositive,
@@ -345,16 +383,16 @@ export function formatReport(r) {
   const g = r.groups;
   lines.push(`| ④a | 不许变差（定点抽样） | 反增 **${g.a.worse.length}** 组 / 共 ${g.a.groups} 组${g.a.worse.length ? `（${g.a.worse.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
   lines.push(`| ④b | 不许丢内容 | 丢内容 **${g.b.losses.length}** 组 / 源库 ≥1 行的 ${g.b.groups} 组${g.b.losses.length ? `（${g.b.losses.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
-  lines.push(`| ④c | 参考：至少省 1 行的组占比 | ${g.c.savedPositive}/${g.c.triggered} = **${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}** · 平均省 ${g.c.avgSaved.toFixed(2)} 行 · 触发 ${g.triggered}（未触发 ${g.untriggered}） | 只展示 |`);
+  lines.push(`| ④c | 参考：**可折组**里"影库省行"的占比 | 可折 **${g.c.foldable}** 组 / 不可折 ${g.c.notFoldable} 组 · 占比 **${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}** · 平均省 ${g.c.avgSaved.toFixed(2)} 行 | 只展示 |`);
   lines.push('');
   lines.push(`结论：${r.ok ? '通过' : '有不通过项'}（① ${r.dup.notWorse ? 'ok' : 'FAIL'} · ② ${r.gate4.pass ? 'ok' : 'FAIL'} · ③ ${r.crossScope.pass ? 'ok' : 'FAIL'} · ④a ${g.a.pass ? 'ok' : 'FAIL'} · ④b ${g.b.pass ? 'ok' : 'FAIL'} · ④c 参考 ${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}）`);
   if (g.rows.length) {
     lines.push('');
-    lines.push('| 合并组 | 成员 | 源库行数 | 影库行数 | 省下 | 触发 | 闸门 |');
-    lines.push('|---|---|---|---|---|---|---|');
+    lines.push('| 合并组 | 成员 | 成员行数（源/影） | 源库行数 | 影库行数 | 省下 | 可折 | 闸门 |');
+    lines.push('|---|---|---|---|---|---|---|---|');
     for (const row of g.rows) {
       const flag = row.shadowRows > row.sourceRows ? '⚠ 反增' : (row.sourceRows >= 1 && row.shadowRows === 0 ? '⚠ 丢内容' : '');
-      lines.push(`| ${row.id} | ${row.members} | ${row.sourceRows} | ${row.shadowRows} | ${row.saved} | ${row.triggered ? '是' : '未触发'} | ${flag} |`);
+      lines.push(`| ${row.id} | ${row.members} | ${row.membersSourceRows}/${row.membersShadowRows} | ${row.sourceRows} | ${row.shadowRows} | ${row.saved} | ${row.foldable ? '是' : '不可折'} | ${flag} |`);
     }
   }
   if (g.worse.length) lines.push(`

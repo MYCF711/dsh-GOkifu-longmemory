@@ -1,11 +1,10 @@
-// T173 的 tombstone test：删掉 `scripts/merge-acceptance.mjs` 的 `sampleMergeGroups` ⇒ 本文件红。
+// T173/T178/T181 的 tombstone test：删掉 `scripts/merge-acceptance.mjs` 的 `sampleMergeGroups` ⇒ 本文件红。
 //
-// 覆盖（任务书 T173 验收）：
-//   - 定点抽样：信号 = 合并组的共享正文（走真实链路 walk → buildMemoryCard；测试里注入假 measure 只验聚合）
-//   - 源库该组 ≤1 行 ⇒ **未触发**，不算进分母
-//   - 汇总：n 组 · 平均省 X 行 · 至少省 1 行的占比；占比 ≥ 80% 才 `pass`
-//   - 影库比源库**多行**的组要单独列出（`worse`）
-//   - `--merge-groups` 参数解析
+// 覆盖：
+//   - T173 定点抽样：信号 = 合并组的共享正文（真实链路 walk → buildMemoryCard；测试注入假 measure 只验聚合）
+//   - T178 三条闸门：④a 不许变差 / ④b 不许丢内容 / ④c 只作参考（不参与退出码）
+//   - T181 ④c 的**分母**改成"可折组"= 源库卡片里**本组成员行 ≥2** 的组；
+//     成员行 ≤1 的组进 `notFoldable`，**不进分母**（旧口径把无关行算进分母，测的不是合流收益）
 //
 // 只读：不写任何库；纯函数聚合，零模型调用。
 
@@ -14,6 +13,7 @@ import assert from 'node:assert/strict';
 
 import { sampleMergeGroups, parseArgs, normalizeText, countDuplicateRows } from '../scripts/merge-acceptance.mjs';
 
+/** 造一个合并组：成员 id 为 `<id>-m0..m{n-1}`。 */
 const group = (id, members = 2, text = `合并组 ${id} 的共享正文`) => ({
   id,
   text,
@@ -21,155 +21,127 @@ const group = (id, members = 2, text = `合并组 ${id} 的共享正文`) => ({
   merge: { members: Array.from({ length: members }, (_, i) => `${id}-m${i}`) },
 });
 
-/** 假 measure：按组 id 返回预设行数（sourceRows / shadowRows）。 */
-function fakeMeasure(table) {
-  return (store, cache) => {
-    const key = store?.__key ?? cache?.__key;
-    return { card: { claims: new Array(table[key] ?? 0).fill(0).map((_, i) => ({ claimId: `x${i}` })) } };
-  };
-}
-
 const srcStore = { __key: 'src' };
 const shadowStore = { __key: 'shadow' };
 
-test('T173/T178: 定点抽样汇总 —— 未触发不计分母；④c 只算参考，④a/④b 决定通过', () => {
-  const merges = [group('g1'), group('g2'), group('g3'), group('g4')];
-  // g1: 3→1 省 2 · g2: 2→1 省 1 · g3: 1→1 未触发 · g4: 2→2 省 0（触发但没省）
-  const rows = { src: [3, 2, 1, 2], shadow: [1, 1, 1, 2] };
-  let i = 0;
-  const measure = () => {
-    const idx = i % 4;
-    i += 1;
-    return { card: { claims: new Array(rows[idx === 0 ? 'src' : 'shadow'][idx] ?? 0).fill(0).map((_, k) => ({ claimId: `c${k}` })) } };
-  };
-  // 用 index 轮转：第 1 次 src、第 2 次 shadow、第 3 次 src ……（4 组 ×2 = 8 次）
+/**
+ * 假 measure：按"第几次调用"返回一张卡。
+ * `specs[i] = { src: 源库行数, shadow: 影库行数, members: 本组成员数 }`
+ * 卡片里前 min(行数, members) 行是**本组成员**，其余是无关 claim。
+ */
+function measureFrom(specs) {
   let call = 0;
-  const measure2 = () => {
-    const groupIdx = Math.floor(call / 2);
+  return () => {
+    const gi = Math.floor(call / 2);
     const isSource = call % 2 === 0;
     call += 1;
-    const n = isSource ? rows.src[groupIdx] : rows.shadow[groupIdx];
-    return { card: { claims: new Array(n).fill(0).map((_, k) => ({ claimId: `c${k}` })) } };
+    const spec = specs[gi] ?? { src: 0, shadow: 0, members: 0 };
+    const n = isSource ? spec.src : spec.shadow;
+    const memberCap = Math.min(spec.members ?? 0, n);
+    const claims = [];
+    for (let k = 0; k < n; k += 1) {
+      claims.push({ claimId: k < memberCap ? `g${gi + 1}-m${k}` : `g${gi + 1}-other${k}` });
+    }
+    return { card: { claims } };
   };
-  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure: measure2 });
-  assert.equal(res.groups, 4);
-  assert.equal(res.untriggered, 1, 'g3 源库只有 1 行 ⇒ 未触发');
-  assert.equal(res.triggered, 3);
-  assert.equal(res.savedTotal, 3, 'g1 省 2 + g2 省 1 + g4 省 0');
-  assert.equal(res.savedPositive, 2, '省 ≥1 行的组：g1/g2');
-  assert.equal(res.ratio, 2 / 3);
-  // T178：④c 只是参考指标 —— 33.3% 偏低但没变差、没丢内容 ⇒ 整体 PASS
-  assert.equal(res.c.ratio, 2 / 3, '④c 照原口径算');
-  assert.equal(res.a.pass, true, '④a 无变差');
-  assert.equal(res.b.pass, true, '④b 无丢内容');
-  assert.equal(res.pass, true, '④c 低不红（只展示）');
-  assert.ok(measure);
+}
 
-  // 3/3 触发组都省 ≥1 行 ⇒ 通过
-  const allSave = [group('a'), group('b'), group('c')];
-  const rows2 = { src: [2, 3, 4], shadow: [1, 1, 1] };
-  let call2 = 0;
-  const measure3 = () => {
-    const gi = Math.floor(call2 / 2);
-    const isSrc = call2 % 2 === 0;
-    call2 += 1;
-    const n = isSrc ? rows2.src[gi] : rows2.shadow[gi];
-    return { card: { claims: new Array(n).fill(0).map((_, k) => ({ claimId: `c${k}` })) } };
-  };
-  const res2 = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges: allSave, measure: measure3 });
-  assert.equal(res2.triggered, 3);
-  assert.equal(res2.savedPositive, 3);
-  assert.equal(res2.ratio, 1);
-  assert.equal(res2.pass, true);
-  assert.equal(res2.avgSaved, 2);
+const mergesOf = (n, membersEach = 2) => Array.from({ length: n }, (_, i) => group(`g${i + 1}`, membersEach));
+
+test('T181 ①: 成员行 ≤1 的组进 notFoldable，不进 ④c 分母', () => {
+  // g1：源库 3 行但**本组成员只有 1 行**（另外 2 行是无关 claim）⇒ 不可折
+  // g2：源库 2 行、成员 2 行 ⇒ 可折
+  const merges = mergesOf(2);
+  const measure = measureFrom([{ src: 3, shadow: 3, members: 1 }, { src: 2, shadow: 1, members: 2 }]);
+  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure });
+
+  assert.equal(res.rows[0].membersSourceRows, 1, 'g1 源库本组成员行 = 1');
+  assert.equal(res.rows[0].foldable, false, 'g1 不可折（旧口径 sourceRows=3>1 会误判成可折）');
+  assert.equal(res.rows[1].membersSourceRows, 2);
+  assert.equal(res.rows[1].foldable, true);
+
+  assert.equal(res.c.foldable, 1, '④c 分母只有 g2');
+  assert.equal(res.c.notFoldable, 1, 'g1 单列 notFoldable');
+  assert.equal(res.c.ratio, 1, 'g2 省了行 ⇒ 1/1');
+  assert.deepEqual(res.c.membersSourceRows.map((r) => [r.id, r.membersSourceRows, r.membersShadowRows]), [
+    ['g1', 1, 1],
+    ['g2', 2, 1],
+  ]);
 });
 
-test('T173: 影库比源库多行的组要单列（worse）', () => {
-  const merges = [group('w1'), group('w2')];
-  const rows = { src: [1, 2], shadow: [2, 3] };
-  let call = 0;
-  const measure = () => {
-    const gi = Math.floor(call / 2);
-    const isSrc = call % 2 === 0;
-    call += 1;
-    const n = isSrc ? rows.src[gi] : rows.shadow[gi];
-    return { card: { claims: new Array(n).fill(0).map((_, k) => ({ claimId: `c${k}` })) } };
-  };
+test('T181 ②: 成员行 ≥2 且影库省行 ⇒ 计入 ④c 分子', () => {
+  const merges = mergesOf(2);
+  const measure = measureFrom([{ src: 3, shadow: 2, members: 2 }, { src: 4, shadow: 3, members: 3 }]);
   const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure });
-  assert.equal(res.worse.length, 2);
-  assert.deepEqual(res.worse.map((x) => [x.id, x.sourceRows, x.shadowRows]), [['w1', 1, 2], ['w2', 2, 3]]);
-  assert.equal(res.a.pass, false, '④a：有反增组 ⇒ FAIL');
-  assert.equal(res.a.worse.length, 2);
-  assert.equal(res.pass, false, '④a 不过 ⇒ 退出码 1');
+  assert.equal(res.c.foldable, 2);
+  assert.equal(res.c.savedPositive, 2);
+  assert.equal(res.c.ratio, 1);
+  assert.equal(res.c.avgSaved, 1, '(3-2 + 4-3) / 2 = 1');
+});
+
+test('T181 ③: 成员行 ≥2 但影库没省 ⇒ 分子不加（如实）', () => {
+  const merges = mergesOf(2);
+  // g1 可折但没省（3→3）；g2 可折且省（2→1）
+  const measure = measureFrom([{ src: 3, shadow: 3, members: 2 }, { src: 2, shadow: 1, members: 2 }]);
+  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure });
+  assert.equal(res.c.foldable, 2);
+  assert.equal(res.c.savedPositive, 1, '只有 g2 省行');
+  assert.equal(res.c.ratio, 0.5);
+  assert.equal(res.c.avgSaved, 0.5, '(0 + 1) / 2');
+  assert.equal(res.a.pass, true, '没变差');
+  assert.equal(res.b.pass, true, '没丢内容');
+  assert.equal(res.pass, true, '④c 低不红（参考指标）');
 });
 
 test('T178 ④a: 任何组反增（影库行数 > 源库）⇒ ④a FAIL', () => {
-  const merges = [group('s1'), group('s2')];
-  const rows = { src: [3, 2], shadow: [4, 1] }; // s1 反增 3→4，s2 省 1
-  let call = 0;
-  const measure = () => {
-    const gi = Math.floor(call / 2);
-    const isSrc = call % 2 === 0;
-    call += 1;
-    const n = isSrc ? rows.src[gi] : rows.shadow[gi];
-    return { card: { claims: new Array(n).fill(0).map((_, k) => ({ claimId: `c${k}` })) } };
-  };
+  const merges = mergesOf(2);
+  const measure = measureFrom([{ src: 3, shadow: 4, members: 2 }, { src: 2, shadow: 1, members: 2 }]);
   const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure });
   assert.equal(res.a.pass, false);
-  assert.deepEqual(res.a.worse, [{ id: 's1', sourceRows: 3, shadowRows: 4 }]);
+  assert.deepEqual(res.a.worse, [{ id: 'g1', sourceRows: 3, shadowRows: 4 }]);
   assert.equal(res.pass, false);
 });
 
 test('T178 ④b: 源库有行、影库 0 行（丢内容）⇒ ④b FAIL', () => {
-  const merges = [group('l1'), group('l2')];
-  const rows = { src: [2, 3], shadow: [0, 3] }; // l1 丢内容 2→0，l2 持平
-  let call = 0;
-  const measure = () => {
-    const gi = Math.floor(call / 2);
-    const isSrc = call % 2 === 0;
-    call += 1;
-    const n = isSrc ? rows.src[gi] : rows.shadow[gi];
-    return { card: { claims: new Array(n).fill(0).map((_, k) => ({ claimId: `c${k}` })) } };
-  };
+  const merges = mergesOf(2);
+  const measure = measureFrom([{ src: 2, shadow: 0, members: 2 }, { src: 3, shadow: 3, members: 2 }]);
   const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure });
   assert.equal(res.a.pass, true, '没有反增组');
   assert.equal(res.b.pass, false, '有丢内容组');
-  assert.deepEqual(res.b.losses, [{ id: 'l1', sourceRows: 2, shadowRows: 0 }]);
+  assert.deepEqual(res.b.losses, [{ id: 'g1', sourceRows: 2, shadowRows: 0 }]);
   assert.equal(res.pass, false, '④b 不过 ⇒ 退出码 1');
 });
 
-test('T178: 只省 0 行但无变差无丢失 ⇒ 整体 PASS（④c 低也不红）', () => {
-  const merges = [group('z1'), group('z2')];
-  const rows = { src: [2, 5], shadow: [2, 5] }; // 一行都没省，但也没变差/丢内容
-  let call = 0;
-  const measure = () => {
-    const gi = Math.floor(call / 2);
-    const isSrc = call % 2 === 0;
-    call += 1;
-    const n = isSrc ? rows.src[gi] : rows.shadow[gi];
-    return { card: { claims: new Array(n).fill(0).map((_, k) => ({ claimId: `c${k}` })) } };
-  };
+test('T178: 一行也没省但无变差无丢失 ⇒ 整体 PASS（④c 为 0 也不红）', () => {
+  const merges = mergesOf(2);
+  const measure = measureFrom([{ src: 2, shadow: 2, members: 2 }, { src: 5, shadow: 5, members: 2 }]);
   const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure });
-  assert.equal(res.c.savedPositive, 0, '④c：0 组省行');
+  assert.equal(res.c.savedPositive, 0);
   assert.equal(res.c.ratio, 0);
   assert.equal(res.a.pass, true);
   assert.equal(res.b.pass, true);
-  assert.equal(res.pass, true, '④c 为 0 不许判红');
+  assert.equal(res.pass, true, '④c 只是参考');
 });
 
-test('T173: 没有合并组 / 组缺正文 ⇒ 不误判通过', () => {
-  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges: [], measure: fakeMeasure({}) });
+test('T173: 没有合并组 / 组缺正文 ⇒ 不误判通过（fail-closed）', () => {
+  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges: [], measure: measureFrom([]) });
   assert.equal(res.groups, 0);
-  assert.equal(res.triggered, 0);
-  assert.equal(res.ratio, null);
-  assert.equal(res.pass, false, '没有样品不能算通过');
+  assert.equal(res.c.foldable, 0);
+  assert.equal(res.c.ratio, null);
+  assert.equal(res.a.pass, false, '没有样品不能算 ④a 通过');
+  assert.equal(res.b.pass, false, '没有样品不能算 ④b 通过');
 
-  assert.equal(res.a.pass, false, '没有样品不能算 ④a 通过（fail-closed）');
-  assert.equal(res.b.pass, false, '没有样品不能算 ④b 通过（fail-closed）');
-
-  const noText = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges: [{ id: 'x', text: '   ', scopeKey: '' }], measure: fakeMeasure({}) });
+  const noText = sampleMergeGroups({
+    source: srcStore,
+    shadow: shadowStore,
+    sourceCache: {},
+    shadowCache: {},
+    merges: [{ id: 'x', text: '   ', scopeKey: '' }],
+    measure: measureFrom([]),
+  });
   assert.equal(noText.rows[0].why, 'no-text-or-scope');
-  assert.equal(noText.triggered, 0);
+  assert.equal(noText.rows[0].foldable, false);
+  assert.equal(noText.c.foldable, 0);
 });
 
 test('T173: --merge-groups 参数与既有参数解析', () => {
