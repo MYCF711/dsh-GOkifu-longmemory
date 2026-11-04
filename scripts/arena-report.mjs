@@ -26,6 +26,27 @@ const readJsonl = (file) => {
 
 const pct = (x) => (typeof x === 'number' && Number.isFinite(x) ? `${(x * 100).toFixed(2)}%` : 'n/a');
 
+/** 2026-11-04：公开仓库里不写本机绝对路径与用户名（脱敏守卫修好后第一时间抓到的就是这两处）。
+ *  用字符串处理而不是正则：分隔符本身就是反斜杠，正则里再转义一次极易写错（已经踩过一次）。 */
+export function redactLocalPaths(text) {
+  const B = String.fromCharCode(92);
+  const usersTag = `${B}Users${B}`;
+  let out = String(text ?? '');
+  let idx = out.indexOf(usersTag);
+  while (idx >= 0) {
+    // 连盘符一起换成 <user-home>：只换用户名不够，脱敏守卫仍会把「盘符 + Users + 名字」认成路径。
+    const driveStart = idx >= 2 && out[idx - 1] === ':' && /[A-Za-z]/.test(out[idx - 2] ?? '') ? idx - 2 : idx;
+    const after = idx + usersTag.length;
+    let end2 = after;
+    const stops = `${B}/ 	`;
+    while (end2 < out.length && !stops.includes(out[end2])) end2 += 1;
+    out = `${out.slice(0, driveStart)}<user-home>${out.slice(end2)}`;
+    idx = out.indexOf(usersTag, driveStart + 11);
+  }
+  out = out.split(REPO).join('<repo>');
+  return out;
+}
+
 /** 分位数（输入未排序原数组；口径与 `scripts/m5-report.mjs` 的 `percentile` 一致：floor(q*n) 截断到 n-1）。 */
 export function quantile(list, q) {
   const a = list.filter((x) => Number.isFinite(x)).slice().sort((x, y) => x - y);
@@ -183,8 +204,8 @@ if (invoked) {
   if (json) console.log(JSON.stringify(summary, null, 2));
   else {
     console.log('擂台报告（零模型调用 · 只读双方日志）');
-    console.log(`我方读数：${summary.oursFrom}`);
-    console.log(`对方读数：${summary.theirsFrom}（usage ${theirs.usageLines} 行 / diag ${theirs.diagLines} 行，${theirs.firstAt} → ${theirs.lastAt}）`);
+    console.log(`我方读数：${redactLocalPaths(summary.oursFrom)}`);
+    console.log(`对方读数：${redactLocalPaths(summary.theirsFrom)}（usage ${theirs.usageLines} 行 / diag ${theirs.diagLines} 行，${theirs.firstAt} → ${theirs.lastAt}）`);
     console.log('');
     for (const r of rows) {
       console.log(`[${r.verdict}] ${r.axis}`);
@@ -200,7 +221,7 @@ if (invoked) {
     const lines = [];
     lines.push('# 擂台实测（我们 vs 本机 Hindsight）');
     lines.push('');
-    lines.push(`> 生成于 ${summary.generatedAt} · 零模型调用 · 只读双方日志。我方读数来自 \`${summary.oursFrom}\`；对方读数来自 \`${summary.theirsFrom}\`。`);
+    lines.push(`> 生成于 ${summary.generatedAt} · 零模型调用 · 只读双方日志。我方读数来自 \`${redactLocalPaths(summary.oursFrom)}\`；对方读数来自 \`${redactLocalPaths(summary.theirsFrom)}\`。`);
     lines.push('');
     lines.push('| 轴 | 判定 | 我方 | 对方 | 判据 |');
     lines.push('|---|---|---|---|---|');

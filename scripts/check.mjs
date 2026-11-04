@@ -77,7 +77,9 @@ try {
 }
 
 // 工作树干净检查只在 release.mjs 做，这里只报分支
-try { const br = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim(); ok.push(`branch=${br}`); } catch { fail.push('不是 git 仓库'); }
+// 2026-11-04：没有 git 不算失败 —— 导出的 tarball / 发行包本来就没有 .git（可交付性闸要在这种目录里跑）。
+// 目录里不能跑的是"发布前必须干净"这类判据；这里只记一行 note，不判红。
+try { const br = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim(); ok.push(`branch=${br}`); } catch { ok.push('branch=（无 git：导出的包，跳过）'); }
 
 console.log(ok.map((x) => `ok  ${x}`).join('\n'));
 if (fail.length) { console.error(fail.map((x) => `ERR ${x}`).join('\n')); process.exit(1); }
