@@ -24,7 +24,7 @@ export const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PUSH_LEDGER = process.argv.includes('--push-ledger');
 
 /** 台账里那条测试行的整行正则（`| 测试 | **N 条**（P pass / F fail / S skip）[本] 时间 |`）。 */
-export const LEDGER_TEST_LINE_RE = /^\|\s*测试\s*\|\s*\*\*(\d+)\s*条\*\*（(\d+)\s*pass\s*\/\s*(\d+)\s*fail\s*\/\s*(\d+)\s*skip）\[本\]\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s*\|$/;
+export const LEDGER_TEST_LINE_RE = /^\|\s*测试\s*\|\s*\*\*(\d+)\s*条\*\*（(\d+)\s*pass\s*\/\s*(\d+)\s*fail\s*\/\s*(\d+)\s*skip）\[本\]\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s*\|\s*$/;
 
 /** 本地时间戳（台账用本地时间，不用 UTC）。 */
 export function formatStamp(ms) {
