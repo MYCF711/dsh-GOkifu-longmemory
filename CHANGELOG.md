@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.157.0（2026-11-05）
+
+### A2b 唯一失分的域分析：**不是漏召回，是跨域样本的结构性代价**（T182）
+- 新 `scripts/a2b-domain-audit.mjs`（只读，零模型）：命中**完全复用** `m5-report` 的 `measureA2b`（同一份冻结集、同一套 overlap≥2 判据），
+  只对返回的逐条做**域归属**：域按 `scopeKey` 严格相等；覆盖 = 库里 claim 的 `support[].episode` 命中 ground truth 的 prior 局；
+  三分类 = 无覆盖 `absent` / 覆盖全在别域 `cross-domain` / 覆盖落在本域 `in-domain-miss`。
+- 真库实测：**in-domain-miss 0 · cross-domain 1 · absent 0**（n=19；`multiHop 15/15` 全中，`openDomain 3/4`）。
+  域校正后 **18/18 = 100.00%**（**只展示，不改口径**）。
+- 唯一失分（`#15`，`openDomain`，bestOverlap=1）：ground truth 在 `w:d:…/长期记忆系统`，样本 scope 是 `w:e:/…/default-workspace`，
+  `a2b-set.json` 里这条 `sameScope` 本来就是 `false`；69 条覆盖 claim **全在别的域**（长期记忆系统 47 + `u:owner` 22），本域一条覆盖都没有。
+- **裁定：严格口径不改**。0 条 `in-domain-miss` 说明"本域有证据却漏召回"的样本一条都没有；18/19 是那 1 条跨域样本的结构性代价。
+  要更可解释应把 `sameScope=false` 的 10 条样本单列（Q18 的 `crossScopeStrict/crossScopeSampled` 已在做），
+  **而不是把跨域从主分母删掉** —— 那会让 A2b 失去"跨项目记忆有没有用"这个唯一观测面。
+
+### 验证
+7 条 a2b-domain-audit 测试全绿；`check PASS`。
+
 ## 0.156.0（2026-11-05）
 
 ### ④c 的口径修正：分母只算"真的可折"的组（T181）
