@@ -238,6 +238,25 @@ export function makeLogLoader({ home = process.env.DSH_HOME || 'D:/DeepSeek Harn
 // CLI
 // ---------------------------------------------------------------------------
 
+/**
+ * 从 `live-stats.jsonl` 的行里挑出**当前宿主**（最后一条心跳所在的那个 pid）。
+ * 2026-11-04：重启前后新旧进程混写 `card-samples.jsonl`，全量统计会把旧代码的账算成"回归"
+ * （A5 那 2 条跨作用域、A6 那 17 条 missing 都是 0.117.0 产出的）。`--current` 用这个函数自动切。
+ * 纯函数：不读盘，单测直接喂行。
+ */
+export function pickCurrentPid(liveRows, { nowMs = null } = {}) {
+  const rows = (Array.isArray(liveRows) ? liveRows : []).filter((r) => r && Number.isFinite(Number(r.pid)) && Number.isFinite(Number(r.at)));
+  if (!rows.length) return null;
+  let latest = rows[0];
+  for (const r of rows) if (Number(r.at) > Number(latest.at)) latest = r;
+  const pid = Number(latest.pid);
+  const at = Number(latest.at);
+  const ageMs = Number.isFinite(nowMs) ? Math.max(0, nowMs - at) : null;
+  const stale = Number.isFinite(ageMs) ? ageMs > 30 * 60 * 1000 : false;
+  const count = rows.filter((r) => Number(r.pid) === pid).length;
+  return { pid, at, ageMs, stale, count };
+}
+
 async function main(argv = process.argv.slice(2)) {
   const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 && argv[i + 1] ? argv[i + 1] : d; };
   const HOME = process.env.DSH_HOME || 'D:/DeepSeek Harness/home';
@@ -253,8 +272,29 @@ async function main(argv = process.argv.slice(2)) {
     .map((l) => { try { return JSON.parse(l); } catch { return null; } })
     .filter(Boolean);
   // 2026-11-04：按宿主进程切样本（重启前后新旧代码混写同一文件，混在一起会把旧账读成回归）。
-  const pidWant = Number(opt('pid', '0'));
+  //   --pid <n>   显式指定；
+  //   --current   自动挑"最后一条心跳所在的 pid"（巡检用这个，省得每次手抄 pid）。
+  let pidWant = Number(opt('pid', '0'));
+  let pidNote = '';
+  if (!(Number.isFinite(pidWant) && pidWant > 0) && argv.includes('--current')) {
+    const liveFile = path.join(storeRoot, 'live-stats.jsonl');
+    const live = fs.existsSync(liveFile)
+      ? fs.readFileSync(liveFile, 'utf8').split('\n').filter(Boolean)
+        .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
+      : [];
+    const cur = pickCurrentPid(live, { nowMs: Date.now() });
+    if (cur) {
+      pidWant = cur.pid;
+      const mins = cur.ageMs == null ? '?' : Math.round(cur.ageMs / 60000);
+      pidNote = `（--current ⇒ 宿主 pid=${cur.pid}，最后心跳 ${mins} 分钟前${cur.stale ? '，**看起来没在跑**' : ''}；该进程心跳 ${cur.count} 条）`;
+    } else {
+      pidNote = '（--current 没找到心跳记录 ⇒ 退回全量样本）';
+    }
+  }
   if (Number.isFinite(pidWant) && pidWant > 0) rows = rows.filter((r) => Number(r.pid) === pidWant);
+  if (argv.includes('--current') && rows.length === 0 && pidNote !== '') {
+    pidNote += ' · 该进程还没有带 pid 的样本（重启后新写的样本才会带）';
+  }
 
   const out = await auditRows({ rows, episodes, loadEvents: makeLogLoader({ home: HOME }), window, textCheck });
 
@@ -263,7 +303,7 @@ async function main(argv = process.argv.slice(2)) {
   } else {
     const pct = (n) => (out.refs ? `${((n / out.refs) * 100).toFixed(1)}%` : '-');
     if (textCheck) {
-      console.log(`样本 ${out.samples} 张 · 引用 ${out.refs} 条 · at-seq ${out.textAtSeq} · elsewhere ${out.textElsewhere} · missing ${out.textMissing} · 日期一致 ${out.dateOk}/${out.refs}`);
+      console.log(`样本 ${out.samples} 张 · 引用 ${out.refs} 条 · at-seq ${out.textAtSeq} · elsewhere ${out.textElsewhere} · missing ${out.textMissing} · 日期一致 ${out.dateOk}/${out.refs}${pidNote ? ' ' + pidNote : ''}`);
       console.log(`（引用层：可回溯 ${out.okRefs}/${out.refs}（${pct(out.okRefs)}，弱判据）· 同作用域 ${out.sameScopeRefs} · 跨作用域 ${out.crossScopeRefs} · window=±${out.window}）`);
       const gap = out.details.flatMap((d) => d.verdicts)
         .filter((v) => v.distance != null && v.distance > out.window && v.distance <= 10).length;
@@ -271,7 +311,7 @@ async function main(argv = process.argv.slice(2)) {
         console.log(`（提示：另有 ${gap} 条落在 ±${out.window + 1}~±10 —— 这是"调用步 → 工具结果"的自然间隔，不是错位；可用 --window 10 复核）`);
       }
     } else {
-      console.log(`样本 ${out.samples} 张 · 引用 ${out.refs} 条 · 可回溯 ${out.okRefs}（${pct(out.okRefs)}）· 同作用域 ${out.sameScopeRefs} · 跨作用域 ${out.crossScopeRefs} · 文字层已跳过（--no-text）`);
+      console.log(`样本 ${out.samples} 张 · 引用 ${out.refs} 条 · 可回溯 ${out.okRefs}（${pct(out.okRefs)}）· 同作用域 ${out.sameScopeRefs} · 跨作用域 ${out.crossScopeRefs} · 文字层已跳过（--no-text）${pidNote ? ' ' + pidNote : ''}`);
     }
     for (const d of out.details) {
       const extra = textCheck

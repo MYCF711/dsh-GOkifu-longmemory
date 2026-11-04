@@ -17,6 +17,29 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.131.0（2026-11-04）
+
+### 巡检的第一句不再要人解释：`audit-card-samples --current` 自动切「当前宿主」
+- 之前的痛点：`card-samples.jsonl` 里新旧进程混写，全量统计永远显示「跨作用域 2 / missing 17」——
+  每次巡检都要人工补一句「那是 0.117.0 的旧账」。只看数字的人会把它读成**回归**。
+- 新增 `--current`：从 `live-stats.jsonl` 里挑**最后一条心跳所在的 pid**（`pickCurrentPid()`，纯函数、可单测），
+  只统计这个进程写的样本；超过 30 分钟没心跳会标「看起来没在跑」，找不到心跳则如实退回全量。
+- **实测立刻见效**：当前宿主（pid 38972）的 22 张样本 ⇒ **跨作用域 0**。
+  也就是说 A5 那 2 条越界全部来自旧代码，当前代码是干净的 —— 这句话以前只能靠人记，现在一条命令就能看见。
+
+### 知识库：调研 36 Letta MemFS —— 记忆块换成 git 仓库
+- [外] MemFS 原文：“The memory itself is part of the agent's state, **held in a git repository that belongs to the agent**”，
+  投影成真实 checkout、**commit + push 前改动只在本地**；按路径寻址（标签 `persona` → `persona.md`）。
+- [外] **根目录文件每轮进系统提示词**；带自己 `MEMORY.md` 的子目录默认不进上下文（“signposts”）；
+  “MemFS **does not include a semantic or vector index by default**”；dreaming / memory doctor 用 **git worktree** 并发改记忆。
+- 对照本仓：Letta 把记忆做成**可写的仓库状态**（面向行为延续），我们把记忆做成**只读档案**（面向经验复用）。
+  可借「分层索引当路标」「把重复纳入机械审计（只报不改）」；**不借**开放写面、根文件进系统提示（祈使句）、
+  模型审阅后自动应用、跨 agent 共享仓库 —— 最值钱的是反向证据：他们正为开放写面付旧 memory blocks 的迁移成本。
+
+### 验证
+481 条测试（477 pass / 0 fail / 4 skip）：新增 3 条覆盖 `pickCurrentPid`（取最新 pid / 30 分钟标 stale / 空输入返回 null）；
+`check PASS`（调研清单 37 篇）。
+
 ## 0.130.0（2026-11-04）
 
 ### 台账闸：红了要能说出**是哪一条**（上一版留下的债）
