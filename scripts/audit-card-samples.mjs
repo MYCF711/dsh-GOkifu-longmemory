@@ -249,9 +249,12 @@ async function main(argv = process.argv.slice(2)) {
   const window = Number(opt('window', String(DEFAULT_WINDOW)));
   const store = createStore({ root: storeRoot });
   const episodes = new Map(store.list('episodes').map((x) => [x.record.id, x.record]));
-  const rows = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+  let rows = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
     .map((l) => { try { return JSON.parse(l); } catch { return null; } })
     .filter(Boolean);
+  // 2026-11-04：按宿主进程切样本（重启前后新旧代码混写同一文件，混在一起会把旧账读成回归）。
+  const pidWant = Number(opt('pid', '0'));
+  if (Number.isFinite(pidWant) && pidWant > 0) rows = rows.filter((r) => Number(r.pid) === pidWant);
 
   const out = await auditRows({ rows, episodes, loadEvents: makeLogLoader({ home: HOME }), window, textCheck });
 

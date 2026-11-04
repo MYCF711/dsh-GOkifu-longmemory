@@ -780,6 +780,9 @@ test('M4: 注入抽样只写 sidecar，且 8MB 上限后停止', async () => {
   const { appendCardSample } = await import('../src/plugin.mjs');
   const dir = mkdtempSync(path.join(tmpdir(), 'kifu-sample-'));
   appendCardSample(dir, { digest: 'd1', tokens: 12, section: '<memory-ledger>x</memory-ledger>' });
+  // 2026-11-04：留样必须带 pid，审计才能按宿主进程切新旧代码的账
+  const firstRow = JSON.parse(readFileSync(path.join(dir, 'card-samples.jsonl'), 'utf8').trim().split('\n')[0]);
+  assert.equal(firstRow.pid, process.pid, '留样要带 pid');
   const file = path.join(dir, 'card-samples.jsonl');
   const rows = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   assert.equal(rows.length, 1);

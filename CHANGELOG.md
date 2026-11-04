@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.127.0（2026-11-04）
+
+### 卡片留样带 pid：审计能按宿主进程切「新旧代码的账」
+- 背景：宿主重启前后新旧进程会混写同一个 `card-samples.jsonl`；不分进程时，旧代码产出的卡会被误读成"新代码回归"
+  （本轮巡检就出现 15 条 `missing`，全是 0.117.0 产出的旧账）。
+- `src/plugin.mjs` 的 `appendCardSample` 现在统一写入 `pid: process.pid`；单测断言该字段存在。
+- `scripts/audit-card-samples.mjs` 新增 `--pid <n>`：只看某个宿主机汇报的样本（默认不过滤，保持向后兼容）。
+- 注意：字段是**新增**的，只对**重启后**的新样本生效；旧样本没有 pid 属预期。
+
+### 知识库：调研 35 Mem0 v3 的 ADD-only 累积
+- [外] Python SDK **v2.0.0（2026-04-14）** 的 Breaking Changes 原文：`add()` 只返回 ADD 事件，
+  **"No more UPDATE or DELETE events. Memories accumulate; nothing is overwritten"**，新记忆靠 `linked_memory_ids` 累积；
+  体积问题改在**读时排序**解决（"handles this at retrieval time instead… without destroying historical context"）。
+- 对照本仓：它把"只增不改 + 读时遮蔽"从异类变成了 2026 年的主流工程解（累积 + 关系 + 时间是一套）；
+  可借的只有"入馆前对完全相同事实做机械去重"这一件小事，不借 LLM 抽取/向量检索/用 delete 控体积。
+- 全部为**厂商文档**（非论文），自报指标未独立复现，笔记里已逐条标注（含 GitHub 抓不到、提示词正文未读到）。
+
+### 验证
+458 条测试（454 pass / 0 fail / 4 skip）；`check PASS`（调研清单 36 篇）；`metrics-guard PASS`（A1=0 · A5=0 · A6=1 · A2b严格 0.8947 · 覆盖 1 · p50 8.56ms）。
+
 ## 0.126.0（2026-11-04）
 
 ### Q18 复核：从"聚合率"升级到"逐条配对 + 精确 McNemar" —— 结论仍是 A

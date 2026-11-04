@@ -726,7 +726,9 @@ export function appendCardSample(storeRoot, row) {
     const file = path.join(storeRoot, 'card-samples.jsonl');
     const stat = fs.existsSync(file) ? fs.statSync(file) : null;
     if (stat && stat.size > 8 * 1024 * 1024) return; // 8 MB 上限，避免无限增长
-    fs.appendFileSync(file, `${JSON.stringify({ at: Date.now(), ...row })}
+    // 2026-11-04：留样带 pid —— 宿主重启后新旧进程会混写同一文件，
+    // 审计要能按进程切（`audit-card-samples --pid <n>`），否则"旧代码的账"会被误读成回归。
+    fs.appendFileSync(file, `${JSON.stringify({ at: Date.now(), pid: process.pid, ...row })}
 `);
   } catch { /* 抽样失败不影响注入 */ }
 }
