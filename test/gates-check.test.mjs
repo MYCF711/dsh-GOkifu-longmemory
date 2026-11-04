@@ -278,7 +278,9 @@ test('R13/闸3: runValidityCheck —— 结果键 `claims:<id>`、summary 计数
   assert.equal(summary.total, 3, 'none 不算进来');
   assert.equal(summary.skipped, 1);
   assert.equal(summary.ok, 1);
-  assert.equal(summary.failed, 2);
+  // 2026-11-05（T158b）：version 读不到包 ⇒ **未核验**（不混进 failed）；只有 file-missing 是真 stale
+  assert.equal(summary.failed, 1);
+  assert.equal(summary.unverified, 1);
   assert.deepEqual(Object.keys(results).sort(), ['claims:c-aaa00001', 'claims:c-aaa00002', 'claims:c-aaa00004']);
   assert.equal(results['claims:c-aaa00001'].ok, true);
   assert.equal(results['claims:c-aaa00002'].reason, 'file-missing');

@@ -151,6 +151,8 @@ test('R09: ENOENT 失败 → fact + validity{type:"file"}（preconditions 可核
   assert.equal(f.state, 'observed', '单局证据只到 observed');
   assert.equal(f.preconditions[0].check, 'file-exists');
   assert.equal(f.preconditions[0].value, 'd:/work/demo/cfg.json');
+  // T158a：ENOENT 派生的 fact 语义是「此刻该路径不存在」⇒ 方向位必须写 missing
+  assert.equal(f.validity.expect, 'missing', 'file 的方向位 = missing（文件出现才 stale）');
   assert.match(f.text, /ENOENT/);
   assert.ok(f.support[0].quote.includes('cfg.json'));
 });

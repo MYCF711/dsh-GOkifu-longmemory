@@ -408,6 +408,38 @@ export function gateCodesFromGates(gates, limit = 5) {
   return [...new Set(codes)].slice(0, limit);
 }
 
+/**
+ * T160：从 `runGates()` 的 `errors[].detail` 里取出**被点名的 claim id**。
+ *
+ * 为什么需要：被闸挡下的卡**不入** `card-samples.jsonl`，心跳行原来只有
+ * `digest / tokens / gateIds / gateCodes` —— 事件过去后无法还原是哪几条 claim 被拦
+ * （按 digest 回放也命中不了，因为库还在长）。这里补上 id，事后能直接去 store 里查。
+ *
+ * 取法（**能拿到就收集，拿不到就空数组，不猜**）：
+ *   · `detail.ids`（数组，闸 4 的 byBody 组）
+ *   · `detail.claimId`（闸 2 / 3 / 5 / 7 的条目级报错）
+ *   · `detail.id`（有的闸只写 id）
+ * 只收非空字符串；去重保序；最多 `limit` 个（默认 5，防止一行心跳被撑爆）。
+ * **只读 id，不碰卡正文**（心跳里不许出现记忆内容）。
+ */
+export function gateClaimIdsFromGates(gates, limit = 5) {
+  const errors = Array.isArray(gates?.errors) ? gates.errors : [];
+  const ids = [];
+  const push = (value) => {
+    if (typeof value !== 'string') return;
+    const id = value.trim();
+    if (id) ids.push(id);
+  };
+  for (const error of errors) {
+    const detail = error?.detail;
+    if (!detail || typeof detail !== 'object') continue;
+    if (Array.isArray(detail.ids)) for (const id of detail.ids) push(id);
+    push(detail.claimId);
+    push(detail.id);
+  }
+  return [...new Set(ids)].slice(0, Math.max(1, Number(limit) || 5));
+}
+
 async function decidePreStep({ ctx, config, deps, payload, decision }) {
   const session = payload?.agent?.session ?? payload?.session ?? null;
   const text = lastUserText(payload?.messages);
@@ -501,7 +533,11 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
     // 于是线上两次 `gates-failed` 的心跳都是 `gateIds: null`，事后根本查不出被哪道闸拦的（"红了但不知道是谁"的同类问题）。
     const failedIds = gateIdsFromGates(gates);
     const gateCodes = gateCodesFromGates(gates);
-    return { decision, action: 'skip', reason: 'gates-failed', card, gates, digest, gateIds: failedIds, gateCodes };
+    // T160：再补"被点名的 claim id"与"卡片渲染了多少行"—— 被闸挡下的卡不进 card-samples，
+    // 没有这两项就永远还原不出是哪几条记忆被拦（只记 id 与计数，**不记卡正文**）。
+    const gateClaimIds = gateClaimIdsFromGates(gates);
+    const gateLineCount = Array.isArray(card?.claims) ? card.claims.length : null;
+    return { decision, action: 'skip', reason: 'gates-failed', card, gates, digest, gateIds: failedIds, gateCodes, gateClaimIds, gateLineCount };
   }
   if (!card?.section || !text2) return { decision, action: 'skip', reason: 'no-hit', card, gates, digest };
 
@@ -1034,6 +1070,14 @@ export function apply(ctx, rawConfig = {}) {
           digest: result.digest ?? null,
           tokens: result.card?.tokens ?? null,
           shadow: config.shadow === true,
+          // T160：只有 gates-failed 才有这两项 —— "被哪几条 claim 拦住 / 卡上本来有几行"。
+          // 拿不到 id 时写 []（不猜）；行数拿不到写 null。**只记 id 与计数，不记卡正文。**
+          ...(result.reason === 'gates-failed'
+            ? {
+              gateClaimIds: Array.isArray(result.gateClaimIds) ? result.gateClaimIds : [],
+              gateLineCount: Number.isFinite(result.gateLineCount) ? result.gateLineCount : null,
+            }
+            : {}),
         });
       }
       // 真注入成功 / 影子记录写成 ⇒ 这个会话就别再来一遍

@@ -222,6 +222,16 @@ export function looksLikeSummary(text) {
 
 export const VALIDITY_TYPES = Object.freeze(['none', 'file', 'version', 'commit']);
 
+// T158（2026-11-05）闸 3 探针的两个语义修正：
+//   ① `file` 有**方向位** `validity.expect: 'exists' | 'missing'`（缺省 exists；旧记录靠
+//      `preconditions:[{check:'file-exists', value:<同一路径>}]` 推断 missing，见 expectedExistenceOf）。
+//      证据写「该路径不存在」的记忆，文件出现才 stale（`file-appeared`）。
+//   ② `version` **读不到包 ⇒ 未核验**（`unverified:true`），不是失效；只有真读到且版本不符才 stale。
+//      查找面：validity.file → claim 自己的 workspace（node_modules/<name>/package.json、package.json）
+//      → `<DSH_HOME>/profiles/*/node_modules/<name>/package.json` → `<DSH_HOME>/profiles/*/workspace/package.json`。
+//   结果形状：`{ok, unverified?, reason, ...}`；`runValidityCheck.summary` 把 `failed`（真 stale）与
+//   `unverified`（核不了）分开计数；闸 3 对 `unverified` 记 `gate3/validity-unverified`，不判红。
+
 /** 结果键（`claims:c-…` / `joseki:j-…`）：脚本、eval、plugin 三处共用同一口径。 */
 export function validityKeyOf(record) {
   const id = typeof record?.id === 'string' ? record.id : '';
@@ -243,6 +253,13 @@ export const REAL_PROBE = Object.freeze({
     }
   },
   readJson: (p) => JSON.parse(fs.readFileSync(p, 'utf8')),
+  readDir: (p) => {
+    try {
+      return fs.readdirSync(p);
+    } catch {
+      return [];
+    }
+  },
   sha256: (p) => sha256OfFile(p),
   gitHasCommit: (sha, cwd) => {
     try {
@@ -301,6 +318,43 @@ function resolveInWorkspace(value, workspace) {
 }
 
 /**
+ * `type:'file'` 的**期望方向**：`'exists'`（默认：此刻文件应在）或 `'missing'`（此刻文件应**不存在**）。
+ *
+ * 为什么需要它（2026-11-05 T158）：同一个 `type:'file'` 承载了两种相反语义 ——
+ *   · ENOENT 派生的 fact：证据是「该路径不存在」，文件**出现**才失效（`claim.mjs` 的 why 原文）；
+ *   · 普通文件 fact：证据是「该文件在此，内容哈希/mtime 如何」，文件**消失**才失效。
+ * 旧记录没有 `expect` 字段。`claim.mjs` 给 ENOENT 派生的 fact 同时写了
+ * `preconditions:[{check:'file-exists', value:<同一路径>}]`，这条前置条件就是 missing 的机械标记
+ * （名字叫 file-exists，语义却是"该路径出现即不再成立"）⇒ 旧记录按 missing 判，其余默认 exists。
+ * 显式 `expect` 永远优先（新 writer 写 `expect:'missing'`）。
+ * @returns {'exists'|'missing'|string} 非法值原样返回，由调用方判红（不静默降级）。
+ */
+export function profilePackageCandidates(parsed, home, io) {
+  if (!parsed || !home) return [];
+  const profilesDir = path.join(String(home), 'profiles');
+  const out = [];
+  for (const name of io.readDir(profilesDir)) {
+    const entry = String(name ?? '');
+    if (!entry || entry.startsWith('.')) continue;
+    const dir = path.join(profilesDir, entry);
+    out.push(path.join(dir, 'node_modules', ...String(parsed.name).split('/'), 'package.json'));
+    out.push(path.join(dir, 'workspace', 'package.json'));
+  }
+  return out;
+}
+
+export function expectedExistenceOf(record, validity = null) {
+  const v = validity && typeof validity === 'object' ? validity : record?.validity;
+  const raw = typeof v?.expect === 'string' ? v.expect.trim().toLowerCase() : '';
+  if (raw === 'exists' || raw === 'missing') return raw;
+  if (raw !== '') return raw; // 未知取值：交给 probe 报 file-bad-expect
+  const value = String(v?.value ?? '');
+  const pres = Array.isArray(record?.preconditions) ? record.preconditions : [];
+  if (value && pres.some((p) => p && p.check === 'file-exists' && String(p.value ?? '') === value)) return 'missing';
+  return 'exists';
+}
+
+/**
  * 核一条记录的 validity。**永不抛**：任何异常都变成 `{ok:false, reason}`。
  *
  * @param {object} record  claim / joseki 记录（用 `validity` 字段）
@@ -308,7 +362,7 @@ function resolveInWorkspace(value, workspace) {
  * @returns {{type:string, value:any, ok:boolean, reason:string|null, checkedAt:number,
  *            exists?:boolean, actual?:any, expected?:any, path?:string}}
  */
-export function probeValidity(record, { workspace = null, now = null, probe = null } = {}) {
+export function probeValidity(record, { workspace = null, now = null, probe = null, dshHome = null } = {}) {
   const checkedAt = Number.isFinite(now) ? Number(now) : Date.now();
   const validity = record?.validity && typeof record.validity === 'object' ? record.validity : null;
   const type = typeof validity?.type === 'string' ? validity.type : 'none';
@@ -323,12 +377,24 @@ export function probeValidity(record, { workspace = null, now = null, probe = nu
   }
 
   const io = { ...REAL_PROBE, ...(probe && typeof probe === 'object' ? probe : {}) };
+  // 版本族放宽查找面时用；未显式传就取宿主环境（只读）
+  const home = typeof dshHome === 'string' && dshHome !== '' ? dshHome : (typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME !== '' ? process.env.DSH_HOME : null);
   try {
     if (type === 'file') {
       const file = resolveInWorkspace(value, workspace);
       if (!file) return { ...base, ok: false, reason: 'file-needs-workspace' };
+      const expect = expectedExistenceOf(record, validity);
+      if (expect !== 'exists' && expect !== 'missing') {
+        return { ...base, ok: false, reason: 'file-bad-expect', path: file, expect };
+      }
       const st = io.stat(file);
-      if (!st || !st.isFile()) return { ...base, ok: false, reason: 'file-missing', path: file };
+      const exists = Boolean(st && st.isFile());
+      if (expect === 'missing') {
+        // 证据时刻「此路径不存在」⇒ 不存在=ok；文件出现了才 stale（mtime/sha256 不参与：方向位只看存在性）
+        if (!exists) return { ...base, ok: true, reason: null, path: file, exists: false, expect };
+        return { ...base, ok: false, reason: 'file-appeared', path: file, exists: true, expect, expected: 'missing', actual: 'present' };
+      }
+      if (!exists) return { ...base, ok: false, reason: 'file-missing', path: file, exists: false, expect, expected: 'exists', actual: 'missing' };
       const wantMtime = Number.isFinite(validity?.mtimeMs) ? Number(validity.mtimeMs) : null;
       if (wantMtime !== null && Math.abs(st.mtimeMs - wantMtime) > 2) {
         return { ...base, ok: false, reason: 'file-mtime-changed', path: file, expected: wantMtime, actual: st.mtimeMs };
@@ -340,14 +406,15 @@ export function probeValidity(record, { workspace = null, now = null, probe = nu
           return { ...base, ok: false, reason: 'file-hash-changed', path: file, expected: wantHash, actual };
         }
       }
-      return { ...base, ok: true, reason: null, path: file, exists: true };
+      return { ...base, ok: true, reason: null, path: file, exists: true, expect };
     }
 
     if (type === 'version') {
       const raw = String(value ?? '').trim();
       const parsed = parsePackageAtVersion(raw);
       const expected = parsed ? parsed.version : raw;
-      // 候选文件：显式 validity.file > 包名对应 package.json > workspace 的 package.json
+      // 候选文件（T158b）：显式 validity.file > claim 自己的 workspace
+      //   > <DSH_HOME>/profiles/*/node_modules/<name>/package.json > <DSH_HOME>/profiles/*/workspace/package.json
       const candidates = [];
       if (typeof validity?.file === 'string' && validity.file.trim() !== '') {
         candidates.push(resolveInWorkspace(validity.file, workspace));
@@ -357,6 +424,7 @@ export function probeValidity(record, { workspace = null, now = null, probe = nu
         candidates.push(path.resolve(String(workspace), 'package.json'));
       }
       candidates.push(resolveInWorkspace('package.json', workspace));
+      candidates.push(...profilePackageCandidates(parsed, home, io));
       const files = [...new Set(candidates.filter(Boolean))];
       if (!files.length) return { ...base, ok: false, reason: 'version-needs-workspace' };
 
@@ -381,9 +449,11 @@ export function probeValidity(record, { workspace = null, now = null, probe = nu
         }
         return { ...base, ok: true, reason: null, path: file, package: parsed?.name ?? pkg?.name ?? null, expected, actual };
       }
-      if (!readAny) return { ...base, ok: false, reason: 'version-file-unreadable', expected, package: parsed?.name ?? null };
-      if (parsed && !nameMatched) return { ...base, ok: false, reason: 'version-package-not-found', expected, package: parsed.name };
-      return { ...base, ok: false, reason: 'version-mismatch', expected, package: parsed?.name ?? null, actual: null };
+      // 读不到包 ≠ 失效（T158b）：返回「未核验」，闸 3 记 unverified、不判红。
+      // 只有**真读到且版本不符**才是 stale（版本判据一字不改）。
+      if (!readAny) return { ...base, ok: false, unverified: true, reason: 'version-file-unreadable', expected, package: parsed?.name ?? null };
+      if (parsed && !nameMatched) return { ...base, ok: false, unverified: true, reason: 'version-package-not-found', expected, package: parsed.name };
+      return { ...base, ok: false, unverified: true, reason: 'version-field-missing', expected, package: parsed?.name ?? null, actual: null };
     }
 
     // commit
@@ -403,11 +473,11 @@ export function probeValidity(record, { workspace = null, now = null, probe = nu
  *   records：数组，或 `{claims:[…], joseki:[…]}`
  * @returns {{results:Object<string,object>, summary:object}}
  */
-export function runValidityCheck({ records = null, workspace = null, now = null, probe = null } = {}) {
+export function runValidityCheck({ records = null, workspace = null, now = null, probe = null, dshHome = null } = {}) {
   const claims = Array.isArray(records?.claims) ? records.claims : (Array.isArray(records) ? records : []);
   const joseki = Array.isArray(records?.joseki) ? records.joseki : [];
   const results = {};
-  const summary = { total: 0, checked: 0, ok: 0, failed: 0, skipped: 0, byType: {}, failures: [] };
+  const summary = { total: 0, checked: 0, ok: 0, failed: 0, unverified: 0, skipped: 0, byType: {}, failures: [], unverifiedList: [] };
 
   for (const record of [...claims, ...joseki]) {
     const key = validityKeyOf(record);
@@ -421,11 +491,15 @@ export function runValidityCheck({ records = null, workspace = null, now = null,
     summary.byType[type] = (summary.byType[type] ?? 0) + 1;
     // 每条按**自己**的作用域核（scopeKey = w:<path>），没有 scopeKey 才退回调用方的基准
     const recordWorkspace = workspaceOf(record, workspace);
-    const result = probeValidity(record, { workspace: recordWorkspace, now, probe });
+    const result = probeValidity(record, { workspace: recordWorkspace, now, probe, dshHome });
     result.workspace = recordWorkspace;
     results[key] = result;
     if (result.ok) summary.ok += 1;
-    else {
+    else if (result.unverified === true) {
+      // 「核不了」不算失效（T158b）：单独计数，不混进 failed
+      summary.unverified += 1;
+      summary.unverifiedList.push({ key, type, reason: result.reason, expected: result.expected ?? null, path: result.path ?? null });
+    } else {
       summary.failed += 1;
       summary.failures.push({ key, type, reason: result.reason, expected: result.expected ?? null, actual: result.actual ?? null, path: result.path ?? null });
     }
@@ -741,6 +815,7 @@ export function runGates({
 
   // ---------------------------------------------------------------- 闸 3（有效性 + 适用条件）
   let validityUnresolved = 0;
+  let validityUnverified = 0;
   /**
    * 取一条记录的 validity 核验结果，三个都认：
    *   1) `validityResults["claims:c-…"]`（gates-check / eval / plugin 的标准口径）
@@ -770,6 +845,9 @@ export function runGates({
       const check = validityResultOf(record, claimId);
       if (!check || typeof check.ok !== 'boolean') {
         validityUnresolved += 1;
+      } else if (check.unverified === true) {
+        // 探针读不到（包不存在/读不了）⇒ 核不了 ≠ 失效（T158b）：记 unverified，不判红
+        validityUnverified += 1;
       } else {
         checks.validityChecked += 1;
         if (check.ok === false) {
@@ -782,6 +860,8 @@ export function runGates({
       const check = preconditionChecks && typeof preconditionChecks === 'object' ? preconditionChecks[claimId] : null;
       if (!check || typeof check.ok !== 'boolean') {
         validityUnresolved += 1;
+      } else if (check.unverified === true) {
+        validityUnverified += 1;
       } else {
         checks.validityChecked += 1;
         if (check.ok === false) {
@@ -800,6 +880,7 @@ export function runGates({
       }
     }
   }
+  unverified('3', 'gate3/validity-unverified', validityUnverified, '探针读不到（包/文件不可读 ⇒ 核不了 ≠ 失效；T158b）');
   unverified('3', 'gate3/validity-unchecked', validityUnresolved, '带 validity/preconditions 的条目没有核验结果（未给 validityResults/validityChecks；先跑 scripts/gates-check.mjs）');
 
   // ---------------------------------------------------------------- 闸 4（只增不改）
