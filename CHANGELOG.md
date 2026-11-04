@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.130.0（2026-11-04）
+
+### 台账闸：红了要能说出**是哪一条**（上一版留下的债）
+- 上一版发版时真踩过一次：`release.mjs` 内部的 `ledger-check` 报「node --test 有失败」，但**输出为空**，
+  看不到红的是哪条 —— 只知道红了、没法修。
+- 新增 `scripts/ledger-parse.mjs`（纯函数、零副作用）：
+  `parseTestCounts()` 同时认 spec（`ℹ tests`）与 tap（`# tests`）两套汇总；
+  `failingTestNames()` 认 `✖ 名字 (12.3ms)` 与 `not ok 7 - 名字`；
+  `describeFailure()` 拼出「；红的是：a | b」，**解析不到就如实说解析不到**（不假装知道）。
+- `scripts/ledger-check.mjs` 接入它，并在 stdout 为空时用 `--test-reporter=tap` **再跑一次兜底**。
+- 为什么单独成文件：`ledger-check.mjs` 是「跑起来就有副作用」的脚本，往里面加 export 再 import 会连带执行整个检查
+  （0.126 的 `q18-preview` 就这么在 CI 里炸过）—— 解析逻辑必须能被单测独立 import。
+
+### 验证
+478 条测试（474 pass / 0 fail / 4 skip）：新增 4 条覆盖解析器（双报告器 / 去掉时长后缀 / 去重保序 / 空输出如实说）；
+`check PASS`。
+
 ## 0.129.0（2026-11-04）
 
 ### SDK 面：把记忆的读操作做成可在 PTC / `run_code` 里反复调用的一层

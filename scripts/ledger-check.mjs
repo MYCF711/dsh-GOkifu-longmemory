@@ -17,6 +17,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseTestCounts, describeFailure } from './ledger-parse.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPO = fileURLToPath(new URL('..', import.meta.url));
@@ -111,10 +112,21 @@ if (invoked) {
     } catch (error) {
       // node --test 有失败用例时 execFile 会抛错，但 stdout 里仍有计数 —— 必须解析，不能当 n/a
       const text = String(error?.stdout ?? '');
-      const t = /ℹ tests (\d+)[\s\S]*?ℹ pass (\d+)[\s\S]*?ℹ fail (\d+)[\s\S]*?ℹ skipped (\d+)/.exec(text);
-      if (t) actual.tests = { total: Number(t[1]), pass: Number(t[2]), fail: Number(t[3]), skip: Number(t[4]) };
+      const parsed = parseTestCounts(text);
+      if (parsed) actual.tests = { total: parsed.total, pass: parsed.pass, fail: parsed.fail, skip: parsed.skip };
       else { actual.tests = null; badParseTests = true; }
-      console.error(`ledger-check: node --test 有失败或解析失败（${String(error?.message ?? error).slice(0, 80)}）`);
+      // 2026-11-04：只报"红了"等于没法修 —— 把**哪一条**红打出来；
+      // execFile 有时拿不到 stdout（本轮真踩过，输出为空查不到名字），此时用 tap 报告器再跑一次兜底。
+      let why = describeFailure(text);
+      if (why.includes('没解析出测试名')) {
+        try {
+          const again = await execFileAsync(process.execPath, ['--test', '--test-reporter=tap'], { cwd: REPO, maxBuffer: 64 * 1024 * 1024 });
+          why = describeFailure(again?.stdout ?? '');
+        } catch (second) {
+          why = describeFailure(`${second?.stdout ?? ''}${second?.stderr ?? ''}`);
+        }
+      }
+      console.error(`ledger-check: node --test 有失败或解析失败（${String(error?.message ?? error).slice(0, 60)}）${why}`);
     }
   }
   try {
