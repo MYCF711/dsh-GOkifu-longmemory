@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.150.0（2026-11-05）
+
+### 发版不再靠人肉改台账：打 tag 前自动同步测试数（T168）
+- 今晚 4 次发布都卡在「台账测试数 N vs 实测 M」——多刀并进来就会变，改数字→开 PR→合并→再发版，白烧一轮。
+- `scripts/release.mjs` 重构成 `performRelease({deps})` + `realDeps()`（CLI 行为/提示/退出码不变），在 `check.mjs` 之后插入 `syncLedgerTests()`：
+  1. 只数 **HEAD 已跟踪** 的 `test/**/*.test.mjs`（未跟踪的队友 WIP 不计入）；
+  2. **整行正则**只替换 `| 测试 | **N 条**（P pass / F fail / S skip）[本] … |` 那一行，其余逐字节不动（golden 守着）；
+  3. 数字一致 ⇒ **零提交**（连时间戳都不动）；不一致 ⇒ 提交 `R00 ledger: 自动同步测试数 N/P/F/S`；
+  4. **打 tag 前必须确认新 HEAD 的 CI = success**；超时/红/推不上去一律打印手动指令并退出 1，**绝不把 tag 打在未验证的提交上**。
+- 按 AGENTS §10：**默认不直推 main**（ruleset 本来也拒），只有显式 `--push-ledger` 才尝试；被拒时打印 PR 路径。
+
+### 性能顺带确认
+`metrics-guard` 现在整轮 **55.7s**（T167 之前要 10 分钟以上），六轴 PASS：A1=0.029 · A5=0 · A6=1 · **A2b 18/19** · p50 18.47ms。
+
+### 验证
+628 条测试（624 pass / 0 fail / 4 skip）；`check PASS`；`release-ledger` 16/16。
+
 ## 0.149.0（2026-11-05）
 
 ### 性能：`m5-report` 从 **>900s 降到 49.5s**（同一命令、真库）

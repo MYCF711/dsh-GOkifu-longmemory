@@ -800,9 +800,44 @@ export function renderEvidenceMarkdown(report) {
 export const H1_VERSION = 1;
 
 /**
+ * 解析 A1 用的 walk 缓存（T169）。
+ *
+ * 为什么需要：A1 的每个信号都要 `walkFromSignals` + `buildMemoryCard` + `runGates`，
+ * 而这三者拿不到缓存时就各自 `store.list()` 一遍（真库 4 类 ≈ 1.02 万个小 JSON）。
+ * 176 个信号 ⇒ 180 万次文件读（Windows 单文件 ~1.1 ms）≈ 46 分钟。
+ *
+ * 形状：`opts.cache` **可选**，语义与 `src/rooms/walk.mjs` 的 `createWalkCache()` 返回值一致：
+ *   · 不传（默认）⇒ 本次调用内**自建一份**并复用 —— 取数方式变快，**定义与输出不变**（回归守卫见 test/eval-h1-cache.test.mjs）；
+ *   · 传对象      ⇒ 直接用（调用方已有缓存时共享，比如 `runPipeline` 那种）；
+ *   · 传函数      ⇒ 当工厂 `(store) => cache` 调一次；
+ *   · 传 `false`  ⇒ 完全不用缓存（= 改动前的逐次读盘，给对拍/排障用）。
+ * 缓存只在本次调用内有效：**不落盘、不跨进程**；建不起来就退回逐次读（不改变结果）。
+ *
+ * @param {object} store   R15 createStore() 的只读 store
+ * @param {object|null} walkRoom  `import('../src/rooms/walk.mjs')` 的结果（可能为 null ⇒ 无缓存）
+ * @param {object|Function|false|null|undefined} injected  `opts.cache`
+ * @returns {object|null}  walk 缓存（`{topics, episodes, links, claims, topicsByKey, get(kind,id)}`）或 null
+ */
+export function resolveWalkCache(store, walkRoom, injected) {
+  if (injected === false || injected === null) return null;
+  if (typeof injected === 'object') return injected;
+  const factory = typeof injected === 'function'
+    ? injected
+    : (walkRoom && typeof walkRoom.createWalkCache === 'function' ? walkRoom.createWalkCache : null);
+  if (typeof factory !== 'function') return null;
+  try {
+    return factory(store) ?? null;
+  } catch {
+    // 缓存建不起来（store 不可读/字段异常）⇒ 退回逐次读：慢，但结果不变
+    return null;
+  }
+}
+
+/**
  * 跑一次 H1 评测。
  * @param {{storeRoot:string, workspace?:string, signals?:number, limit?:number,
- *          budgetTokens?:number, now?:number, probe?:object}} opts
+ *          budgetTokens?:number, now?:number, probe?:object,
+ *          cache?:object|Function|false}} opts  `cache` 见 resolveWalkCache（不传 = 自建一份复用）
  * @returns {Promise<object>} report
  */
 export async function runH1(opts = {}) {
@@ -822,6 +857,8 @@ export async function runH1(opts = {}) {
   const walkRoom = await import('../src/rooms/walk.mjs').catch(() => null);
 
   const store = createStore({ root: storeRoot });
+  // T169：A1 的 176 个信号共用一份 walk 缓存（不传 = 自建；false = 退回改动前的逐次读盘，供对拍）
+  const walkCache = resolveWalkCache(store, walkRoom, opts.cache);
   const read = (kind) => {
     try {
       return store.list(kind).map((x) => x?.record).filter((r) => r && typeof r === 'object');
@@ -885,12 +922,15 @@ export async function runH1(opts = {}) {
     const signal = signalFromText(spec.text, { at: now });
     signal.scopeKey = spec.scopeKey;
     let walk = null;
+    // 缓存三处都传同一个对象：walk 吃 `topics/episodes/links/claims`，card 吃 `VIEW_CACHE`（WeakMap 键），
+    // gates 的 `buildResolver` 吃 `cache.get(kind,id)` —— 三处都缺省回退 store，所以传 null 时行为等于改动前。
+    const cacheOpt = walkCache ? { cache: walkCache } : {};
     if (walkRoom && typeof walkRoom.walkFromSignals === 'function') {
-      walk = walkRoom.walkFromSignals({ signal, store, scope: spec.scopeKey, depth: 2, limit, budgetTokens });
+      walk = walkRoom.walkFromSignals({ signal, store, scope: spec.scopeKey, depth: 2, limit, budgetTokens, ...cacheOpt });
     }
-    if (!walk) walk = degradedWalk({ signal, store, limit });
-    const card = buildMemoryCard({ signal, walkResult: walk, store, scope: spec.scopeKey, now, limit, budgetTokens });
-    const gates = runGates({ card, walkResult: walk, store, scope: spec.scopeKey, validityResults: validityByKey });
+    if (!walk) walk = degradedWalk({ signal, store, limit, ...cacheOpt });
+    const card = buildMemoryCard({ signal, walkResult: walk, store, scope: spec.scopeKey, now, limit, budgetTokens, ...cacheOpt });
+    const gates = runGates({ card, walkResult: walk, store, scope: spec.scopeKey, validityResults: validityByKey, ...cacheOpt });
     const rows = (card.claims ?? []).filter((c) => typeof c.claimId === 'string');
     const staleRows = rows.filter((c) => {
       const res = validityByKey[`claims:${c.claimId}`] ?? validityByKey[c.claimId] ?? null;
