@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.128.0（2026-11-04）
+
+### 可交付性闸 + 两个被它逼出来的真问题
+- 新增 `scripts/deliverability.mjs`：用 **`git archive HEAD` 只导出 tracked 内容**（不是 clone —— archive 更严，未跟踪文件一个都不带），
+  在干净目录里跑 `node scripts/check.mjs` + `node --test`。判据：check 退出 0、单测 fail=0、且至少跑了 1 条。
+  单测 `test/deliverability.test.mjs` 钉住判据本身（check 非 0 / 有失败 / 0 条 / 没汇总 都判不可交付）。
+- **它立刻抓到两个真问题**：
+
+  1. **脱敏守卫从来没生效过**：`scripts/privacy-scan.mjs` 的 `user-home` 规则用了 `\+Users\+` 这种写法，
+     `\+` 在正则里是**字面加号** ⇒ 只匹配 `C:+Users+`，真实的 Windows 用户目录一个都抓不到；`key-dir` 规则同病。
+     修：改用 `\x5c`（反斜杠的十六进制写法）避开转义坑。**修好后立刻扫出 2 处真实泄漏**（见下条）。
+  2. **`evidence/M7-arena.md` 写着本机用户名**：擂台报告把绝对路径原样写进了公开仓库（含 Hindsight 日志目录）。
+     修：`arena-report.mjs` 新增 `redactLocalPaths`（本仓根 ⇒ `<repo>`，用户目录连盘符一起 ⇒ `<user-home>`），并重新生成证据。
+     现在 `node scripts/privacy-scan.mjs` → **PASS（0 处）**。
+- 顺带：`privacy-scan` 在没有 `.git` 时**不再抛错**，退化成目录遍历（跳过 `node_modules`/`tmp`/二进制），
+  这样导出的 tarball 也能过 check；单测覆盖回退路径与三个规则的真实命中。
+
+### 验证
+465 条测试（461 pass / 0 fail / 4 skip）；`check PASS`；`privacy-scan 0 处`；`metrics-guard PASS`
+（A1=0 · A5=0 · A6=1 · A2b严格 0.8947 · 覆盖 1 · p50 16.81ms）；`deliverability` 在干净导出目录里 PASS。
+
 ## 0.127.0（2026-11-04）
 
 ### 卡片留样带 pid：审计能按宿主进程切「新旧代码的账」
