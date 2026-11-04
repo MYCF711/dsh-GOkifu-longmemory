@@ -90,6 +90,10 @@
 
 import { createHash } from 'node:crypto';
 
+import os from 'node:os';
+
+import path from 'node:path';
+
 
 
 export class ClaimError extends Error {
@@ -271,8 +275,69 @@ export function isGenericErrorText(text) {
 
 
 
-/** 文本里的绝对路径（引号包裹优先，允许空格；其次裸 token）。 */
+/** 路径的"方言"（T159）。只描述**证据原文里怎么写**，不猜用户意图。 */
+export const PATH_FLAVORS = Object.freeze(['windows', 'unc', 'msys-drive', 'msys-tmp', 'posix', 'relative']);
 
+/**
+ * 分类一条证据路径的写法。
+ * - `windows`：`C:\x` / `c:/x`
+ * - `unc`：`\\host\share\x`
+ * - `msys-drive`：Git Bash 的盘符挂载 `/c/x`、`/d/x`（可无损还原）
+ * - `msys-tmp`：Git Bash 的 `/tmp/x`（还原到本机临时目录）
+ * - `posix`：其他 POSIX 绝对路径（`/主工作区/x`、`/大小`）——**无法还原**，只能标记
+ * - `relative`：相对路径
+ */
+export function classifyPathFlavor(raw) {
+  const s = String(raw ?? '').trim();
+  if (s === '') return 'relative';
+  if (/^[A-Za-z]:[\\/]/.test(s)) return 'windows';
+  if (/^\\\\/.test(s)) return 'unc';
+  if (/^\/[A-Za-z](\/|$)/.test(s)) return 'msys-drive';
+  if (/^\/tmp(\/|$)/.test(s)) return 'msys-tmp';
+  if (s.startsWith('/')) return 'posix';
+  return 'relative';
+}
+
+function slash(p) {
+  return String(p ?? '').replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+}
+
+/**
+ * 写侧路径归一（T159），**只影响新写入**：
+ * - `msys-drive`：`/d/x` → `d:/x`（与 `extractPaths` 的既有归一一致）
+ * - `msys-tmp`：`/tmp/x` → `<TEMP>/x`（Git Bash 的 `/tmp` 就是本机临时目录，不是盘根）
+ * - `windows`/`unc`：只统一分隔符与盘符大小写
+ * - `posix`：**原值保留** + `pathFlavor:'posix'`（读侧据此判"无法核验"，而不是解析到盘根）
+ * - `relative`：原值保留
+ * @param {string} raw
+ * @param {{tmpDir?:string|null}} [opts]
+ * @returns {{value:string, pathFlavor:string, rawValue:string|null}}
+ */
+export function normalizeEvidencePath(raw, opts = {}) {
+  const s = String(raw ?? '').trim();
+  const pathFlavor = classifyPathFlavor(s);
+  const normalizedFor = (p) => slash(p).replace(/^([A-Za-z]):/, (_, d) => `${d.toLowerCase()}:`).replace(/[.,;:]+$/, '');
+  if (s === '') return { value: '', pathFlavor: 'relative', rawValue: null };
+  if (pathFlavor === 'msys-drive') {
+    const m = /^\/([A-Za-z])(\/.*)?$/.exec(s);
+    const value = normalizedFor(`${m[1].toLowerCase()}:${m[2] ?? ''}`);
+    return { value, pathFlavor, rawValue: value === s ? null : s };
+  }
+  if (pathFlavor === 'msys-tmp') {
+    const rest = s.replace(/^\/tmp\/?/, '');
+    const tmpDir = typeof opts.tmpDir === 'string' && opts.tmpDir !== '' ? opts.tmpDir : os.tmpdir();
+    const value = normalizedFor(rest === '' ? tmpDir : path.join(tmpDir, rest));
+    return { value, pathFlavor, rawValue: s };
+  }
+  if (pathFlavor === 'windows' || pathFlavor === 'unc') {
+    const value = pathFlavor === 'unc' ? s : normalizedFor(s);
+    return { value, pathFlavor, rawValue: value === s ? null : s };
+  }
+  // posix / relative：不猜挂载点，原值保留（读侧靠 pathFlavor 判"不可核验"）
+  return { value: s, pathFlavor, rawValue: null };
+}
+
+/** 文本里的绝对路径（引号包裹优先，允许空格；其次裸 token）。 */
 export function extractPaths(text) {
 
   const out = [];
@@ -713,21 +778,34 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
       const path = paths[0];
 
+      // T159（2026-11-05）：写侧路径归一。证据原文里的 Git Bash 路径（`/tmp/x`、`/d/x`）
+      // 若原样入库，读侧 `resolveValidityPath` 会把 `/tmp/x` 当当前盘根的 `D:\tmp\x`，
+      // 于是"文件出现了"可能是**另一个文件**（真机：`/tmp/pr1-comment.json` 命中 `D:\tmp\…`）。
+      // 归一后：`/tmp/x` → `<TEMP>\x`；`/d/x` → `d:/x`；归不了的 POSIX 路径留原值 + 打 `pathFlavor`。
+      const evidence = normalizeEvidencePath(path);
+      // 分组键仍用**原文路径**：claim id = hash(kind,key,scope)，换 key 会让老条目换个 id 重生。
       const g = ensure('fact', `file\u0000${path}`, ep.scopeKey, {
 
         representativeText: clip(errorLineOf(rawQuote), opts.maxQuote),
 
         representativeAt: at,
 
-        // T158a：ENOENT 派生的 fact 语义是「证据时刻该路径不存在」⇒ 方向位 missing。
+        // T158a + T159：ENOENT 派生的 fact 语义是「证据时刻该路径不存在」⇒ 方向位 missing。
         // probeValidity 按 expect 判：仍不存在 = ok；文件出现了 = stale（file-appeared）。
-        validity: { type: 'file', value: path, expect: 'missing' },
+        // T159 额外记路径形态（pathFlavor / rawValue），归档侧才能把 Git Bash 的 /tmp/… 与盘根区分开。
+        validity: {
+          type: 'file',
+          value: evidence.value,
+          expect: 'missing',
+          pathFlavor: evidence.pathFlavor,
+          ...(evidence.rawValue ? { rawValue: evidence.rawValue } : {}),
+        },
 
         preconditions: [{
 
           check: 'file-exists',
 
-          value: path,
+          value: evidence.value,
 
           why: '该条记录的是证据时刻「此路径不存在」；该路径出现即不再成立（方案 §5.3）',
 

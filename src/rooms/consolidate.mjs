@@ -1,7 +1,9 @@
-// R17 · consolidate —— 合流内核（S2：**只读预览**）
+// R17 · consolidate —— 合流内核（S2 只读预览 + S3 影子库写路径）
 //
 // 职责：按 `docs/合流-契约.md` §2/§3/§4 的机械判据，把同一 `(scopeKey, kind)` 桶内
-//       「同一个坑/同一条事实」的 claim 收成**合并组**（不写盘、不改任何 claim）。
+//       「同一个坑/同一条事实」的 claim 收成**合并组**。
+//       `dryRun:true`（默认）只读预览；`dryRun:false` 把结果写进**调用方显式给的影子库** `outStoreDir`，
+//       源库一个字节都不动。
 //
 // 判据（完整定义见契约 §2.3）：
 //   A · ASCII 词集 Jaccard ≥ JACCARD_MIN（两侧词集都 ≥ MIN_ASCII_TOKENS）
@@ -21,9 +23,10 @@
 //   V8 任一方是输出噪声（`ℹ tests …` / `ls` 输出 / `[exit code: 0]` / 合成失败标记）
 //   V1/V2（跨 scope / 跨 kind）由分桶天然保证；V9（主题交集）不适用：claim 层 `threadIds` 无生产者。
 //
-// 只读保证：只调用 `store.list('claims')`（`persist` 里只 `readFileSync`），
-//           **不调用** `put / replaceDerived / rebuild / writeManifest / cleanupTmp`。
-//           `dryRun:false` 本刀直接抛错（真写是 S3，单独一刀）。
+// 只读保证：预览只调用 `store.list('claims')`（`persist` 里只 `readFileSync`）。
+//           写模式（`dryRun:false`）只往 `outStoreDir` 写（复制源库 claim 层 + 追加合并节点），
+//           源库只读；`outStoreDir` 缺省/为空 ⇒ 抛 `consolidate/need-out-dir`；
+//           `outStoreDir` 等于或位于源库内 ⇒ 抛 `consolidate/out-inside-source`。
 //
 // 确定性：同一库两次调用，`groups` 的 id 集合与顺序完全一致 ——
 //         排序键写死为 `scopeKey → kind → 首成员 id`，成员按 `(occurredAt, id)` 升序。
@@ -36,6 +39,8 @@
 // 禁止依赖：`node:fs`（写盘）、`src/rooms/persist.mjs` 的写方法、任何模型/网络。
 
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   featuresOf,
@@ -49,6 +54,8 @@ import {
   bucketKeyOf,
 } from '../../scripts/dup-report.mjs';
 import { isGenericErrorText } from './claim.mjs';
+import { allowedStates } from './gates.mjs';
+import { createStore } from './persist.mjs';
 
 /** 合并节点版本（S2 只读预览的结构版本）。 */
 export const MERGE_VERSION = 1;
@@ -234,6 +241,155 @@ function pickRepresentative(members) {
   return { claimId: ordered[0]?.id ?? null, episode: null, seq: null, quote: '' };
 }
 
+/* ── 影子库写路径（S3）─────────────────────────────────────── */
+
+/** 已经是合并节点的记录（带 `merge` 字段）⇒ 派生数据，不再参与下一轮合流。 */
+export function isMergeRecord(record) {
+  return Boolean(record && typeof record === 'object' && record.merge && typeof record.merge === 'object');
+}
+
+/** 成员 support 并集：按 `(episode, seq, quote)` 去重，按 `occurredAt`（同刻按 seq）升序。 */
+export function mergeSupportOf(memberRecords) {
+  const seen = new Set();
+  const out = [];
+  for (const member of memberRecords) {
+    for (const entry of Array.isArray(member?.support) ? member.support : []) {
+      if (!entry || typeof entry !== 'object') continue;
+      const key = `${String(entry.episode ?? '')} ${String(entry.seq ?? '')} ${String(entry.quote ?? '')}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ...entry });
+    }
+  }
+  const timeOf = (x) => (Number.isFinite(x?.occurredAt) ? x.occurredAt : Number.POSITIVE_INFINITY);
+  out.sort((a, b) => {
+    const ta = timeOf(a);
+    const tb = timeOf(b);
+    if (ta !== tb) return ta < tb ? -1 : 1;
+    const sa = Number.isFinite(a?.seq) ? a.seq : Number.POSITIVE_INFINITY;
+    const sb = Number.isFinite(b?.seq) ? b.seq : Number.POSITIVE_INFINITY;
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    return String(a?.episode ?? '') < String(b?.episode ?? '') ? -1 : 1;
+  });
+  return out;
+}
+
+/**
+ * 合并节点（契约 §4.1 的形状；`text` 逐字取 `representative.quote`，不加前缀）。
+ * 时钟全部由成员派生（`occurredAt=min`、`recordedAt=max`），保证同输入同输出 ⇒ 幂等。
+ */
+export function buildMergedRecord(group, memberRecords) {
+  const members = Array.isArray(memberRecords) ? memberRecords.filter(Boolean) : [];
+  const repRecord = members.find((m) => m.id === group.representative.claimId) ?? members[0] ?? {};
+  const support = mergeSupportOf(members);
+  let occurredAt = Number.POSITIVE_INFINITY;
+  let recordedAt = 0;
+  for (const member of members) {
+    if (Number.isFinite(member?.occurredAt) && member.occurredAt < occurredAt) occurredAt = member.occurredAt;
+    const t = Number.isFinite(member?.recordedAt) ? member.recordedAt : (Number.isFinite(member?.occurredAt) ? member.occurredAt : 0);
+    if (t > recordedAt) recordedAt = t;
+  }
+  const occurred = Number.isFinite(occurredAt) ? occurredAt : 0;
+  const allowed = allowedStates({ support: group.supportEpisodes, counter: 0 }).allowed;
+  const state = ['observed', 'candidate', 'semantic', 'standard'].filter((x) => allowed.includes(x)).pop() ?? 'observed';
+  return {
+    id: `c-${hash8(group.members.join('|'))}`,
+    kind: group.kind,
+    text: group.representative.quote, // 逐字，不拼接、不加前缀（T1）
+    scopeKey: group.scopeKey,
+    state,
+    support,
+    counter: [],
+    validity: repRecord.validity && typeof repRecord.validity === 'object' ? { ...repRecord.validity } : { type: 'none', value: null },
+    validityOk: repRecord.validityOk !== false,
+    preconditions: Array.isArray(repRecord.preconditions) ? repRecord.preconditions.map((p) => ({ ...p })) : [],
+    threadIds: [],
+    occurredAt: occurred,
+    recordedAt,
+    validFrom: occurred,
+    validTo: null,
+    counters: { support: support.length, counter: 0, injections: 0, lastInjectedAt: null },
+    supersedes: null,
+    merge: {
+      version: MERGE_VERSION,
+      key: group.key,
+      rule: group.tier === TIERS.SAME_EVIDENCE ? 'same-evidence' : 'multi-criteria',
+      members: [...group.members],
+      representative: { ...group.representative },
+      supportEpisodes: group.supportEpisodes,
+      at: recordedAt,
+    },
+  };
+}
+
+/**
+ * 写影子库：复制源库 claim 层 → 追加合并节点。**只写 `outStoreDir`，源库只读。**
+ * 幂等：同 id 同内容 ⇒ `put` 返回 `changed:false`（第二次新增 0）。
+ */
+export function applyToShadow({ groups, memberRecordsOf, sourceClaims, outStoreDir, sourceRoot = null }) {
+  const dstRoot = path.resolve(String(outStoreDir));
+  const srcRoot = sourceRoot ? path.resolve(String(sourceRoot)) : '';
+  if (srcRoot && (dstRoot === srcRoot || dstRoot.startsWith(`${srcRoot}${path.sep}`))) {
+    throw new ConsolidateError('consolidate: outStoreDir 不能是源库本身或源库子目录（源库只读）', 'consolidate/out-inside-source');
+  }
+  if (fs.existsSync(dstRoot) && !fs.statSync(dstRoot).isDirectory()) {
+    throw new ConsolidateError('consolidate: outStoreDir 已存在但不是目录', 'consolidate/out-not-directory');
+  }
+  const dst = createStore({ root: dstRoot });
+  const existed = new Set(dst.ids('claims'));
+
+  // 1) 复制源库 claim 层（不写源库）
+  let copied = 0;
+  let copiedChanged = 0;
+  for (const record of sourceClaims) {
+    if (!record || typeof record !== 'object' || typeof record.id !== 'string') continue;
+    copied += 1;
+    if (dst.put('claims', record).changed) copiedChanged += 1;
+  }
+
+  // 2) 追加合并节点（已存在同 id 的真 claim ⇒ 不覆盖，记冲突）
+  let mergedAdded = 0;
+  let mergedRewritten = 0;
+  let conflicts = 0;
+  const mergedIds = [];
+  for (const group of groups) {
+    const members = group.members.map((id) => memberRecordsOf.get(id)).filter(Boolean);
+    if (members.length < 2) {
+      conflicts += 1;
+      continue;
+    }
+    const record = buildMergedRecord(group, members);
+    let previous = null;
+    if (existed.has(record.id)) {
+      try {
+        previous = dst.get('claims', record.id);
+      } catch {
+        previous = null;
+      }
+      if (previous && !isMergeRecord(previous)) {
+        conflicts += 1; // 绝不覆盖既有的真 claim
+        continue;
+      }
+    }
+    const result = dst.put('claims', record);
+    mergedIds.push(record.id);
+    if (!previous) mergedAdded += 1;
+    else if (result.changed) mergedRewritten += 1;
+  }
+
+  return {
+    outStoreDir: dstRoot,
+    sourceRoot: srcRoot || null,
+    claimsCopied: copied,
+    claimsCopiedChanged: copiedChanged,
+    mergedAdded,
+    mergedRewritten,
+    conflicts,
+    mergedIds,
+    totalClaims: dst.ids('claims').length,
+  };
+}
+
 /* ── 主入口 ───────────────────────────────────────────────── */
 
 /**
@@ -241,21 +397,29 @@ function pickRepresentative(members) {
  * @param {{store:{list:Function}, scope?:string|null, dryRun?:boolean, now?:number}} opts
  * @returns {{ok:boolean, groups:Array, stats:object, quality:object, thresholds:object}}
  */
-export function consolidate({ store, scope = null, dryRun = true, now = Date.now() } = {}) {
-  if (dryRun !== true) {
-    throw new ConsolidateError('consolidate: 本刀只实现 dryRun:true（真写是 S3，单独一刀）', 'consolidate/dry-run-only');
-  }
+export function consolidate({ store, scope = null, dryRun = true, outStoreDir = null, now = Date.now() } = {}) {
   if (!store || typeof store.list !== 'function') {
     throw new ConsolidateError('consolidate: 需要 store（含 list(kind)）', 'consolidate/missing-store');
+  }
+  if (typeof dryRun !== 'boolean') {
+    throw new ConsolidateError('consolidate: dryRun 必须是布尔值', 'consolidate/bad-dry-run');
+  }
+  const writing = dryRun === false;
+  if (writing && (typeof outStoreDir !== 'string' || outStoreDir.trim() === '')) {
+    throw new ConsolidateError('consolidate: dryRun:false 需要显式 outStoreDir（影子库路径，绝不默认写真库）', 'consolidate/need-out-dir');
   }
 
   const listed = store.list('claims');
   const all = listed.filter((r) => r && r.record && typeof r.record === 'object').map((r) => r.record);
   const scoped = typeof scope === 'string' && scope !== '' ? all.filter((c) => String(c?.scopeKey ?? '') === scope) : all;
 
-  const blocked = { v3: 0, v4: 0, v5: 0, v6: 0, v7: 0, v8: 0, singleCriterion: 0, t1: 0 };
+  const blocked = { v3: 0, v4: 0, v5: 0, v6: 0, v7: 0, v8: 0, merged: 0, singleCriterion: 0, t1: 0 };
   const claims = [];
   for (const claim of scoped) {
+    if (isMergeRecord(claim)) {
+      blocked.merged += 1; // 派生节点不再参与合流（否则重复合流会套娃）
+      continue;
+    }
     if (isClassClaim(claim)) {
       blocked.v7 += 1;
       continue;
@@ -351,28 +515,42 @@ export function consolidate({ store, scope = null, dryRun = true, now = Date.now
     byTier,
     blocked,
     // 单位说明：v3–v6/singleCriterion 计「对」（每对 claim 一次），v7/v8 计「条」（单条 claim 级否决）
-    blockedUnits: { v3: 'pair', v4: 'pair', v5: 'pair', v6: 'pair', v7: 'claim', v8: 'claim', singleCriterion: 'pair', t1: 'group' },
-    excluded: { v7: blocked.v7, v8: blocked.v8 },
+    blockedUnits: { v3: 'pair', v4: 'pair', v5: 'pair', v6: 'pair', v7: 'claim', v8: 'claim', merged: 'claim', singleCriterion: 'pair', t1: 'group' },
+    excluded: { v7: blocked.v7, v8: blocked.v8, merged: blocked.merged },
     buckets: buckets.size,
   };
 
   // 质量闸（契约 §6）
   const t1 = groups.every((g) => g.mergedText === g.representative.quote && g.representative.quote.length > 0);
   const t2 = groups.every((g) => g.members.every((id) => claims.find((c) => c.id === id)?.scopeKey === g.scopeKey));
-  const t3 = dryRun === true;
+  const t3 = true; // 两种模式都不写源库：预览不写盘；写模式只写 outStoreDir
   const serialized = JSON.stringify(groups);
   const resorted = JSON.stringify([...groups].sort((a, b) => (a.scopeKey !== b.scopeKey ? (a.scopeKey < b.scopeKey ? -1 : 1) : a.kind !== b.kind ? (a.kind < b.kind ? -1 : 1) : a.members[0] < b.members[0] ? -1 : a.members[0] > b.members[0] ? 1 : 0)));
   const t4 = serialized === resorted;
   const t5 = stats.reduction <= 0.25;
 
+  // 影子库写路径（S3）：只有显式 dryRun:false + outStoreDir 才落盘
+  let apply = null;
+  if (writing) {
+    const byId = new Map(all.map((c) => [String(c.id), c]));
+    apply = applyToShadow({
+      groups,
+      memberRecordsOf: byId,
+      sourceClaims: all,
+      outStoreDir,
+      sourceRoot: store.root ?? null,
+    });
+  }
+
   return {
-    ok: t1 && t2 && t3 && t4 && t5,
+    ok: t1 && t2 && t3 && t4 && t5 && (!apply || apply.conflicts === 0),
     groups,
     stats,
     quality: { t1, t2, t3, t4, t5 },
     thresholds: { jaccardMin: JACCARD_MIN, minAsciiTokens: MIN_ASCII_TOKENS, bigramOverlapMin: BIGRAM_OVERLAP_MIN, prefixChars: PREFIX_CHARS, version: MERGE_VERSION, tiers: ALLOWED_TIERS },
+    apply,
     at: Number.isFinite(now) ? now : null,
   };
 }
 
-export default { consolidate, judgePair, judgeFeatures, criteriaOf, isNoiseClaim, isClassClaim, preconditionsKeyOf, validityKeyOf, TIERS, ALLOWED_TIERS, GATES, MERGE_VERSION };
+export default { consolidate, applyToShadow, buildMergedRecord, mergeSupportOf, isMergeRecord, judgePair, judgeFeatures, criteriaOf, isNoiseClaim, isClassClaim, preconditionsKeyOf, validityKeyOf, TIERS, ALLOWED_TIERS, GATES, MERGE_VERSION };

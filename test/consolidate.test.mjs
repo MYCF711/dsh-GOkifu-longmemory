@@ -206,7 +206,7 @@ test('R17 consolidate: 只读 —— dryRun 期间库文件 sha256 全部不变'
 test('R17 consolidate: dryRun:false 直接抛错（真写是 S3）', () => {
   const { store, cleanup } = makeStore([claim('c-x', 'Error: x')]);
   try {
-    assert.throws(() => consolidate({ store, dryRun: false }), (error) => error instanceof ConsolidateError && error.code === 'consolidate/dry-run-only');
+    assert.throws(() => consolidate({ store, dryRun: false }), (error) => error instanceof ConsolidateError && error.code === 'consolidate/need-out-dir');
   } finally {
     cleanup();
   }
