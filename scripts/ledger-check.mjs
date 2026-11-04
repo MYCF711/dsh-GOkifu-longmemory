@@ -77,7 +77,7 @@ export function compare(ledger, actual, { live = false } = {}) {
 }
 
 /** --full 的加严项：缺测点/陈旧/解析失败都算不一致（fail-closed）。 */
-export function fullCheck(ledger, bad, { now = Date.now() } = {}) {
+export function fullCheck(ledger, bad, { now = Date.now(), m5CollectFailed = null } = {}) {
   const out = [...bad];
   if (ledger.tests === null) out.push('台账缺测试行');
   if (ledger.stamp === null) out.push('台账缺 [本] 时点');
@@ -88,7 +88,8 @@ export function fullCheck(ledger, bad, { now = Date.now() } = {}) {
     // 时点只用来抓"改完大事忘了 sync"；窗口太短会被发版流程本身（PR/CI 排队）卡死。
     else if (now - t > 6 * 60 * 60 * 1000) out.push(`台账时点过旧：${ledger.stamp}（>6 小时，先跑 ledger-sync）`);
   }
-  if (ledger.a2 === null || ledger.a4 === null) out.push('台账缺 A2/A4 实测值');
+  if (m5CollectFailed) out.push(`m5 采集失败（不是台账的问题）：${m5CollectFailed}`);
+  else if (ledger.a2 === null || ledger.a4 === null) out.push('台账缺 A2/A4 实测值');
   if (ledger.episodes === null) out.push('台账缺局数');
   return out;
 }
@@ -126,6 +127,9 @@ if (invoked) {
     const { createStore } = await import('../src/rooms/persist.mjs');
     actual.episodes = createStore({ root: path.join(HOME, 'memory-context') }).list('episodes').length;
   } catch { actual.episodes = null; }
+  // 2026-11-04：m5 --json 会**间歇性静默死亡**。原实现把异常吞成 a2/a4=null，报错却说"台账缺 A2/A4"——
+  // 把采集失败伪装成台账问题，是最坏的一种误导。现在把 m5 的 exit/stderr 打出来，并单独标"采集失败"。
+  let m5CollectFailed = null;
   try {
     const { stdout } = await execFileAsync(process.execPath, [path.join(REPO, 'scripts', 'm5-report.mjs'), '--json'], { cwd: REPO, maxBuffer: 64 * 1024 * 1024 });
     const j = JSON.parse(stdout);
@@ -133,7 +137,12 @@ if (invoked) {
     const a4 = j.axes?.A4?.value;
     actual.a2 = Number.isFinite(a2) ? Number((a2 * 100).toFixed(2)) : null;
     actual.a4 = Number.isFinite(a4) ? Number(a4.toFixed(2)) : null;
-  } catch { actual.a2 = null; actual.a4 = null; }
+  } catch (error) {
+    actual.a2 = null;
+    actual.a4 = null;
+    const tail = (text, n = 400) => String(text ?? '').trim().slice(-n);
+    m5CollectFailed = `exit=${error?.code ?? 'n/a'}${tail(error?.stderr) ? ` · stderr: ${tail(error.stderr)}` : ''}${tail(error?.stdout) ? ` · stdout 尾部: ${tail(error.stdout, 200)}` : ''}`;
+  }
   // 安装指南不得写死版本号/测试条数（2026-11-02 audit-04：这正是「按它安装」最先读到的文件）
   try {
     const guide = read('docs/安装指南.md');
@@ -153,7 +162,7 @@ if (invoked) {
   } catch { live = false; }
   let bad = compare(ledger, actual, { live });
   if (badParseTests) bad.push('测试计数解析失败（fail-closed）');
-  if (full) bad = fullCheck(ledger, bad);
+  if (full) bad = fullCheck(ledger, bad, { m5CollectFailed });
   if (!agentsOk) bad.push('AGENTS §7：指针缺失或写回了测试条数');
   if (!read('CHANGELOG.md').includes(`## ${actual.version}`)) bad.push(`CHANGELOG 缺 ${actual.version} 段`);
 

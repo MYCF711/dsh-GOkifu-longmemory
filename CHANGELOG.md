@@ -17,6 +17,34 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.120.0（2026-11-04）
+
+### 回归闸的采集失败不再"不可诊断"，也不再伪装成台账问题
+- 巡检时 `node scripts/metrics-guard.mjs` **直接失败**：`采集失败（Command failed: … m5-report.mjs --json）`；
+  重跑同一条命令又正常 —— `m5 --json` 是**间歇性静默死亡**。
+- 三个缺陷让这件事只能靠猜：① `execFile` 把子进程 **stderr 吞了**，信息只剩 `Command failed`；
+  ② `JSON.parse` 失败与子进程失败混成同一句"采集失败"；③ `ledger-check.mjs` `catch {}` 后把 a2/a4 置空，
+  于是报「**台账缺 A2/A4 实测值**」—— 把采集失败伪装成台账问题，指向完全错误的排查方向。
+- 修（只改工具，不改任何判据）：
+  - `scripts/metrics-guard.mjs` 改用 `spawn`，分记 `exitCode / stderr / stdout`；失败时打印 exit、stderr 尾部、stdout 尾部，
+    并把原始输出落 `tmp/m5-raw.json`、`tmp/m5-raw.stderr.txt`；**只对「exit≠0 且 stderr 为空」的静默死亡重试一次**。
+  - `scripts/ledger-check.mjs` 把采集失败单独记成 `m5 采集失败（不是台账的问题）：exit=… · stderr: …`。
+  - 单测：`test/ledger-check.test.mjs` 加一条 —— 带 `m5CollectFailed` 时必须报采集失败，且**不得**出现「台账缺 A2/A4」。
+
+### 巡检留档
+- `evidence/M7-patrol-2026-11-04-0900.md`：心跳 73 次注入 / 失败 0；跨作用域 2 条**全是补闸前老卡**（无回归）；
+  文字级线上仍是旧代码的账（85/149、missing 14），离线重抽 41/43、missing 0、日期 43/43。
+- 残留 2 条 `elsewhere` 已定位于 `ep-8cc34e32`（同局内同一句失败原文重复出现，`seq` 指向较早那次），
+  同局内坐标精度问题、非跨局越界，记 T109。
+
+### 知识库：调研 34 Obsolete Facts（过时事实与"检索不足"）
+- [外] 证据预算 64→512 tokens 反而让准确率从 45% 掉到 32%（检索集里始终含最新陈述）；
+  把一条无关陈述换成**过时的竞争陈述**，准确率 100%→44.6%（Qwen2.5）/ 100%→87.8%（Qwen3-14B）。
+- 对照本仓：旧条永远在库里 ⇒ **遮蔽必须发生在注入前**；可借「旧条只给指针不给正文」，不借提示词级修复。
+
+### 验证
+436 条测试（432 pass / 0 fail / 4 skip）；`check PASS`；`tag-audit` PASS。
+
 ## 0.119.0（2026-11-04）
 
 ### Q18 裁定：维持关闸（A），并用数据把"该不该开"变成可复核的判定
