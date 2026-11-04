@@ -10,6 +10,7 @@
 //   - A4 = 实际跑的 run 数（n）+ p50/p90/p95/max + tokens p50
 //   - 空 store 不抛；只读（跑前跑后 store 的 sha256 不变）
 //   - CLI：`--json` 结构 + `--evidence` 写 markdown（写到 tmp，不写仓库）
+//   - T167 性能闸：`withStoreReadCache` 只缓存该缓存的、一定还原、**六轴与无缓存逐位相同**（含 JSON 结构不变）
 //
 // 夹具全部在 os.tmpdir；不写 <DSH_HOME>；不新增依赖；零模型调用。
 
@@ -20,10 +21,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 
 import {
   runM5, measureA1, measureA3, measureA2b, runPipeline, buildSignalTexts, formatM5Report, renderM5Markdown,
-  parseArgs, runCli, AXIS_IDS, AXIS_STATUSES,
+  parseArgs, runCli, AXIS_IDS, AXIS_STATUSES, withStoreReadCache,
 } from '../scripts/m5-report.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
 import { scopeKeyFromPath } from '../src/rooms/inject.mjs';
@@ -430,4 +432,149 @@ test('m5: A2b 失分归因 —— 空库时全部记 notRetrieved（不把检索
   assert.equal(r.specificHits, 0, '空库里召回不到 ⇒ 严格 0');
   assert.deepEqual(r.missBy, { covered: 0, notRetrieved: 1 }, '要归因成"未检索到"，不能算成文本不匹配');
   assert.equal(typeof r.recallSpecific, 'number');
+});
+
+// ---------------------------------------------------------------------------
+// T167 · 性能闸：只读读穿缓存（withStoreReadCache）
+//   背景（实测）：真库 176 个信号 × 每次 store.list() 1.02 万文件 ≈ 180 万次 readFileSync；
+//   Windows 上单文件 1.1 ms、JSON.parse 0.003 ms ⇒ 热点是**文件读**，不是解析。
+//   这几个测试锁住三件事：① 只缓存该缓存的 ② 一定还原 ③ 结果与无缓存逐位相同。
+// ---------------------------------------------------------------------------
+
+test('m5 性能: withStoreReadCache 只缓存 root 下的小文本读，退出还原', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-m5-cache-'));
+  const outside = mkdtempSync(path.join(tmpdir(), 'kifuin-m5-nocache-'));
+  try {
+    mkdirSync(path.join(root, 'claims'), { recursive: true });
+    const textFile = path.join(root, 'claims', 'c-1.json');
+    const bigFile = path.join(root, 'claims', 'big.json');
+    const bufFile = path.join(root, 'claims', 'buf.bin');
+    const outFile = path.join(outside, 'x.txt');
+    writeFileSync(textFile, '{"id":"c-1"}', 'utf8');
+    writeFileSync(bigFile, 'x'.repeat(64), 'utf8');
+    writeFileSync(bufFile, 'binary', 'utf8');
+    writeFileSync(outFile, 'outside', 'utf8');
+
+    const before = fs.readFileSync;
+    let restoredDuring = null;
+    await withStoreReadCache([root], async () => {
+      assert.equal(fs.readFileSync(textFile, 'utf8'), '{"id":"c-1"}');
+      rmSync(textFile);
+      assert.equal(fs.readFileSync(textFile, 'utf8'), '{"id":"c-1"}', 'root 下的小文本必须已缓存（删了也读得到）');
+
+      // Buffer 读取（无编码）不缓存：删掉就真的没了
+      fs.readFileSync(bufFile);
+      rmSync(bufFile);
+      assert.throws(() => fs.readFileSync(bufFile), /ENOENT/, '无编码的 Buffer 读不许缓存');
+
+      // root 之外不缓存
+      assert.equal(fs.readFileSync(outFile, 'utf8'), 'outside');
+      rmSync(outFile);
+      assert.throws(() => fs.readFileSync(outFile), /ENOENT/, 'root 之外的文件不许缓存');
+
+      // 超过 maxBytes 不缓存
+      assert.equal(fs.readFileSync(bigFile, 'utf8').length, 64);
+      rmSync(bigFile);
+      assert.throws(() => fs.readFileSync(bigFile), /ENOENT/, '超过 maxBytes 的不缓存');
+      restoredDuring = fs.readFileSync === before;
+    }, { maxBytes: 16 });
+    assert.equal(restoredDuring, false, '回调期间必须是打过补丁的版本（否则上面的断言没意义）');
+    assert.equal(fs.readFileSync, before, '退出后必须还原');
+
+    // 抛错也要还原
+    fs.readFileSync = before;
+    await assert.rejects(withStoreReadCache([root], async () => { throw new Error('boom'); }), /boom/);
+    assert.equal(fs.readFileSync, before, '抛错路径也必须还原');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('m5 性能: 缓存下 store.list 的结果与无缓存逐位相同（不改变语义）', async () => {
+  const fixture = buildFixture();
+  const store = createStore({ root: fixture.storeRoot });
+  const kinds = ['claims', 'topics', 'links', 'episodes', 'threads', 'joseki'];
+  const cold = Object.fromEntries(kinds.map((k) => [k, store.list(k)]));
+  await withStoreReadCache([fixture.storeRoot], async () => {
+    for (const k of kinds) {
+      assert.deepEqual(store.list(k), cold[k], `${k} 第 1 次读（冷）必须一致`);
+      assert.deepEqual(store.list(k), cold[k], `${k} 第 2 次读（热）必须一致`);
+    }
+  });
+  for (const k of kinds) assert.deepEqual(store.list(k), cold[k], `${k} 缓存关闭后仍一致`);
+});
+
+test('m5 性能: 缓存不改变六轴 —— runPipeline / measureA1 有缓存与无缓存逐位相同', async () => {
+  const fixture = buildFixture();
+  const store = createStore({ root: fixture.storeRoot });
+  const texts = buildSignalTexts(store, 4);
+  const plain = runPipeline({ store, workspace: fixture.root, texts, runs: 4, now: ARCHIVE_TS });
+  const cached = await withStoreReadCache([fixture.storeRoot], async () =>
+    runPipeline({ store, workspace: fixture.root, texts, runs: 4, now: ARCHIVE_TS }));
+  // 墙钟不再比（缓存会把"省掉的 I/O"从计时里去掉，这正是目的）；比的是**被计时的产物**是否逐位相同
+  assert.equal(cached.stats.n, plain.stats.n, 'run 数一致');
+  assert.equal(cached.gatesFailed, plain.gatesFailed);
+  assert.equal(cached.zeroInjection, plain.zeroInjection);
+  assert.equal(cached.cards.length, plain.cards.length);
+  for (let i = 0; i < plain.cards.length; i += 1) {
+    assert.equal(cached.cards[i].card.section, plain.cards[i].card.section, `第 ${i} 张卡的 section 必须逐字相同`);
+    assert.equal(cached.cards[i].card.tokens, plain.cards[i].card.tokens);
+  }
+
+  // A1 的真库热路径 = 主题信号 + **每条带 validity 的条目各一个信号**（真库有 140 条）⇒ 用带 validity 的夹具覆盖
+  const vfix = buildFixture({ withValidity: true });
+  const a1Plain = await measureA1({ storeRoot: vfix.storeRoot, workspace: vfix.root, now: ARCHIVE_TS, signals: 2 });
+  const a1Cached = await withStoreReadCache([vfix.storeRoot], async () =>
+    measureA1({ storeRoot: vfix.storeRoot, workspace: vfix.root, now: ARCHIVE_TS, signals: 2 }));
+  assert.deepEqual(a1Cached, a1Plain, 'A1（含 validity 信号）的 value/n/status/detail 必须完全一致');
+  assert.ok(a1Plain.n >= 0);
+});
+
+test('m5 性能: runM5 两次运行除时钟外逐位相同（缓存保证确定性、不是"记住上次结果"）', async () => {
+  const fixture = buildFixture();
+  const opts = { storeRoot: fixture.storeRoot, dataRoot: fixture.root, workspace: fixture.root, runs: 3, cards: 2, signals: 2, now: ARCHIVE_TS };
+  const a = await runM5(opts);
+  const b = await runM5(opts);
+  const c = await runM5({ ...opts, readCache: false }); // 优化前行为（无缓存）
+  // A4 是墙钟（p50/p90 每次不同）、pipeline.coldCacheMs 也是一次性耗时 ⇒ 比"六轴里的五个 + 语料 + 作用域"
+  const strip = (r) => {
+    const { elapsedMs, pipeline, axes, ...rest } = r;
+    const { A4, ...stableAxes } = axes;
+    return { ...rest, axes: stableAxes, a4N: A4.n };
+  };
+  assert.deepEqual(strip(a), strip(b), '同一库同一参数两次结果必须一致');
+  assert.deepEqual(strip(c), strip(a), '有缓存 / 无缓存（优化前）六轴逐位相同（A4 墙钟除外）');
+  // JSON 结构不许变（ledger-check / metrics-guard 按字段读）
+  assert.deepEqual(Object.keys(a), Object.keys(b), '顶层键集合不变');
+  for (const key of AXIS_IDS) {
+    assert.deepEqual(Object.keys(a.axes[key]), Object.keys(b.axes[key]), `${key} 轴键集合不变`);
+    assert.deepEqual(Object.keys(a.axes[key].detail ?? {}), Object.keys(b.axes[key].detail ?? {}), `${key}.detail 键集合不变`);
+  }
+  assert.equal(a.axes.A1.value, b.axes.A1.value);
+  assert.equal(a.axes.A2.value, b.axes.A2.value);
+});
+
+test('m5 性能: 缓存真的减少磁盘读（计数不靠墙钟，不会 flaky）', async () => {
+  const fixture = buildFixture({ withValidity: true });
+  const base = { storeRoot: fixture.storeRoot, dataRoot: fixture.root, workspace: fixture.root, runs: 2, cards: 2, signals: 3, now: ARCHIVE_TS };
+  const original = fs.readFileSync;
+  let reads = 0;
+  // 计数器装在**里层**：m5 的缓存会把它当作 original 调用 ⇒ 只统计真正落盘的读
+  fs.readFileSync = function counted(p, o) {
+    reads += 1;
+    return original.call(fs, p, o);
+  };
+  try {
+    await runM5(base);
+    const cachedReads = reads;
+    reads = 0;
+    await runM5({ ...base, readCache: false });
+    const plainReads = reads;
+    assert.ok(cachedReads > 0, '缓存版也要真读一次（冷读）');
+    assert.ok(cachedReads < plainReads, `缓存版磁盘读必须更少：cached=${cachedReads} plain=${plainReads}`);
+    console.log(`[T167] 磁盘读次数：cached=${cachedReads} / plain=${plainReads}`);
+  } finally {
+    fs.readFileSync = original;
+  }
 });

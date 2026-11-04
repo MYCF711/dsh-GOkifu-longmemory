@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.149.0（2026-11-05）
+
+### 性能：`m5-report` 从 **>900s 降到 49.5s**（同一命令、真库）
+- 现象：`release.mjs` 的 `ledger-check --full` 会跑 `scripts/m5-report.mjs --json`，它**今晚两次把发布拖死**（>15 分钟不返回，exit=143）。
+- 剖析（`node --cpu-prof`，真库）：**97.3% 时间在 `readFileUtf8`** —— 不是算得慢，是**读得慢**。
+  `store.list(claims)` 1340 条 = 1339ms；同 1340 个文件 `readFileSync` 1551ms 而 `JSON.parse` 只有 4ms；
+  `walk` 无缓存 13.4s → 有缓存 30ms；A1 的 176 个信号 × 15.74s ≈ **46 分钟**。
+- 改（`scripts/m5-report.mjs`）：`runM5` 内套一层**只读读穿缓存** `withStoreReadCache` —— 只拦 storeRoot 下 ≤512KB 的**显式编码文本读**，
+  Buffer/大文件/root 外一律不拦；结束或抛错立刻还原 `fs.readFileSync`；另留 `--no-read-cache` 作"优化前行为"对拍开关。
+- 前后对照（真库同一命令）：**>900s（被 143 杀）→ real 49.5s**（并行抢盘时最慢一次 69.6s，仍 ≤120s）。
+- **正确性对拍**：真库 `runPipeline`（5 runs）有/无缓存，卡片 `section/tokens/gates` 逐位相同；
+  `runEval` totals 逐位相同；夹具上 `runM5` 三次（cached×2 + uncached）除 A4 墙钟外**六轴逐位相同**；JSON 键结构不变。
+- 留下的结构性债：A1 仍是 176 信号 × ~250ms，语料再翻倍会逼近预算；根治要让 `scripts/eval.mjs` 的 `runH1` 接受 `createWalkCache`（下一刀）。
+
+### 验证
+`node --test "test/m5-report.test.mjs"` 17/17；`check PASS`；记忆库只读（指纹跑前跑后一致）。
+
 ## 0.148.0（2026-11-05）
 
 ### 闸 4 认「成员反指针」：同组合并成员不再被当成重复（T162c）
