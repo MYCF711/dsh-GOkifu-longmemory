@@ -171,3 +171,23 @@ test('sdk: scopeOf() 与钩子同一实现（不另造一套作用域口径）',
   assert.match(key, /^w:d:\/deepseek harness\/default-workspace\//i);
   assert.throws(() => sdk.scopeOf(''), (e) => e instanceof SdkError);
 });
+
+test('sdk: view() 知识库巨型节点能展开（不是孤岛）', async () => {
+  const { dshHome } = makeStore();
+  const sdk = createMemorySdk({ dshHome });
+  const r = await sdk.view({ center: { kind: 'library', id: 'lib:docs/调研' } });
+  assert.equal(r.nodes[0].kind, 'library');
+  assert.match(String(r.nodes[0].label), /调研知识库/);
+  assert.ok(r.nodes.filter((n) => n.kind === 'note').length > 0, '必须展开出每篇一个子节点');
+  assert.ok(r.counts.edges > 0, '库节点要有 contains 边');
+  jsonSafe(r, 'view-library');
+});
+
+test('sdk: view() 库不存在 ⇒ 空结构（不抛、不编节点）', async () => {
+  const ghost = path.join(mkdtempSync(path.join(tmpdir(), 'kifu-view-ghost-')), 'nope');
+  const sdk = createMemorySdk({ dshHome: ghost });
+  const r = await sdk.view({ center: { kind: 'episode', id: 'ep-x' } });
+  assert.equal(r.status, 'missing');
+  assert.deepEqual(r.nodes, []);
+  assert.equal(r.counts.nodes, 0);
+});

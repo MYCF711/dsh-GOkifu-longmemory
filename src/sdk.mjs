@@ -14,7 +14,7 @@ import { createWalkCache, walkFromSignals } from './rooms/walk.mjs';
 import { buildMemoryCard, signalFromText, estimateTokens, scopeKeyFromPath } from './rooms/inject.mjs';
 import { runGates } from './rooms/gates.mjs';
 import { errorClassKeyOf } from './rooms/topic.mjs';
-import { buildNeighborhood, MAX_VIEW_NODES } from './rooms/view.mjs';
+import { buildNeighborhood, MAX_VIEW_NODES, LIBRARY_ID, LIBRARY_TITLE } from './rooms/view.mjs';
 
 export const SDK_VERSION = 1;
 
@@ -94,17 +94,29 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
 
   // 2026-11-05（T140）：邻域视图要一个"整图视图对象"。这里按需拼一次并缓存（只读、纯机械）。
   let graphView = null;
-  const viewOf = () => {
+  const viewOf = async () => {
     if (graphView) return graphView;
     const st = ensure();
     if (!st) return { episodesById: new Map(), claimsById: new Map(), topicsById: new Map(), links: [] };
     const toMap = (kind) => new Map(listSafe(kind).map((r) => [String(r.id), r]));
+    // 2026-11-05（T150 的 SDK 侧）：知识库巨型节点必须**接得上**——否则以它为中心是孤岛（实测 0 边）。
+    // 这里只做两件不依赖解析的：篇数（label 用）与每篇一个 note 子节点；主题边由 buildLibraryIndex 的 resolver 负责。
+    let library = null;
+    let libraryNotes = [];
+    try {
+      const { buildLibraryIndex } = await import('../scripts/build-library-index.mjs');
+      const idx = buildLibraryIndex({});
+      library = { id: LIBRARY_ID, title: LIBRARY_TITLE, count: idx?.node?.count ?? idx?.notes?.length ?? 0 };
+      libraryNotes = Array.isArray(idx?.notes) ? idx.notes : [];
+    } catch { /* 索引不可用就不挂知识库节点（不编数字） */ }
     graphView = {
       episodesById: toMap('episodes'),
       claimsById: toMap('claims'),
       topicsById: toMap('topics'),
       links: listSafe('links'),
       scope: resolvedScope,
+      ...(library ? { library } : {}),
+      ...(libraryNotes.length ? { libraryNotes } : {}),
     };
     return graphView;
   };
@@ -245,12 +257,12 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
      * 邻域视图（18×18）：以某个节点为中心切一块**有界**子图，边界边全部进 frontier，
      * 不够时调用方再顺着 frontier 走一步。只读、零模型。
      */
-    view({ center, maxNodes, depth, scope: viewScope } = {}) {
+    async view({ center, maxNodes, depth, scope: viewScope } = {}) {
       const st = ensure();
       if (!st) {
         return { ok: true, center: center ?? null, nodes: [], edges: [], frontier: [], counts: { nodes: 0, edges: 0, frontier: 0 }, truncated: { nodes: false, edges: false }, clamped: false, status: 'missing' };
       }
-      const v = viewOf();
+      const v = await viewOf();
       const graph = viewScope === undefined ? v : { ...v, scope: viewScope == null ? null : String(viewScope) };
       const out = buildNeighborhood({ center, view: graph, maxNodes, depth });
       return { ok: true, ...out, status: out.counts.nodes ? 'measured' : 'empty', maxNodesLimit: MAX_VIEW_NODES };
