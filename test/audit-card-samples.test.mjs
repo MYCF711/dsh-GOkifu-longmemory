@@ -1,0 +1,160 @@
+// audit-card-samples 的单测（M4，2026-11-04）
+// 用**构造夹具**覆盖文字层三档（at-seq / elsewhere / missing）+ 日期层 + 弱判据回退，
+// 不依赖真实库与会话日志（事件读取用 `loadEvents` 注入）。
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  auditRows,
+  checkDate,
+  classifyTextByEvents,
+  eventsToBlobs,
+  normalizeCardText,
+  parseCardLines,
+} from '../scripts/audit-card-samples.mjs';
+
+const DAY = (y, m, d, h = 0) => Date.UTC(y, m - 1, d, h);
+
+const episodes = new Map([
+  ['ep-aaaa0001', { id: 'ep-aaaa0001', scopeKey: 'w:/a', closure: { seqFrom: 0, seqTo: 100 } }],
+  ['ep-bbbb0002', { id: 'ep-bbbb0002', scopeKey: 'w:/b', closure: { seqFrom: 0, seqTo: 100 } }],
+]);
+
+const rawEvents = {
+  'ep-aaaa0001': [
+    // 1) 卡上 seq=10，文字出现在 11（距离 1 ⇒ at-seq）
+    { seq: 11, time: DAY(2026, 11, 4, 1), data: { message: { content: [{ type: 'text', text: 'Error: old_string was not found in "/a/b.go"' }] } } },
+    // 2) 卡上 seq=20，文字只出现在 60（距离 40 ⇒ elsewhere）
+    { seq: 60, time: DAY(2026, 11, 4, 5), data: { message: { content: [{ type: 'text', text: 'Error: cannot modify "/x/y.md": file has not been read — read the file, then retry' }] } } },
+    // 3) 卡上 seq=40，文字就在 40，但那天是 11-03（卡片写 11-04 ⇒ 日期不一致）
+    { seq: 40, time: DAY(2026, 11, 3, 9), data: { message: { content: [{ type: 'text', text: 'Error: date drift text' }] } } },
+  ],
+  'ep-bbbb0002': [
+    { seq: 5, time: DAY(2026, 11, 4, 2), data: { message: { content: [{ type: 'text', text: 'Error: other scope text' }] } } },
+  ],
+};
+
+const loadEvents = async (id) => rawEvents[id] ?? [];
+
+const section = [
+  '<memory-ledger>',
+  '- [antipattern] Error: old_string was not found in "/a/b.go" (ep-aaaa0001, 2026-11-04, seq 10)',
+  '- [antipattern] class:fs-read-before-write · Error: cannot modify "/x/y.md" (ep-aaaa0001, 2026-11-04, seq 20)',
+  '- [antipattern] Error: totally missing text (ep-aaaa0001, 2026-11-04, seq 30)',
+  '- [antipattern] [跨项目] Error: date drift text (ep-aaaa0001, 2026-11-04, seq 40)',
+  '- [observed] Error: other scope text (ep-bbbb0002, 2026-11-04, seq 5)',
+  '</memory-ledger>',
+].join('\n');
+
+const rows = [{ at: 1793749445009, digest: 'd1', tokens: 100, scope: 'w:/a', section }];
+
+test('normalizeCardText: 单行化 + 去卡片模板前缀 + 去截断尾', () => {
+  assert.equal(normalizeCardText('  [跨项目]   class:fs-read-before-write · Error:  x   y  '), 'Error: x y');
+  assert.equal(normalizeCardText('[跨项目] Error: a…'), 'Error: a');
+  assert.equal(normalizeCardText('class:sandbox-limit · Error: tool call aborted'), 'Error: tool call aborted');
+  // CJK 与路径反斜杠保持原样
+  assert.equal(normalizeCardText('C:\\a\\b.md 不存在'), 'C:\\a\\b.md 不存在');
+});
+
+test('parseCardLines: 抽出 marker / 正文 / (ep, 日期, seq)', () => {
+  const lines = parseCardLines(section);
+  assert.equal(lines.length, 5);
+  assert.deepEqual(lines[0], {
+    marker: 'antipattern',
+    text: 'Error: old_string was not found in "/a/b.go"',
+    episode: 'ep-aaaa0001',
+    date: '2026-11-04',
+    seq: 10,
+  });
+});
+
+test('classifyTextByEvents: at-seq / elsewhere / missing 三档', () => {
+  const events = eventsToBlobs(rawEvents['ep-aaaa0001']);
+  assert.equal(classifyTextByEvents({ text: 'Error: old_string was not found', seq: 10, events }).verdict, 'at-seq');
+  const far = classifyTextByEvents({ text: 'Error: cannot modify "/x/y.md"', seq: 20, events });
+  assert.equal(far.verdict, 'elsewhere');
+  assert.equal(far.nearestSeq, 60);
+  assert.equal(far.distance, 40);
+  assert.equal(classifyTextByEvents({ text: 'Error: nowhere at all', seq: 20, events }).verdict, 'missing');
+});
+
+test('classifyTextByEvents: window 边界（默认 3，可收窄）', () => {
+  const events = eventsToBlobs(rawEvents['ep-aaaa0001']);
+  assert.equal(classifyTextByEvents({ text: 'Error: old_string was not found', seq: 10, events, window: 1 }).verdict, 'at-seq');
+  assert.equal(classifyTextByEvents({ text: 'Error: old_string was not found', seq: 10, events, window: 0 }).verdict, 'elsewhere');
+});
+
+test('eventsToBlobs: 递归收集字符串，不把引号转义成 \\"', () => {
+  const [ev] = eventsToBlobs([{ seq: 1, time: 1, data: { a: { b: ['cannot modify "/x/y.md"'] } } }]);
+  assert.ok(ev.blob.includes('cannot modify "/x/y.md"'));
+  assert.ok(!ev.blob.includes('\\"'));
+});
+
+test('checkDate: 同一天（UTC）算一致，跨天算不一致，无事件记 no-event', () => {
+  assert.equal(checkDate({ refDate: '2026-11-04', event: { time: DAY(2026, 11, 4, 23) } }).verdict, 'ok');
+  assert.equal(checkDate({ refDate: '2026-11-04', event: { time: DAY(2026, 11, 3, 23) } }).verdict, 'mismatch');
+  assert.equal(checkDate({ refDate: '2026-11-04', event: null }).verdict, 'no-event');
+});
+
+test('auditRows: 三档 + 日期 + 跨作用域汇总与退出码', async () => {
+  const out = await auditRows({ rows, episodes, loadEvents, window: 3, textCheck: true });
+  assert.equal(out.samples, 1);
+  assert.equal(out.refs, 5);
+  assert.equal(out.okRefs, 5);              // 弱判据仍 100%（ep 存在 + seq 在闭包）
+  assert.equal(out.textAtSeq, 3);           // 行 1、4（日期不符但文字在）、5（跨作用域但文字在）
+  assert.equal(out.textElsewhere, 1);       // 行 2
+  assert.equal(out.textMissing, 1);         // 行 3
+  assert.equal(out.dateOk, 3);              // 行 1、2、5（日期层独立于文字层：按所引 seq 最近的事件判）
+  assert.equal(out.dateBad, 2);             // 行 3（最近事件 @40 是 11-03）、行 4（同理）
+  assert.equal(out.sameScopeRefs, 4);
+  assert.equal(out.crossScopeRefs, 1);      // ep-bbbb0002 属于 w:/b
+  assert.equal(out.exitCode, 1);            // 有 missing + 日期不一致 ⇒ 红
+
+  const line3 = out.details[0].verdicts[2];
+  assert.equal(line3.verdict, 'missing');   // 文字层：本局无这段文字
+  assert.equal(line3.dateVerdict, 'mismatch'); // 日期层只看"所引 seq 最近事件"（@40，11-03），与本行文字无关
+  assert.equal(line3.eventDate, '2026-11-03');
+  const line4 = out.details[0].verdicts[3];
+  assert.equal(line4.verdict, 'at-seq');
+  assert.equal(line4.dateVerdict, 'mismatch');
+  assert.equal(line4.eventDate, '2026-11-03');
+});
+
+test('auditRows: 读不到原件（loadEvents 抛错）⇒ fail-closed 记 missing', async () => {
+  const out = await auditRows({
+    rows,
+    episodes,
+    loadEvents: async () => { throw new Error('log unreadable'); },
+    textCheck: true,
+  });
+  assert.equal(out.textMissing, 5);
+  assert.equal(out.dateBad, 5);
+  assert.equal(out.exitCode, 1);
+});
+
+test('auditRows: 全绿夹具 ⇒ 退出码 0', async () => {
+  const okSection = [
+    '- [antipattern] Error: old_string was not found in "/a/b.go" (ep-aaaa0001, 2026-11-04, seq 11)',
+    '- [observed] Error: other scope text (ep-bbbb0002, 2026-11-04, seq 5)',
+  ].join('\n');
+  const out = await auditRows({
+    rows: [{ at: 1, digest: 'd2', tokens: 10, scope: 'w:/a', section: okSection }],
+    episodes,
+    loadEvents,
+    textCheck: true,
+  });
+  assert.equal(out.textAtSeq, 2);
+  assert.equal(out.textMissing, 0);
+  assert.equal(out.dateOk, 2);
+  assert.equal(out.exitCode, 0);
+});
+
+test('auditRows --no-text: 退回弱判据（文字层 skipped，退出码只看引用层）', async () => {
+  const out = await auditRows({ rows, episodes, loadEvents, textCheck: false });
+  assert.equal(out.textCheck, false);
+  assert.equal(out.textMissing, 0);
+  assert.equal(out.textAtSeq, 0);
+  assert.equal(out.details[0].verdicts.every((v) => v.verdict === 'skipped'), true);
+  assert.equal(out.exitCode, 0);            // 旧口径：5/5 可回溯 ⇒ 绿（这正是本次升级要堵的假绿）
+  assert.equal(out.crossScopeRefs, 1);      // 弱判据下跨作用域照样计得出来
+});
