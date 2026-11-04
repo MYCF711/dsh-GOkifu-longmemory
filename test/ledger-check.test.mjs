@@ -24,7 +24,8 @@ test('ledger-check: 完全一致 ⇒ 无差异', () => {
 
 test('ledger-check: 任一项不一致都要报出来（含测试四个分量）', () => {
   const l = parseLedger(TEXT);
-  const bad = compare(l, { version: '0.60.0', tests: { total: 390, pass: 385, fail: 0, skip: 5 }, claim: 323, threads: 144 });
+  // 2026-11-04（0.143.0）：语料判据改成单向（只查变少 / 台账过旧），所以这里用**变少**来触发
+  const bad = compare(l, { version: '0.60.0', tests: { total: 390, pass: 385, fail: 0, skip: 5 }, claim: 300, threads: 130 });
   assert.ok(bad.some((x) => x.startsWith('版本')));
   assert.ok(bad.some((x) => x.includes('测试 total')));
   assert.ok(bad.some((x) => x.includes('测试 skip')));
@@ -56,7 +57,8 @@ test('ledger-check --full: 缺测点/缺 A2/A4/时点过旧都要报', () => {
 
 test('ledger-check compare: 局数/A2/A4 不一致（超容差）要报', () => {
   const l = { ...parseLedger(TEXT), episodes: 117, a2: 26.6, a4: 2.1 };
-  const bad = compare(l, { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 322, threads: 143, episodes: 116, a2: 27.5, a4: 9.0 });
+  // A2 用 >2pp 的差（线上整库增长时容差是 2pp，真实退化仍要报）
+  const bad = compare(l, { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 322, threads: 143, episodes: 116, a2: 30.0, a4: 9.0 });
   assert.ok(bad.some((x) => x.startsWith('局数')));
   assert.ok(bad.some((x) => x.startsWith('A2')));
   assert.ok(bad.some((x) => x.startsWith('A4')));
@@ -77,4 +79,16 @@ test('ledger-check: m5 采集失败时不许伪装成「台账缺 A2/A4」', () 
   // 没有采集失败时，缺 A2/A4 仍按原口径报
   const plain = fullCheck(l, [], { now: Date.parse('2026-11-02T22:00:00') });
   assert.ok(plain.some((x) => x.includes('台账缺 A2/A4')));
+});
+
+
+test('ledger-check: 能读到 store 时按单向判 —— 增长放行、变少必报（心跳空闲也一样）', () => {
+  const l = parseLedger(TEXT);
+  const base = { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, threads: 143, episodes: 116 };
+  // 增长：台账 322 → 实测 400，心跳不新鲜（live:false）也必须放行
+  assert.deepEqual(compare(l, { ...base, claim: 400 }, { live: false }), []);
+  // 变少：322 → 300，必须报
+  assert.ok(compare(l, { ...base, claim: 300 }, { live: false }).some((x) => x.startsWith('claim')));
+  // 根本没测到 store（干净克隆）⇒ 不比较语料
+  assert.deepEqual(compare(l, { ...base, claim: null, episodes: null }, { live: false }), []);
 });
