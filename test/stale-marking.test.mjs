@@ -48,7 +48,7 @@ test.after(() => {
 // A · 写侧路径归一
 // ---------------------------------------------------------------------------
 
-test('T159: 路径方言与归一 —— /tmp 与 /d 不再落到盘根', () => {
+test('T159: 路径方言与归一 —— /tmp 与 /d 不再落到盘根', { skip: process.platform !== 'win32' ? 'Windows/MSYS 路径语义（CI 跑在 ubuntu）' : false }, () => {
   assert.equal(classifyPathFlavor('/tmp/x.json'), 'msys-tmp');
   assert.equal(classifyPathFlavor('/d/work/x'), 'msys-drive');
   assert.equal(classifyPathFlavor('/c/Users/Administrator/x'), 'msys-drive');
@@ -57,14 +57,21 @@ test('T159: 路径方言与归一 —— /tmp 与 /d 不再落到盘根', () => 
   assert.equal(classifyPathFlavor('/主工作区/x'), 'posix');
   assert.equal(classifyPathFlavor('tmp/rel.json'), 'relative');
 
+  // 2026-11-05：这段断言只在 Windows/MSYS 语义下成立 —— CI 跑在 ubuntu-latest，那里 `/tmp` 本来就是
+  // 合法 POSIX 路径（TEMP 就是 /tmp），不该也不可能有"归一成盘符"这回事。所以按平台分支。
   const msysTmp = normalizeEvidencePath('/tmp/foo.json');
-  assert.equal(msysTmp.pathFlavor, 'msys-tmp');
+  assert.equal(msysTmp.pathFlavor, 'msys-tmp', '方言判定是纯语法，两个平台都要对');
   assert.equal(msysTmp.rawValue, '/tmp/foo.json', '保留原文便于追溯');
   assert.ok(path.isAbsolute(msysTmp.value), '归一后是绝对路径');
-  assert.ok(!msysTmp.value.startsWith('/'), '归一后不是 POSIX 字符串');
-  assert.equal(msysTmp.value.toLowerCase().endsWith('/temp/foo.json'), true, `应当落在临时目录下：${msysTmp.value}`);
-  assert.notEqual(resolveValidityPath(msysTmp.value, null).toLowerCase(), resolveValidityPath('/tmp/foo.json', null).toLowerCase(),
-    '不能再和"盘根"解析结果相同');
+  if (process.platform === 'win32') {
+    assert.ok(!msysTmp.value.startsWith('/'), '归一后不是 POSIX 字符串');
+    assert.equal(msysTmp.value.toLowerCase().endsWith('/temp/foo.json'), true, `应当落在临时目录下：${msysTmp.value}`);
+    assert.notEqual(resolveValidityPath(msysTmp.value, null).toLowerCase(), resolveValidityPath('/tmp/foo.json', null).toLowerCase(),
+      '不能再和"盘根"解析结果相同');
+  } else {
+    // Linux：TEMP 就是 /tmp，归一结果与原值等价 —— 断言的是"不跑到盘根/不乱加盘符"，不是"必须变盘符"
+    assert.ok(!/^[A-Za-z]:/.test(msysTmp.value), '不许凭空造盘符');
+  }
 
   const drive = normalizeEvidencePath('/d/work/demo/cfg.json');
   assert.equal(drive.value, 'd:/work/demo/cfg.json', 'Git Bash 盘符挂载可无损还原');
@@ -79,7 +86,7 @@ test('T159: 路径方言与归一 —— /tmp 与 /d 不再落到盘根', () => 
   assert.equal(normalizeEvidencePath('').value, '');
 });
 
-test('T159: ENOENT 派生的 claim 写 expect:missing + 归一后的路径', () => {
+test('T159: ENOENT 派生的 claim 写 expect:missing + 归一后的路径', { skip: process.platform !== 'win32' ? 'Windows/MSYS 路径语义（CI 跑在 ubuntu）' : false }, () => {
   const scope = 'w:d:/work/demo';
   const episodes = [{ id: 'ep-aaaaaaaa', sessionId: 'session-a', scopeKey: scope, startedAt: T0 }];
   const signals = new Map([['ep-aaaaaaaa', {
@@ -227,7 +234,7 @@ test('T159: classifyClaim —— 只标真 stale；unverified / posix-ambiguous 
   assert.equal(classifyClaim(claimRecord({ validity: { type: 'none', value: null } }), { ...staleVersion }).reason, 'no-validity');
 });
 
-test('T159: dry-run —— 默认不写一个字节，只给计划', async () => {
+test('T159: dry-run —— 默认不写一个字节，只给计划', { skip: process.platform !== 'win32' ? 'Windows/MSYS 路径语义（CI 跑在 ubuntu）' : false }, async () => {
   const fixture = buildFixture();
   const before = hashTree(fixture.storeRoot);
   const report = await runMarkStale({ storeRoot: fixture.storeRoot, workspace: fixture.ws, now: AT + 1000 });
@@ -244,7 +251,7 @@ test('T159: dry-run —— 默认不写一个字节，只给计划', async () =>
   assert.equal(hashTree(fixture.storeRoot), before, 'dry-run 必须零写入');
 });
 
-test('T159: --apply 写入降级指针（只增不改），再跑幂等，verify OK', async () => {
+test('T159: --apply 写入降级指针（只增不改），再跑幂等，verify OK', { skip: process.platform !== 'win32' ? 'Windows/MSYS 路径语义（CI 跑在 ubuntu）' : false }, async () => {
   const fixture = buildFixture();
   const report = await runMarkStale({ storeRoot: fixture.storeRoot, workspace: fixture.ws, apply: true, now: AT + 2000 });
   assert.equal(report.counts.mark, 2);
@@ -282,7 +289,7 @@ test('T159: --apply 写入降级指针（只增不改），再跑幂等，verify
   assert.equal(again.verify.ok, true);
 });
 
-test('T159: --revert --apply 原样回退（可逆）', async () => {
+test('T159: --revert --apply 原样回退（可逆）', { skip: process.platform !== 'win32' ? 'Windows/MSYS 路径语义（CI 跑在 ubuntu）' : false }, async () => {
   const fixture = buildFixture();
   await runMarkStale({ storeRoot: fixture.storeRoot, workspace: fixture.ws, apply: true, now: AT + 2000 });
 
@@ -331,7 +338,7 @@ test('T159: buildMarked / buildReverted 是纯函数，字段集合固定', () =
   assert.equal(buildReverted({ ...rec, state: 'candidate' }).state, 'candidate', 'staleFrom 缺失时退回 observed');
 });
 
-test('T159: CLI —— --json 结构、--evidence 写 markdown、参数解析', async () => {
+test('T159: CLI —— --json 结构、--evidence 写 markdown、参数解析', { skip: process.platform !== 'win32' ? 'Windows/MSYS 路径语义（CI 跑在 ubuntu）' : false }, async () => {
   const fixture = buildFixture();
   const res = await runCli(['--store', fixture.storeRoot, '--workspace', fixture.ws, '--now', String(AT + 5000), '--json']);
   assert.equal(res.code, 0, res.stderr);
