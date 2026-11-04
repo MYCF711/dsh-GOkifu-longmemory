@@ -22,7 +22,9 @@ import {
   formatStamp, sameCounts, waitForCi, LEDGER_TEST_LINE_RE,
 } from '../scripts/release.mjs';
 
-const NOW = new Date('2026-11-05T05:20:00+08:00').getTime();
+// 2026-11-05：台账用的是**本地时间**，CI 在 UTC 上跑，写死 +08:00 的时间戳会差 8 小时（红过）。
+// 用「本地构造」代替固定 epoch —— 在任何时区下都得到 2026-11-05 05:20。
+const NOW = new Date(2026, 10, 5, 5, 20, 0).getTime();
 
 // 一段带测试行的台账（前后各有多行；用 \n 与一行 \r\n 混排，验证行尾不被改动）
 const LEDGER_TEXT = [
