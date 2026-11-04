@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.142.0（2026-11-04）
+
+### 巡检压成一条命令：`node scripts/patrol.mjs`
+- 以前整点巡检要手动跑 3–4 条命令、再从输出里挑数字抄进 `evidence/` —— 抄错一次就把错数写进台账。
+- 新增 `scripts/patrol.mjs`：跑心跳 + 当前宿主审计（`--full` 再加六轴闸），**只打印结论行**并给出判定
+  （跨作用域必须 0、missing 必须 0、日期必须逐条一致），`--write` 直接落 `evidence/M8-patrol-<日期>.md`。
+- 解析逻辑抽成纯函数并加了 4 条单测（心跳两行格式 / 审计两行格式 / 三条判定 / 空输入不炸）。
+  写的时候踩到一个真坑：`gates-failed` 在「原因」行而不是「动作」行，第一版一直读成 `?`。
+
+### 知识库到 39 篇：调研 38 · Cognee 的排序层
+- [外] 原文已核（Mintlify 的 `.md` 直链）：`importance_weight` 取 **0.0–1.0、默认 0.5**，
+  "stored on the ingested data record and carried onto everything derived from it … a property of the memory
+  rather than of the query"；图检索把它折进 triplet 距离 **`(2 - importance_weight)`**（1.0 不动、0.0 距离翻倍）；
+  **"A low weight biases ranking; it does not hide data."**
+- 对照本仓：可抄三条纪律 —— **排序 ≠ 可见性**（我们刚做的边界闸行级化，正是"先判可见、再谈排序"）、
+  **无证据不降权**（中性原则）、**权重属记忆且写入不改**（对应 df / 失败计数）。
+  不借：连续浮点分、反馈评分、embedding 锚/余弦坐标、多检索器多套公式、`forget()` 重入库。
+
+### 验证
+505 条测试（501 pass / 0 fail / 4 skip）；`check PASS`（调研清单 39 篇）；`patrol.mjs` 本机实跑通过并落证据。
+
 ## 0.141.0（2026-11-04）
 
 ### 工具面拆成**独立插件**：把风险关在一个格子里
