@@ -829,3 +829,59 @@ test('A6: 旧数据缺 quote ⇒ 退回 claim.text（审计会把它抓成 elsew
     assert.ok(line.includes(formatCardDate(T(22))), `日期仍取所引事件时刻：${line}`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// T111（0.122.0）：类级 claim 只存一个代表原文 ⇒ 展示时优先选「与本次信号最贴近」的那条同域 support
+// ---------------------------------------------------------------------------
+
+test('T111: 同域 support 里更贴近信号的原文会被选中（不固定取 hit.seq 那条）', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t111-'));
+  try {
+    const store = createStore({ root, now: T(20) });
+    store.ensureDirs();
+    store.putMany('episodes', [episode('ep-ccccc001', 21, 2)]);
+    store.putMany('claims', [
+      claim({
+        id: 'c-cccc0001', kind: 'antipattern', text: 'class:tool-unavailable · sed: -e expression #1, unknown command', day: 21, state: 'semantic',
+        support: [
+          { episode: 'ep-ccccc001', seq: 10, quote: 'sed: -e expression #1, char 1: unknown command', day: 21 },
+          { episode: 'ep-ccccc001', seq: 20, quote: 'json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)', day: 21 },
+        ],
+      }),
+    ]);
+    // hit 指向 seq 10（sed），但信号说的是 JSON 解析失败
+    const hits = [hit({ episodeId: 'ep-ccccc001', seq: 10, claimId: 'c-cccc0001' })];
+    const signal = signalFromText('json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)', { at: T(21) });
+    signal.scopeKey = SCOPE;
+    const card = buildMemoryCard({ signal, walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const line = cardLines(card)[0] ?? '';
+    assert.ok(line.includes('JSONDecodeError'), `应展示与信号贴近的那条原文：${line}`);
+    assert.ok(line.includes('seq 20'), `出处也要跟着换成那条（seq 20）：${line}`);
+    assert.ok(line.includes('class:tool-unavailable'), `类级标签保留：${line}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T111: 没有更贴近的原文时保持原选（不为换而换）', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t111b-'));
+  try {
+    const store = createStore({ root, now: T(20) });
+    store.ensureDirs();
+    store.putMany('episodes', [episode('ep-ccccc002', 21, 2)]);
+    store.putMany('claims', [
+      claim({
+        id: 'c-cccc0002', kind: 'antipattern', text: 'class:tool-unavailable · sed: -e expression #1, unknown command', day: 21, state: 'semantic',
+        support: [
+          { episode: 'ep-ccccc002', seq: 10, quote: 'sed: -e expression #1, char 1: unknown command', day: 21 },
+          { episode: 'ep-ccccc002', seq: 20, quote: 'fatal: unable to access: connection reset', day: 21 },
+        ],
+      }),
+    ]);
+    const hits = [hit({ episodeId: 'ep-ccccc002', seq: 10, claimId: 'c-cccc0002' })];
+    const signal = signalFromText('TypeError: x is not a function', { at: T(21) });
+    signal.scopeKey = SCOPE;
+    const card = buildMemoryCard({ signal, walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const line = cardLines(card)[0] ?? '';
+    assert.ok(line.includes('seq 10'), `没有更好候选时保持原出处：${line}`);
+    assert.ok(line.includes('unknown command'), `原文也不换：${line}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
