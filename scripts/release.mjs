@@ -15,7 +15,12 @@ const tag = `v${pkg.version}`;
 
 const branch = out('git rev-parse --abbrev-ref HEAD');
 if (branch !== 'main') { console.error(`release: 必须在 main 上（当前 ${branch}）`); process.exit(1); }
-if (out('git status --porcelain')) { console.error('release: 工作树不干净'); process.exit(1); }
+// 2026-11-04（0.143.x）：只看**已跟踪文件**的改动。未跟踪文件是并行队友正在写的 WIP，
+// 它们进不了本次 commit、也进不了 tag 指向的树 —— 用它挡发布属于误伤（今晚真被挡了一次）。
+const dirty = out('git status --porcelain').split('\n').filter((l) => l && !l.startsWith('??'));
+if (dirty.length) { console.error(`release: 工作树不干净（已跟踪文件有改动）：${dirty.join(' | ')}`); process.exit(1); }
+const untracked = out('git status --porcelain').split('\n').filter((l) => l.startsWith('??'));
+if (untracked.length) console.log(`release: 注意 —— 有 ${untracked.length} 个未跟踪文件（队友 WIP），不计入本次发布`);
 run('git fetch origin main');
 if (out('git rev-parse HEAD') !== out('git rev-parse origin/main')) {
   console.error('release: HEAD 与 origin/main 不一致'); process.exit(1);
