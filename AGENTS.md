@@ -78,6 +78,9 @@
 
 ### 2.4 工程纪律
 
+- **有未提交改动时禁止 `git reset --hard` / `git checkout -- .` / `git stash` 后不恢复**（2026-11-05 连踩 **5 次**）：
+  合入 PR 后对齐远端一律用 `git pull --ff-only` 或 `git merge --ff-only origin/main`；树脏就**先提交**（哪怕是 WIP 分支），
+  再切分支。被冲掉的改动只有三种找回方式：`git stash list`、`git reflog`、`git fsck --unreachable`——**都不是保证**。
 - **一刀一个 commit**，commit 首行 = 切片 id；不许同一刀里同时改「结构」与「行为」。
 - **契约先行**：新增房间/字段先写契约（职责 / 导出 / 输入输出 / 错误语义 / 允许依赖），再写代码。
 - **指标先有消费者**：任何指标必须有真实语料消费者，否则会一直算假数。
