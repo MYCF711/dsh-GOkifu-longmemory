@@ -112,7 +112,13 @@ test('T236b ③: 输出层级 —— A2b 的失败排在 A1 之前', () => {
 // 现在默认用 T236a 的 n=108 考卷（repeat + self），实测严格 34.26%。
 // 门槛 = 当前实测（37/108、74/108）—— 起点不是目标，任何下降即红。
 
-const HOLDOUT = { n: 108, strict: 37 / 108, cover: 74 / 108, sampleSource: 'holdout' };
+// 夹具跟着基线走（T264 重定基线后，旧的 37/108 在 cover 维度会低于新基线 79/114 ⇒ 假红）。
+const HOLDOUT = {
+  n: HOLDOUT_BASELINE.n,
+  strict: HOLDOUT_BASELINE.strictMin,
+  cover: HOLDOUT_BASELINE.coverMin,
+  sampleSource: 'holdout',
+};
 
 test('T242 ①: 考卷不存在 ⇒ 抛错并说清"考卷不存在"（fail-closed，不静默回退）', () => {
   const missingFs = { existsSync: () => false, readFileSync: () => { throw new Error('should not read'); } };
@@ -122,22 +128,24 @@ test('T242 ①: 考卷不存在 ⇒ 抛错并说清"考卷不存在"（fail-clos
   );
 });
 
-test('T242 ②: 用 108 条考卷时 n=108，严格/覆盖取自考卷', () => {
+test('T242 ②: 考卷的 n 与严格/覆盖一律取自考卷本身（不写死某一版数字）', () => {
   const v = judge(base(), undefined, HOLDOUT);
-  assert.equal(v.values.a2bN, 108);
+  assert.equal(v.values.a2bN, HOLDOUT.n);
   assert.equal(v.values.sampleSource, 'holdout');
-  assert.equal(v.values.a2bStrict, 37 / 108);
-  assert.equal(v.values.a2bCover, 74 / 108);
+  assert.equal(v.values.a2bStrict, HOLDOUT.strict);
+  assert.equal(v.values.a2bCover, HOLDOUT.cover);
 });
 
 test('T242 ③: 门槛不因换考卷而误报（当前实测 = 门槛 ⇒ PASS）；下降即红', () => {
-  assert.equal(HOLDOUT_BASELINE.n, 108);
-  assert.equal(HOLDOUT_BASELINE.strictMin, 37 / 108);
-  assert.equal(HOLDOUT_BASELINE.coverMin, 74 / 108);
+  // 基线随"合法口径"重定（T264：信号仅限注入时刻可得），这里不再写死数字 ——
+  // 断言的是**结构**（n > 0、两个门槛都在 (0,1] 且由同一份考卷算出），不是某一版的具体值。
+  assert.ok(HOLDOUT_BASELINE.n > 0);
+  assert.equal(HOLDOUT_BASELINE.strictMin, HOLDOUT_BASELINE.strictHits / HOLDOUT_BASELINE.n);
+  assert.equal(HOLDOUT_BASELINE.coverMin, HOLDOUT_BASELINE.relatedHits / HOLDOUT_BASELINE.n);
   // 当前实测正好等于门槛 ⇒ PASS（不允许出现"基线被四舍五入卡在门外"的假红）
   assert.equal(judge(base(), undefined, HOLDOUT).ok, true, '当前实测应当 PASS');
   // 严格掉 1 条（36/108）⇒ 红
-  const dropped = judge(base(), undefined, { ...HOLDOUT, strict: 36 / 108 });
+  const dropped = judge(base(), undefined, { ...HOLDOUT, strict: (HOLDOUT_BASELINE.strictHits - 1) / HOLDOUT_BASELINE.n });
   assert.equal(dropped.ok, false, '掉一条也要红（起点不是目标）');
   assert.ok(dropped.layers.main.some((f) => f.includes('A2b 严格')), JSON.stringify(dropped.layers));
   // 旧的 repeat-only 回归线不该套到新考卷上：34.26% < 84.21%-10pp，但新考卷口径下不因这条红
