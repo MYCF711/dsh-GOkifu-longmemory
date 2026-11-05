@@ -1574,14 +1574,14 @@ test('T207 ④: mergeStats 四个计数正确（含"库里无合并节点"的全
       walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23), mergeHit('ep-mrg00001', 30, 'c-mem0001', 21)]),
       store, scope: SCOPE, now: T(24),
     });
-    assert.deepEqual(a.mergeStats, { candidatesHit: 1, membersHit: 1, collapsed: 1, bubbled: 1 });
+    assert.deepEqual(a.mergeStats, { groupsHit: 1, membersHit: 1, collapsed: 1, bubbled: 1 });
 
     // 两个成员、没命中合并节点 ⇒ 候选 0 / 成员 2 / 折叠 2 / 冒泡 0
     const b = buildMemoryCard({
       walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mem0001', 21), mergeHit('ep-mrg00002', 12, 'c-mem0002', 22)]),
       store, scope: SCOPE, now: T(24),
     });
-    assert.deepEqual(b.mergeStats, { candidatesHit: 0, membersHit: 2, collapsed: 2, bubbled: 0 });
+    assert.deepEqual(b.mergeStats, { groupsHit: 1, membersHit: 2, collapsed: 2, bubbled: 0 });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1591,5 +1591,28 @@ test('T207 ④: mergeStats 四个计数正确（含"库里无合并节点"的全
     walkResult: walkOf([hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-0000aa01' })]),
     store: plain.store, scope: SCOPE, now: T(24),
   });
-  assert.deepEqual(card.mergeStats, { candidatesHit: 0, membersHit: 0, collapsed: 0, bubbled: 0 });
+  assert.deepEqual(card.mergeStats, { groupsHit: 0, membersHit: 0, collapsed: 0, bubbled: 0 });
+});
+
+// ---------------------------------------------------------------- T226（audit-13 ①）：指标先有消费者
+//
+// `mergeStats.candidatesHit` 是**结构性死值**：T193 之后 walk 不再把合并节点当 hit 返回，
+// 那个计数永远 0。它会让读的人以为"合流从来没被命中"。现改为 `groupsHit`（命中的**合并组**数），
+// 由"卡片里出现该组的 ≥1 个成员"去重得到 —— 组数推不出行数，行数也推不出组数，两个都要。
+test('T226: 有成员命中时 groupsHit 非零，且死值 candidatesHit 已从 mergeStats 消失', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const card = buildMemoryCard({
+      walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mem0001', 21)]),
+      store, scope: SCOPE, now: T(24),
+    });
+    assert.equal(card.mergeStats.groupsHit, 1, `命中了 1 组，实际：${JSON.stringify(card.mergeStats)}`);
+    assert.equal(card.mergeStats.membersHit, 1);
+    assert.equal('candidatesHit' in card.mergeStats, false, '死值字段必须从 mergeStats 里消失');
+    // 没有成员命中 ⇒ 组数 0（而不是"死值 0"：这里 0 是有意义的"没触发"）
+    const none = buildMemoryCard({ walkResult: walkOf([]), store, scope: SCOPE, now: T(24) });
+    assert.equal(none.mergeStats.groupsHit, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
