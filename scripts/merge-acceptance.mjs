@@ -222,19 +222,25 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
     const memberIds = new Set(Array.isArray(merged?.merge?.members) ? merged.merge.members.map(String) : []);
     let sourceClaims = [];
     let shadowClaims = [];
+    let shadowCard = null;
     try {
       sourceClaims = run(source, sourceCache).card.claims ?? [];
     } catch {
       sourceClaims = [];
     }
     try {
-      shadowClaims = run(shadow, shadowCache).card.claims ?? [];
+      shadowCard = run(shadow, shadowCache).card ?? null;
+      shadowClaims = shadowCard?.claims ?? [];
     } catch {
+      shadowCard = null;
       shadowClaims = [];
     }
     // "成员行数" = 卡片渲染行里 claimId ∈ 本组 merge.members 的行数（机械数集合交集，不解析正文）
     const membersSourceRows = sourceClaims.filter((entry) => memberIds.has(String(entry?.claimId ?? ''))).length;
     const membersShadowRows = shadowClaims.filter((entry) => memberIds.has(String(entry?.claimId ?? ''))).length;
+    // T211：折叠触发从 P(≥2) 改成 P(≥1) 后，卡片里成员不再"同时成行" ⇒ 旧 ④c 恒 0。
+    // 运行时计数（inject 的 mergeStats）才是收益的载体：membersHit / collapsed / bubbled。
+    const stats = shadowCard?.mergeStats ?? null;
 
     // T189 ④b：**内容身份**判据（不再只看行数）——
     // 源卡里每一行，要么在影卡里**同 claimId** 出现，要么被某个**渲染中的合并节点**
@@ -284,6 +290,10 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
       membersResolvable,
       lostRows,
       shrunk,
+      mergeStats: stats,
+      membersHit: Number(stats?.membersHit ?? 0) || 0,
+      collapsed: Number(stats?.collapsed ?? 0) || 0,
+      bubbled: Number(stats?.bubbled ?? 0) || 0,
       mergedRendered: shadowClaims.length >= 1,
     });
   }
@@ -320,40 +330,52 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
   const foldable = rows.filter((r) => r.foldable);
   const savedPositive = foldable.filter((r) => r.shadowRows < r.sourceRows);
   const savedTotal = foldable.reduce((n, r) => n + Math.max(0, r.sourceRows - r.shadowRows), 0);
-  // T185：④c 带 Wilson 95% 区间 + 样本量门槛，小样本的 100% 不许当结论用。
-  const wilson = wilsonInterval(savedPositive.length, foldable.length);
-  const MIN_FOLDABLE = 10;
+  // ── T211：④c 换成 mergeStats 口径 ────────────────────────────────────────
+  // T207 把折叠触发从 P(≥2) 改成 P(≥1) 之后，卡片里成员**永远不会同时成行** ⇒ 旧"可折组"恒 0，
+  // 指标结构性失效。收益的真实载体是 inject 的运行时计数 mergeStats{membersHit, collapsed, bubbled}。
+  // 新 ④c = **有成员被命中的组里，实际折叠了行的组占比** = collapsedGroups / hitGroups。
+  const hitGroups = rows.filter((r) => r.membersHit > 0).length;
+  const collapsedGroups = rows.filter((r) => r.collapsed > 0).length;
+  const bubbledGroups = rows.filter((r) => r.bubbled > 0).length;
+  const collapsedRows = rows.reduce((n, r) => n + (Number(r.collapsed) || 0), 0);
+  const bubbledRows = rows.reduce((n, r) => n + (Number(r.bubbled) || 0), 0);
+  const membersHitRows = rows.reduce((n, r) => n + (Number(r.membersHit) || 0), 0);
+  const ratio = hitGroups ? collapsedGroups / hitGroups : null;
+  const wilson = wilsonInterval(collapsedGroups, hitGroups);
+  const MIN_GROUPS = 10;
   const THRESHOLD = 0.7; // T189：从"比抛硬币好"抬到"可靠"
-  // 全校正下界：随机取一个合并组，既"可折"又"真省行"的概率下界
-  // = 可折率（点估计）× 可折组里省行率的 Wilson 下界（保守：两个量都往下取）
-  const foldableShare = rows.length ? foldable.length / rows.length : 0;
-  const layerLowerBound = foldableShare * (wilson.lower ?? 0);
-  const nNeededPerfect = Math.ceil(wilson.z * wilson.z); // p̂=1 时下界 ≥0.5 的数学下限（n ≥ z²）
+  const hitShare = rows.length ? hitGroups / rows.length : 0;
+  const layerLowerBound = hitShare * (wilson.lower ?? 0);
+  // 历史列（P(≥2) 时代的口径，现在恒 0，只展示）
   let evidence;
   if (rows.length === 0) {
     evidence = { verdict: '证据不足', reason: '没有可评估的合并组（影库里没有 merge.members）' };
-  } else if (foldable.length === 0) {
-    evidence = { verdict: '证据不足', reason: '没有可折组（成员从不同时出现在同一张卡里，或成员记录已不可解析；④c 无定义）' };
-  } else if (foldable.length < MIN_FOLDABLE) {
-    evidence = {
-      verdict: '证据不足',
-      reason: `可折组 ${foldable.length} < ${MIN_FOLDABLE}（当前 ${savedPositive.length}/${foldable.length} 省行；Wilson 下界 ${(wilson.lower * 100).toFixed(1)}%）`
-        + `—— 若真实收益只有 50%，${foldable.length} 组全中的概率仍有 ${((0.5 ** foldable.length) * 100).toFixed(1)}%；`
-        + `若后续仍全中，至少 ${nNeededPerfect} 个可折组（数学下限 z²≈${(wilson.z * wilson.z).toFixed(2)}）才能让下界 ≥0.5，项目门槛取 ${MIN_FOLDABLE}`,
-    };
+  } else if (hitGroups === 0) {
+    evidence = { verdict: '证据不足', reason: `没有成员命中的组（0 / ${rows.length}）—— ④c 无定义，缺"成员被渲染"这个前提` };
+  } else if (hitGroups < MIN_GROUPS) {
+    evidence = { verdict: '证据不足', reason: `命中的组 ${hitGroups} < ${MIN_GROUPS}（当前 ${collapsedGroups}/${hitGroups} 折叠了行；Wilson 下界 ${(wilson.lower * 100).toFixed(1)}%）` };
   } else if (wilson.lower < THRESHOLD) {
-    evidence = { verdict: '证据不足', reason: `Wilson 下界 ${(wilson.lower * 100).toFixed(1)}% < ${THRESHOLD * 100}%（可折 ${foldable.length} 组）` };
+    evidence = { verdict: '证据不足', reason: `Wilson 下界 ${(wilson.lower * 100).toFixed(1)}% < ${THRESHOLD * 100}%（命中 ${hitGroups} 组、折叠 ${collapsedGroups} 组）` };
   } else {
-    evidence = { verdict: '有证据', reason: `Wilson 下界 ${(wilson.lower * 100).toFixed(1)}% ≥ ${THRESHOLD * 100}% 且可折组 ${foldable.length} ≥ ${MIN_FOLDABLE}` };
+    evidence = { verdict: '有证据', reason: `Wilson 下界 ${(wilson.lower * 100).toFixed(1)}% ≥ ${THRESHOLD * 100}% 且命中组 ${hitGroups} ≥ ${MIN_GROUPS}` };
   }
   const c = {
     id: '④c',
-    name: '参考：可折组里"影库省行"的占比',
+    name: '参考：有成员命中的组里"实际折叠了行"的占比',
     total: rows.length,
+    // 新口径
+    hitGroups,
+    collapsedGroups,
+    bubbledGroups,
+    collapsedRows,
+    bubbledRows,
+    membersHitRows,
+    ratio,
+    // 旧键（保留，别删 —— 有下游在读）
     foldable: foldable.length,
     notFoldable: rows.length - foldable.length,
     savedPositive: savedPositive.length,
-    ratio: foldable.length ? savedPositive.length / foldable.length : null,
+    foldableRatio: foldable.length ? savedPositive.length / foldable.length : null,
     avgSaved: foldable.length ? savedTotal / foldable.length : 0,
     savedTotal,
     wilson,
@@ -362,10 +384,10 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
       ...evidence,
       verdict: evidence.verdict,
       threshold: THRESHOLD,
-      minFoldable: MIN_FOLDABLE,
+      minGroups: MIN_GROUPS,
       lower: wilson.lower,
       upper: wilson.upper,
-      n: foldable.length,
+      n: hitGroups,
     },
     membersSourceRows: rows.map((r) => ({
       id: r.id,
@@ -375,6 +397,9 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
       shadowRows: r.shadowRows,
       foldable: r.foldable,
       saved: r.sourceRows - r.shadowRows,
+      membersHit: r.membersHit,
+      collapsed: r.collapsed,
+      bubbled: r.bubbled,
     })),
     criterion: '只展示（不参与退出码）',
   };
@@ -561,7 +586,8 @@ export function formatReport(r) {
   lines.push(`| ④a | 不许变差（定点抽样） | 反增 **${g.a.worse.length}** 组 / 共 ${g.a.groups} 组 · 载荷缩水 ${g.a.shrunk} 行（只展示）${g.a.worse.length ? `（${g.a.worse.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
   lines.push(`| ④b | 不许丢内容（**按 claimId 对齐**） | 丢行 **${g.b.lostRows}** 行 / ${g.b.losses.length} 组${g.b.losses.length ? `（${g.b.losses.map((x) => `${x.id} 源${x.sourceRows}→影${x.shadowRows}·丢${x.lostRows}`).join(' · ')}）` : ''} | lostRows = 0 |`);
   const w = g.c.wilson;
-  lines.push(`| ④c | 参考：可折组里"影库省行"的占比 | 总 **${g.c.total}** 组 · 可折 **${g.c.foldable}** · 不可折 ${g.c.notFoldable} · 省行 ${g.c.savedPositive}/${g.c.foldable} = **${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}** · Wilson 95% **${w.lower === null ? 'n/a' : `[${(w.lower * 100).toFixed(1)}%, ${(w.upper * 100).toFixed(1)}%]`}** · 全校正下界 ${(g.c.layerLowerBound * 100).toFixed(1)}% · 平均省 ${g.c.avgSaved.toFixed(2)} 行 | 只展示 |`);
+  lines.push(`| ④c | 参考：**有成员命中的组里"实际折叠了行"的占比** | 命中 **${g.c.hitGroups}** / ${g.c.total} 组 · 折叠 **${g.c.collapsedGroups}** 组 · 占比 **${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}** · Wilson 95% ${w.lower === null ? 'n/a' : `[${(w.lower * 100).toFixed(1)}%, ${(w.upper * 100).toFixed(1)}%]`} · collapsed **${g.c.collapsedRows}** 行 · bubbled ${g.c.bubbledRows} 行 · 命中成员 ${g.c.membersHitRows} | 只展示 |`);
+  lines.push(`| ④c″ | 历史列（P(≥2) 口径，现恒 0） | 可折 ${g.c.foldable} 组 · 省行 ${g.c.savedPositive}/${g.c.foldable} · 平均 ${g.c.avgSaved.toFixed(2)} 行 | 只展示 |`);
   lines.push(`| ④c′ | 统计结论 | **${g.c.evidence.verdict}** —— ${g.c.evidence.reason} | 只展示 |`);
   lines.push('');
   lines.push(`结论：${r.ok ? '通过' : '有不通过项'}（① ${r.dup.notWorse ? 'ok' : 'FAIL'} · ② ${r.gate4.pass ? 'ok' : 'FAIL'} · ③ ${r.crossScope.pass ? 'ok' : 'FAIL'} · ④a ${g.a.pass ? 'ok' : 'FAIL'} · ④b ${g.b.pass ? 'ok' : 'FAIL'} · ④c 参考 ${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}（${g.c.evidence.verdict}））`);
