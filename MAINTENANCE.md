@@ -26,9 +26,9 @@
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | **760 条**（755 pass / 0 fail / 5 skip）[本] 2026-11-05 12:32 |
-| 六轴 | A1 **0.00%** · A2 **22.28%** · A3 live · A4 p50 **15.22ms（3 次中位数，单次抖动 ±2ms）** · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-05 12:32 · node scripts/m5-report.mjs` |
-| 语料 | 602 局 / **523 卷** / **claim 1379**（有效期已止 87；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-05 12:32 · node scripts/cli.mjs audit + store` |
+| 测试 | **766 条**（761 pass / 0 fail / 5 skip）[本] 2026-11-05 12:56 |
+| 六轴 | A1 **0.00%** · A2 **22.28%** · A3 live · A4 p50 **12.69ms（3 次中位数，单次抖动 ±2ms）**（p50 是抖动量，按量级校验：台账 ≤ max(实测×2, 实测+20ms)） · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-05 12:56 · node scripts/m5-report.mjs` |
+| 语料 | 602 局 / **523 卷** / **claim 1379**（有效期已止 87；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-05 12:56 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
 | 已发布 | **0.15.0 → 0.175.0 的 CHANGELOG 段齐全**；v0.116.0 见下方缺口说明，v0.117.0 已补发 tag + Release；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。**0.116.0 归入"无 tag"**：原 `v0.116.0` tag 指在 PR 前的分支提交（`046509f`，其 `package.json` 已是 0.117.0）⇒ 版本与内容错位，撤 tag、不补 Release，内容随 0.117.0 同一提交（`4376d5f`）落地；`scripts/release.mjs` 自此加「tag↔版本一致性」闸防复发。 |
 | 证据 | `M6-acceptance.md`、`a2-pair-set.json`（A2 配对冻结集 20 条）、`M7-arena.md`（擂台实测：赢 3 / 输 0 / 不可比 3）、`M7-a2b-misses.md`（A2b 三条失分归因）、`M7-patrol-2026-11-04-0900.md`（整点巡检）、`M7-A6-text-level.md`（A6 文字级前后对照）、`M7-A5-live-clean.md`（A5 补闸后线上复核）、`M7-A5-live-leak.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |

@@ -435,6 +435,30 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
   const shadowClaims = shadow.list('claims').map((e) => e.record).filter(Boolean);
   const sourceClaims = source.list('claims').map((e) => e.record).filter(Boolean);
 
+  // ── T222 前置闸：对照组必须真的存在 ──────────────────────────────────────
+  // 真库被合流写过之后，默认 --source 指向的就是影库自己 ⇒ ④a/④b/④c 全部"测自己"却显示绿。
+  // 这里先比 claim id 集合：相同（或同一个目录）⇒ **拒绝给出"通过"**（退出 2）。
+  const shadowIdSet = new Set(shadowClaims.map((c) => String(c?.id ?? '')));
+  const sourceIdSet = new Set(sourceClaims.map((c) => String(c?.id ?? '')));
+  const sameRoot = path.resolve(String(shadowRoot)) === path.resolve(String(sourceRoot));
+  const sameSet = shadowIdSet.size === sourceIdSet.size && [...shadowIdSet].every((id) => sourceIdSet.has(id));
+  const overlap = [...shadowIdSet].filter((id) => sourceIdSet.has(id)).length;
+  if (sameRoot || sameSet) {
+    return {
+      ok: false,
+      refused: true,
+      exitCode: 2,
+      shadowRoot,
+      sourceRoot,
+      claims: shadowIdSet.size,
+      overlap,
+      error: [
+        `✗ 源库与影库的 claim 集合相同（${shadowIdSet.size} 条）—— ④ 的对照组不存在，拒绝给出"通过"`,
+        '  请用 --source 指向**合流前快照**（例如 <DSH_HOME>/memory-context.pre-T201）',
+      ].join(String.fromCharCode(10)),
+    };
+  }
+
   // ── ① 同文重复行（源库 vs 影库）──────────────────────────────────────────
   const picks = sampleClaims(shadowClaims, sample);
   const shadowCache = createWalkCache(shadow);
@@ -560,6 +584,7 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
   return {
     shadowRoot,
     sourceRoot,
+    overlap,
     sample: picks.length,
     dup,
     gate4,
@@ -573,6 +598,9 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
 export function formatReport(r) {
   const pct = (x) => (x === null ? 'n/a' : `${(x * 100).toFixed(2)}%`);
   const lines = [];
+  if (r.overlap !== undefined && r.overlap > 0) {
+    lines.push(`⚠ 源库与影库有 ${r.overlap} 条 claim 重叠（不是同一集合，继续；但重叠越多，对照越弱）`);
+  }
   lines.push(`源库（只读）：${r.sourceRoot}`);
   lines.push(`影库：${r.shadowRoot}`);
   lines.push(`抽样 ${r.sample} 条 claim 造卡 · 耗时 ${ms(r.elapsedMs)}`);
@@ -619,6 +647,7 @@ export function runCli(argv = process.argv.slice(2)) {
   if (!fs.existsSync(shadowRoot)) return { code: 2, stderr: `影库不存在：${shadowRoot}` };
   if (!fs.existsSync(sourceRoot)) return { code: 2, stderr: `源库不存在：${sourceRoot}` };
   const result = runAcceptance({ shadowRoot, sourceRoot, sample: flags.sample, mergeSample: flags.mergeSample, mergeGroups: flags.mergeGroups });
+  if (result.refused) return { code: 2, stderr: result.error };
   if (flags.json) return { code: result.ok ? 0 : 1, stdout: JSON.stringify(result, null, 2) };
   return { code: result.ok ? 0 : 1, stdout: formatReport(result) };
 }

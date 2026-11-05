@@ -95,7 +95,12 @@ test('ledger-check compare: 局数/A2/A4 不一致（超容差）要报', () => 
   const bad = compare(l, { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 322, threads: 143, episodes: 116, a2: 30.0, a4: 9.0 });
   assert.ok(bad.some((x) => x.startsWith('局数')));
   assert.ok(bad.some((x) => x.startsWith('A2')));
-  assert.ok(bad.some((x) => x.startsWith('A4')));
+  // T225：A4 改成**量级**判据（延迟是统计量，不能按绝对相等卡）。
+  // 台账 2.1 vs 实测 9.0 ⇒ 上限 max(18, 29) = 29 ⇒ 在量级内，**不报**（这是抖动，不是漂移）。
+  assert.ok(!bad.some((x) => x.startsWith('A4')), 'A4 在量级内不再假红');
+  // 但"台账落后到量级不同"仍要报（这条才是真信号：台账陈旧/读数不可信）
+  const staleLedger = compare({ ...l, a4: 100 }, { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 322, threads: 143, episodes: 117, a2: 26.6, a4: 9.0 });
+  assert.ok(staleLedger.some((x) => x.startsWith('A4')), '台账比实测高一个量级要报');
   const within = compare(l, { version: '0.59.0', tests: { total: 389, pass: 385, fail: 0, skip: 4 }, claim: 322, threads: 143, episodes: 117, a2: 26.9, a4: 2.5 });
   assert.deepEqual(within, [], '容差内不报');
 });
