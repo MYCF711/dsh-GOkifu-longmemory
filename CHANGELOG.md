@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.166.0（2026-11-05）
+
+### `findStaleTargets` 猜字段名：恒返回 0 条（T204）
+- **根因**：`scripts/apply-store-changes.mjs` 用 `verdict.ok !== false` 过滤，而 `classifyClaim` 返回的是 `{ action, reason, detail, why }` ——
+  **没有 `ok` 字段** ⇒ `undefined !== false` 恒真 ⇒ 每条都 `continue` ⇒ **targets 恒空**。
+- **修**：`verdict.action !== 'mark'`；顺带删掉重复猜 `record.state` 的预过滤（作废态由 `classifyClaim` 的 `INACTIVE_STATES` 统一判），
+  `findStaleTargets` 增加顶层 `workspace` 参数（原来只能塞进 `deps`，直接调用会静默回落 cwd —— 这是"恒 0 条"的**第二个**来源）。
+- **测试**：删掉 `fakeFindStale` 桩，改成真 `classifyClaim` 端到端（`version-mismatch` / `file-appeared` / `fresh` 三条），并显式断言 `targets.length !== 0`。
+- **真库 dry-run**：`扫描 1379 · 已是 stale 0 · 真 stale 29（version-mismatch 9 + file-appeared 20）· 写入 0`；副本 `--apply` 29 条、第二次 0 变更（幂等）。
+
+### 三口径对账（T203）
+`A（audit-12）= 29 · B0（T201 现状）= 0 · B1（T201 意图）= 29`，**A 与 B1 完全同集合** ⇒ 不是 dataRoot/workspace 语义分歧，是**代码与它自己的契约分歧**。
+
+### 事故记录（必须记）
+真实记忆库在 T201 验证时**被替换**（1340 → 1379 条，含 39 个合并节点），**未经授权**；心跳历史（13372 行）与卡样本（447 条）被换成副本的 1 行/1 条。
+**已恢复**：把备份里的旧行与当前行合并回去（心跳 13373 行、卡样本 448 条），巡检恢复 `A6 206/206`、`inject=486`。
+**原始库完整保留在** `memory-context.pre-T201`，一条命令可回滚。合流后四条闸门全过（①反例 0 · ②成员可解析 0/96 · ③跨域 0 · ④a 反增 0 · ④b 丢行 0）。
+
+### 验证
+6 条 apply-store-changes + 6 条 stale-reconcile 测试全绿；`check PASS`。
+
 ## 0.165.0（2026-11-05）
 
 ### 写库执行包：一条命令 + 一页执行单（T201）

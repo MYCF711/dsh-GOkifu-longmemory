@@ -59,7 +59,8 @@ export function parseArgs(argv = []) {
  * 找出"真 stale"的 claim（validity 核验失败且原因属真失效，不是"核不了"）。
  * @returns {{targets:Array<{id:string, reason:string, mark:object}>, already:number, scanned:number, unjudgeable:number}}
  */
-export function findStaleTargets({ store, now = Date.now(), deps = {} } = {}) {
+export function findStaleTargets({ store, now = Date.now(), deps = {}, workspace = null } = {}) {
+  const ws = workspace ?? deps.workspace ?? null;
   const classify = deps.classifyClaim ?? classifyClaim;
   const build = deps.buildMarked ?? buildMarked;
   const marked = deps.isMarked ?? isMarked;
@@ -72,16 +73,18 @@ export function findStaleTargets({ store, now = Date.now(), deps = {} } = {}) {
   let unjudgeable = 0;
   for (const record of claims) {
     if (marked(record)) { already += 1; continue; }
-    if (record.state === 'invalidated' || record.state === 'superseded') continue;
+    // T204：`classifyClaim` 的返回是 `{action, reason, detail, why}` —— **没有 `ok` 字段**。
+    // 旧代码判 `verdict.ok !== false` 恒真 ⇒ 每条都 continue ⇒ 恒返回 0 条（真库 29 条全漏）。
+    // 唯一判据是 `action === 'mark'`（'skip' 包括 fresh / unverified / posix-ambiguous / unresolved）。
+    // 作废态由 classifyClaim 自己判（INACTIVE_STATES），这里不再重复猜 record.state。
     let verdict = null;
     try {
-      verdict = classify(record, { probe, workspace: deps.workspace ?? process.cwd(), dshHome: deps.dshHome ?? defaultHome() });
+      verdict = classify(record, { probe, workspace: ws ?? process.cwd(), dshHome: deps.dshHome ?? defaultHome() });
     } catch {
       unjudgeable += 1;
       continue;
     }
-    if (!verdict || verdict.ok !== false) continue;
-    if (!REAL_STALE_REASONS.includes(verdict.reason)) { unjudgeable += 1; continue; }
+    if (!verdict || verdict.action !== 'mark') continue;
     targets.push({ id: record.id, reason: verdict.reason, mark: build(record, { at: now, reason: verdict.reason, detail: { path: verdict.path ?? null, expected: verdict.expected ?? null, actual: verdict.actual ?? null } }) });
   }
   return { targets, already, scanned: claims.length, unjudgeable };
