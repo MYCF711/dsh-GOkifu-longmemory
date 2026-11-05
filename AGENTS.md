@@ -311,6 +311,14 @@ AGENTS.md  本文件
 - 发布前必跑：`node scripts/check.mjs`（退出 0）、`node --test`、`node scripts/release.mjs --dry-run`。
 - **不发 npm**：`package.json` 保持 `private: true`；版本发布 = annotated tag + GitHub Release；`publishConfig` 不出现。
 - **每个功能实现都升版本**：`CHANGELOG.md` 写清更新内容（用户可读），`package.json` 同步版本。
+- **版本号按改动大小走（semver，主人 2026-11-05 纠正）**：`0.158.0 → 0.158.1` 才是"只改了一点点"，
+  不要每轮都 `+1 minor`。判据（机械可核，看 `git diff --stat <上个 tag>..HEAD`）：
+  | 改了什么 | 升哪一位 | 例 |
+  |---|---|---|
+  | 只动 `test/**` `docs/**` `evidence/**` `reports/**`，或 `CHANGELOG`/台账措辞 | **patch** `x.y.Z` | 补测试、补文档、改口径说明 |
+  | 改 `src/**` 或 `scripts/**` 的**行为**（新增能力、收紧/放宽判据、改输出） | **minor** `x.Y.0` | 新增触发面、改闸判据 |
+  | 破坏既有契约（字段改名/删除、错误语义变更） | **major**（1.0 前用 minor 并在 CHANGELOG 段首标「**破坏性**」） | 字段移除 |
+  `node scripts/version-suggest.mjs` 会按这条规则给出建议；与建议差两位以上要在 CHANGELOG 里写一句为什么。
 - **维护台账**：`MAINTENANCE.md` 的「当前状态 / 下一步」每次干完活必须更新；接手先读它。
 - **一刀一个 commit**：commit 首行 = 房间 id（如 `R01 logread: ...`）；不许同刀混结构+行为。
 - 出问题先看 `MAINTENANCE.md` 的「给接手者的最短路径」，不要猜。
