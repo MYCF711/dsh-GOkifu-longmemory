@@ -226,10 +226,17 @@ export function runCli(argv = process.argv.slice(2)) {
   if (flags.help) return { code: 0, stdout: USAGE };
   const home = flags.home ? path.resolve(flags.home) : defaultHome();
   const storeRoot = flags.store ? path.resolve(flags.store) : path.join(home, 'memory-context');
-  // ⚠ T257 守卫：--apply 只许落在 tmp/ 下（真库只读）
+  // ⚠ T257 守卫：**不许写真正的库**（而不是"路径里必须含 tmp"）。
+  // 旧写法按"路径段含 tmp"判定，在 Linux/macOS 上 `os.tmpdir()` = `/tmp` ⇒ 任何临时目录都含 tmp ⇒ 守卫失效（CI 红）。
+  // 正确语义：与**真库根**（--home 或 DSH_HOME 下的 memory-context）比对；相等或位于其内部 ⇒ 拒绝。
   if (flags.apply) {
-    const segs = path.resolve(storeRoot).split(path.sep).map((x) => x.toLowerCase());
-    if (!segs.includes('tmp')) return { code: 1, stdout: `✗ 拒绝 --apply：store 必须位于 tmp/ 下（实际 ${path.resolve(storeRoot)}）—— 真库只读` };
+    const home = flags.home || process.env.DSH_HOME || '';
+    const realStore = path.resolve(home, 'memory-context');
+    const target = path.resolve(storeRoot);
+    const inside = target === realStore || target.startsWith(realStore + path.sep);
+    if (inside) {
+      return { code: 1, stdout: `✗ 拒绝 --apply：目标是**真库**（${target}）。请先复制到临时目录再跑：cp -r "${realStore}" <临时目录>/memory-context` };
+    }
   }
   if (!fs.existsSync(storeRoot)) return { code: 2, stdout: `库不存在：${storeRoot}` };
   const store = createStore({ root: storeRoot });
