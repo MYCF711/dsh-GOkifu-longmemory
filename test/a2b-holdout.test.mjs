@@ -193,3 +193,40 @@ test('T248 ⑤ 不相关对照组：误判率不高于原口径（放水的反�
   assert.equal(c.bridged, 0, `无关 claim 不应被硬实体桥判相关，实际 ${c.bridged}：${JSON.stringify(c.examples)}`);
   assert.ok(c.bridgeRate <= c.tokenRate, `硬实体误判率(${c.bridgeRate}) 不应高于原口径(${c.tokenRate})`);
 });
+
+test('T249 shortRoot：短任务原话换成该局硬实体信号（file×2 + error×1），无实体时保留原样', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't249-'));
+  const home = path.join(tmp, 'home');
+  fs.mkdirSync(path.join(home, 'g1'), { recursive: true });
+  fs.mkdirSync(path.join(home, 'g2'), { recursive: true });
+  const mkGraph = (dir, text) => fs.writeFileSync(path.join(dir, 'graph.json'), JSON.stringify({ nodes: { n1: { id: 'n1', kind: 'user', text } }, edges: {} }));
+  mkGraph(path.join(home, 'g1'), '处理一下');
+  mkGraph(path.join(home, 'g2'), '修一下');
+  const episodes = [
+    {
+      id: 'ep-s1', scopeKey: 'w:/demo', endedAt: 1000, closure: { graphPath: 'g1/graph.json' },
+      topics: [
+        { kind: 'file', key: '_tmp/replace-invite-method.mjs', count: 2 },
+        { kind: 'file', key: 'docs/internals.md', count: 1 },
+        { kind: 'file', key: 'third/path.mjs', count: 1 },
+        { kind: 'tool', key: 'bash', count: 9 },
+        { kind: 'error', key: 'Error: cannot edit "<path>": file changed since it was read', count: 1 },
+      ],
+    },
+    { id: 'ep-s2', scopeKey: 'w:/demo', endedAt: 2000, closure: { graphPath: 'g2/graph.json' }, topics: [] },
+  ];
+  const claims = [claim('c-a', ['ep-s1']), claim('c-b', ['ep-s2'])];
+  const exam = buildExam({ store: fakeStore(claims, episodes), home, includeRepeat: false });
+  const a = exam.items.find((x) => x.episode === 'ep-s1');
+  assert.equal(a.signalSource, 'shortRootEntities', '有实体 ⇒ 换成实体信号');
+  assert.equal(a.taskText, '处理一下', '原始任务原话要留着供追溯');
+  assert.ok(a.signal.includes('_tmp/replace-invite-method.mjs'), `信号应含文件路径：${a.signal}`);
+  assert.ok(a.signal.includes('docs/internals.md'), '最多取 2 个文件');
+  assert.equal(a.signal.includes('third/path.mjs'), false, '第 3 个文件不进信号');
+  assert.equal(a.signal.includes('bash'), false, '通用工具名不进信号（会用高频词灌水）');
+  assert.ok(a.signal.includes('Error: cannot edit'), '错误码进信号');
+  const b = exam.items.find((x) => x.episode === 'ep-s2');
+  assert.equal(b.signalSource, 'shortRoot', '无实体 ⇒ 保留原样，如实标注');
+  assert.equal(b.signal, '修一下');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
