@@ -164,3 +164,52 @@ test('T257 守卫: --apply 只许 tmp/ 下（真库路径直接退出 1）', () 
   assert.equal(r.code, 1, `真库 --apply 必须退出 1，实际 ${r.code}`);
   assert.match(r.stdout, /拒绝 --apply/);
 });
+
+// ── T260：重指 seq 必须同步 occurredAt ────────────────────────────────────────
+const evT = (seq, text, time, type = 'tool/result') => ({ seq, type, time, data: { content: [{ type: 'text', text }] } });
+const EP = [{ id: 'ep-0001', closure: { logPath: 'x' } }];
+
+function freshStore(tag, id, seq, quote, occurredAt) {
+  const root = path.join(mkdtempSync(path.join(tmp, tag)), 'store');
+  const store = createStore({ root });
+  store.ensureDirs();
+  store.putMany('claims', [{ ...claim(id, seq, quote), support: [{ episode: 'ep-0001', seq, quote, occurredAt }] }], { at: T0 });
+  store.writeManifest(T0);
+  return store;
+}
+
+test('T260 ①: 重指后 occurredAt = 新事件的 time（不是旧事件的时间）', () => {
+  const events = [evT(10, '旧的一步', 1_700_000_000_000), evT(14, 'fatal: unable to access github.com', 1_700_000_060_000)];
+  const store = freshStore('t260-a-', 'c-sync', 10, 'fatal: unable to access github.com', 1_700_000_000_000);
+  const plan = planRepairs({ claims: store.list('claims').map((e) => e.record), episodes: EP, loadEvents: () => events });
+  assert.equal(plan.repair.length, 1);
+  assert.equal(plan.repair[0].toOccurredAt, 1_700_000_060_000);
+  applyPlan({ store, plan, apply: true, at: T0 + 1 });
+  const after = store.list('claims').map((e) => e.record).find((x) => x.id === 'c-sync');
+  assert.equal(after.support[0].seq, 14);
+  assert.equal(after.support[0].occurredAt, 1_700_000_060_000, 'occurredAt 必须跟着新 seq 的事件时间');
+});
+
+test('T260 ②: provenanceRepair.fixes[] 记 fromOccurredAt / toOccurredAt', () => {
+  const events = [evT(10, '旧的一步', 1_700_000_000_000), evT(14, 'fatal: unable to access github.com', 1_700_000_060_000)];
+  const store = freshStore('t260-b-', 'c-prov', 10, 'fatal: unable to access github.com', 1_700_000_000_000);
+  const plan = planRepairs({ claims: store.list('claims').map((e) => e.record), episodes: EP, loadEvents: () => events });
+  applyPlan({ store, plan, apply: true, at: T0 + 1 });
+  const fix = store.list('claims').map((e) => e.record).find((x) => x.id === 'c-prov').provenanceRepair[0].fixes[0];
+  assert.equal(fix.from, 10);
+  assert.equal(fix.to, 14);
+  assert.equal(fix.fromOccurredAt, 1_700_000_000_000);
+  assert.equal(fix.toOccurredAt, 1_700_000_060_000);
+});
+
+test('T260 ③: 幂等 —— 日期同步后再跑第二次 0 变更（dateSync 归零）', () => {
+  const events = [evT(10, '旧的一步', 1_700_000_000_000), evT(14, 'fatal: unable to access github.com', 1_700_000_060_000)];
+  const store = freshStore('t260-c-', 'c-idem', 10, 'fatal: unable to access github.com', 1_700_000_000_000);
+  const loadEvents = () => events;
+  const p1 = planRepairs({ claims: store.list('claims').map((e) => e.record), episodes: EP, loadEvents });
+  applyPlan({ store, plan: p1, apply: true, at: T0 + 1 });
+  const p2 = planRepairs({ claims: store.list('claims').map((e) => e.record), episodes: EP, loadEvents });
+  assert.equal(p2.repair.length, 0);
+  assert.equal(p2.dateSync.length, 0, '日期已同步 ⇒ 不该再有 dateSync');
+  assert.equal(applyPlan({ store, plan: p2, apply: true, at: T0 + 2 }).changed, 0);
+});

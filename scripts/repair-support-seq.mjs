@@ -44,7 +44,7 @@ export function buildEventIndex(events) {
     const prev = map.get(seq);
     const text = parts.join(String.fromCharCode(10));
     const joined = parts.join(' ');
-    map.set(seq, { seq, type: String(ev?.type ?? prev?.type ?? 'unknown'), text: prev ? `${prev.text}${String.fromCharCode(10)}${text}` : text, joined: prev ? `${prev.joined} ${joined}` : joined });
+    map.set(seq, { seq, time: Number.isFinite(Number(ev?.time)) ? Number(ev.time) : (prev?.time ?? null), type: String(ev?.type ?? prev?.type ?? 'unknown'), text: prev ? `${prev.text}${String.fromCharCode(10)}${text}` : text, joined: prev ? `${prev.joined} ${joined}` : joined });
   }
   return map;
 }
@@ -72,14 +72,14 @@ export function locateQuoteSeq({ quote, seq, eventIndex }) {
   const hits = candidates.map((sq) => ({ seq: sq, type: String(eventIndex.get(sq)?.type ?? 'unknown') }));
   if (candidates.length === 1) {
     const to = candidates[0];
-    return { status: 'repair', from: Number.isFinite(from) ? from : null, to, candidates, hits, eventType: hits[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'quote-not-at-seq' };
+    return { status: 'repair', from: Number.isFinite(from) ? from : null, to, toTime: eventIndex.get(to)?.time ?? null, candidates, hits, eventType: hits[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'quote-not-at-seq' };
   }
   if (candidates.length > 1) {
     // T257 消歧：原始出处（tool/result）优先于模型回显（assistant/message）
     const tool = hits.filter((h) => /^tool(\/|$)/.test(h.type));
     if (tool.length === 1) {
       const to = tool[0].seq;
-      return { status: 'repair', from: Number.isFinite(from) ? from : null, to, candidates: tool.map((h) => h.seq), hits, eventType: tool[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'disambiguated-tool-result' };
+      return { status: 'repair', from: Number.isFinite(from) ? from : null, to, toTime: eventIndex.get(to)?.time ?? null, candidates: tool.map((h) => h.seq), hits, eventType: tool[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'disambiguated-tool-result' };
     }
     return { status: 'ambiguous', from: Number.isFinite(from) ? from : null, to: null, candidates, hits, eventType: null, distance: null, reason: tool.length > 1 ? `multiple-tool-results:${tool.length}` : 'echo-only' };
   }
@@ -118,7 +118,7 @@ export function makeLogLoader({ home = defaultHome() } = {}) {
 export function planRepairs({ claims, episodes, loadEvents }) {
   const epById = new Map((Array.isArray(episodes) ? episodes : []).map((e) => [String(e?.id ?? ''), e]));
   const indexCache = new Map();
-  const out = { scanned: 0, refs: 0, ok: 0, repair: [], ambiguous: [], unrepaired: [], skipped: [], unreadable: 0, buckets: { 'multiple-tool': 0, 'echo-only': 0 } };
+  const out = { scanned: 0, refs: 0, ok: 0, repair: [], dateSync: [], ambiguous: [], unrepaired: [], skipped: [], unreadable: 0, buckets: { 'multiple-tool': 0, 'echo-only': 0 } };
   for (const claim of Array.isArray(claims) ? claims : []) {
     out.scanned += 1;
     const support = Array.isArray(claim?.support) ? claim.support : [];
@@ -138,11 +138,42 @@ export function planRepairs({ claims, episodes, loadEvents }) {
       if (!index) { out.unreadable += 1; continue; }
       const r = locateQuoteSeq({ quote: ref.quote, seq: ref.seq, eventIndex: index });
       if (r.status === 'ok') { out.ok += 1; continue; }
-      const row = { claimId: claim.id, episode: epId, index: i, quote: String(ref.quote ?? '').slice(0, 120), from: r.from, to: r.to, candidates: r.candidates.slice(0, 8), candidateCount: r.candidates.length, eventType: r.eventType, distance: r.distance, reason: r.reason, hitTypes: (r.hits ?? []).map((h) => h.type) };
+      const row = { claimId: claim.id, episode: epId, index: i, quote: String(ref.quote ?? '').slice(0, 120), from: r.from, to: r.to, fromOccurredAt: Number.isFinite(Number(ref.occurredAt)) ? Number(ref.occurredAt) : null, toOccurredAt: r.toTime ?? null, candidates: r.candidates.slice(0, 8), candidateCount: r.candidates.length, eventType: r.eventType, distance: r.distance, reason: r.reason, hitTypes: (r.hits ?? []).map((h) => h.type) };
       if (r.status === 'repair') out.repair.push(row);
       else if (r.status === 'ambiguous') { out.ambiguous.push(row); const b = String(r.reason).startsWith('multiple-tool-results') ? 'multiple-tool' : 'echo-only'; out.buckets[b] += 1; }
       else if (r.status === 'unrepaired') out.unrepaired.push(row);
       else out.skipped.push(row);
+    }
+  }
+  // T260 · 修既有重指的日期：seq 已重指但 occurredAt 与新事件时间不一致 ⇒ 只同步日期
+  // 性能：按 episode 缓存事件索引（否则每处 fix 都重读一局日志 = O(n×log)，实测跑不完）
+  const syncCache = new Map();
+  for (const claim of Array.isArray(claims) ? claims : []) {
+    const repairs = Array.isArray(claim?.provenanceRepair) ? claim.provenanceRepair : [];
+    if (!repairs.length) continue;
+    for (const p of repairs) {
+      const fixes = Array.isArray(p?.fixes) ? p.fixes : [p];
+      for (const fix of fixes) {
+        if (!fix || !Number.isFinite(Number(fix.to))) continue;
+        const idx = Number(fix.index) ?? -1;
+        const ref = (Array.isArray(claim.support) ? claim.support : [])[idx];
+        if (!ref) continue;
+        const epId = String(ref.episode ?? '');
+        let evIndex = syncCache.get(epId);
+        if (evIndex === undefined) {
+          const ep = epById.get(epId) ?? null;
+          let events = null;
+          try { events = loadEvents(epId, ep); } catch { events = null; }
+          evIndex = events ? buildEventIndex(events) : null;
+          syncCache.set(epId, evIndex);
+        }
+        if (!evIndex) continue;
+        const toTime = evIndex.get(Number(fix.to))?.time ?? null;
+        const declared = Number(ref.occurredAt ?? claim.occurredAt);
+        if (!Number.isFinite(toTime) || !Number.isFinite(declared)) continue;
+        if (Math.abs(toTime - declared) <= 1000) continue;
+        out.dateSync.push({ claimId: claim.id, episode: epId, index: idx, from: Number(ref.seq), to: Number(fix.to), fromOccurredAt: declared, toOccurredAt: toTime, reason: 'occurredAt-out-of-sync' });
+      }
     }
   }
   return out;
@@ -151,10 +182,13 @@ export function planRepairs({ claims, episodes, loadEvents }) {
 /** 把计划落成新记录：**只改 seq** + 追加 provenanceRepair。 */
 export function applyPlan({ store, plan, apply = false, at = Date.now() }) {
   const byClaim = new Map();
-  for (const row of plan.repair) {
+  const push = (row, kind) => {
     if (!byClaim.has(row.claimId)) byClaim.set(row.claimId, []);
-    byClaim.get(row.claimId).push(row);
-  }
+    byClaim.get(row.claimId).push({ ...row, kind });
+  };
+  for (const row of plan.repair ?? []) push(row, 'repair');
+  // T260 · 只同步日期的行（seq 早已重指）
+  for (const row of plan.dateSync ?? []) push(row, 'dateSync');
   const changed = [];
   for (const [claimId, rows] of byClaim) {
     const entry = store.list('claims').find((e) => e.id === claimId);
@@ -165,8 +199,18 @@ export function applyPlan({ store, plan, apply = false, at = Date.now() }) {
     for (const row of rows) {
       const ref = support[row.index];
       if (!ref) continue;
+      if (row.kind === 'dateSync') {
+        const declared = Number(ref.occurredAt);
+        if (!Number.isFinite(Number(row.toOccurredAt))) continue;
+        if (Math.abs(Number(row.toOccurredAt) - declared) <= 1000) continue;
+        ref.occurredAt = Number(row.toOccurredAt);
+        touched = true;
+        continue;
+      }
       if (Number(ref.seq) !== Number(row.from)) continue; // 已被别人改过 ⇒ 跳过
       ref.seq = row.to;
+      // T260 · 重指 seq 必须同步 occurredAt = 新事件的 time（否则"指针换了、时间没换"= 自相矛盾）
+      if (Number.isFinite(Number(row.toOccurredAt))) ref.occurredAt = Number(row.toOccurredAt);
       touched = true;
     }
     if (!touched) continue;
@@ -175,7 +219,7 @@ export function applyPlan({ store, plan, apply = false, at = Date.now() }) {
       support,
       provenanceRepair: [
         ...(Array.isArray(record.provenanceRepair) ? record.provenanceRepair : []),
-        { at, version: REPAIR_VERSION, fixes: rows.map((r) => ({ from: r.from, to: r.to, reason: r.reason, eventType: r.eventType, index: r.index })), evidenceSeq: rows[0].to },
+        { at, version: REPAIR_VERSION, fixes: rows.map((r) => ({ from: r.from, to: r.to, fromOccurredAt: Number.isFinite(Number(r.fromOccurredAt)) ? Number(r.fromOccurredAt) : null, toOccurredAt: Number.isFinite(Number(r.toOccurredAt)) ? Number(r.toOccurredAt) : null, reason: r.reason, eventType: r.eventType, index: r.index })), evidenceSeq: rows[0].to },
       ],
     };
     changed.push({ claimId, fixes: rows.length });
