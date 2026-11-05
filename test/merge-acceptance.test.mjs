@@ -56,7 +56,12 @@ function measureFrom(specs) {
       for (let k = 0; k < (spec.extraShadow ?? 0); k += 1) claims.push({ claimId: `${gid}-extra${k}`, text: TEXT });
       if (spec.covered) claims.push({ claimId: gid, text: `${TEXT}${TEXT}` });
     }
-    return { card: { claims } };
+    // T211：④c 走 mergeStats（inject 的运行时计数）
+    const st = !isSource && spec.stats ? spec.stats : null;
+    const mergeStats = st
+      ? { candidatesHit: st.candidatesHit ?? 0, membersHit: st.membersHit ?? 0, collapsed: st.collapsed ?? 0, bubbled: st.bubbled ?? 0 }
+      : { candidatesHit: 0, membersHit: 0, collapsed: 0, bubbled: 0 };
+    return { card: { claims, mergeStats } };
   };
 }
 
@@ -76,7 +81,7 @@ test('T181 ①: 成员行 ≤1 的组进 notFoldable，不进 ④c 分母', () =
   assert.equal(res.rows[1].foldable, true);
   assert.equal(res.c.foldable, 1, '④c 分母只有 g2');
   assert.equal(res.c.notFoldable, 1);
-  assert.equal(res.c.ratio, 1, 'g2 省了行 ⇒ 1/1');
+  assert.equal(res.c.foldableRatio, 1, '历史列：g2 省了行 ⇒ 1/1');
 });
 
 test('T181 ②: 成员行 ≥2 且影库省行 ⇒ 计入 ④c 分子', () => {
@@ -85,7 +90,7 @@ test('T181 ②: 成员行 ≥2 且影库省行 ⇒ 计入 ④c 分子', () => {
   const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure, shadowClaimIds: allMemberIds(merges) });
   assert.equal(res.c.foldable, 2);
   assert.equal(res.c.savedPositive, 2);
-  assert.equal(res.c.ratio, 1);
+  assert.equal(res.c.foldableRatio, 1);
 });
 
 test('T181 ③: 成员行 ≥2 但影库没省 ⇒ 分子不加（如实）', () => {
@@ -94,7 +99,7 @@ test('T181 ③: 成员行 ≥2 但影库没省 ⇒ 分子不加（如实）', ()
   const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure, shadowClaimIds: allMemberIds(merges) });
   assert.equal(res.c.foldable, 2);
   assert.equal(res.c.savedPositive, 1, '只有 g2 省行');
-  assert.equal(res.c.ratio, 0.5);
+  assert.equal(res.c.foldableRatio, 0.5);
   assert.equal(res.pass, true, '④c 低不红（参考指标）');
 });
 
@@ -186,16 +191,17 @@ test('T185 ②: 全组遍历 —— 组数与影库合并节点一致（默认�
 
 test('T185 ③: 可折组 <10 ⇒ 结论"证据不足"（哪怕全中）', () => {
   const merges = mergesOf(3);
-  const measure = measureFrom([{ srcMembers: 3, shadowMembers: 1, covered: true }, { srcMembers: 3, shadowMembers: 1, covered: true }, { srcMembers: 3, shadowMembers: 1, covered: true }]);
+  const st = { membersHit: 3, collapsed: 2, bubbled: 1 };
+  const measure = measureFrom([{ srcMembers: 3, shadowMembers: 1, covered: true, stats: st }, { srcMembers: 3, shadowMembers: 1, covered: true, stats: st }, { srcMembers: 3, shadowMembers: 1, covered: true, stats: st }]);
   const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure, shadowClaimIds: allMemberIds(merges) });
   assert.equal(res.c.foldable, 3);
-  assert.equal(res.c.ratio, 1);
+  assert.equal(res.c.foldableRatio, 1);
   assert.equal(res.c.evidence.verdict, '证据不足');
-  assert.match(res.c.evidence.reason, /可折组 3 < 10/);
+  assert.match(res.c.evidence.reason, /命中的组 3 < 10/);
   assert.equal(res.c.evidence.threshold, 0.7, 'T189：下界门槛 0.7');
 
   const many = mergesOf(10);
-  const measureMany = measureFrom(Array.from({ length: 10 }, () => ({ srcMembers: 3, shadowMembers: 1, covered: true })));
+  const measureMany = measureFrom(Array.from({ length: 10 }, () => ({ srcMembers: 3, shadowMembers: 1, covered: true, stats: st })));
   const resMany = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges: many, measure: measureMany, shadowClaimIds: allMemberIds(many) });
   assert.equal(resMany.c.foldable, 10);
   assert.equal(resMany.c.evidence.verdict, '有证据');
@@ -251,4 +257,48 @@ test('T173: 归一化与重复行计数（合流收益的两个原子）', () =>
   ]);
   assert.equal(dup.duplicates, 1);
   assert.equal(dup.groups, 1);
+});
+
+// ── T211：④c 换 mergeStats 口径（有成员命中的组里，实际折叠了行的占比）───────
+test('T211 ①: 有成员命中且折叠了行 ⇒ 计入分子', () => {
+  const merges = mergesOf(2);
+  const measure = measureFrom([
+    { srcMembers: 3, shadowMembers: 1, covered: true, stats: { membersHit: 4, collapsed: 3, bubbled: 1 } },
+    { srcMembers: 3, shadowMembers: 2, covered: true, stats: { membersHit: 2, collapsed: 1, bubbled: 1 } },
+  ]);
+  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure, shadowClaimIds: allMemberIds(merges) });
+  assert.equal(res.c.hitGroups, 2, '两组都有成员命中');
+  assert.equal(res.c.collapsedGroups, 2, '两组都折叠了行');
+  assert.equal(res.c.collapsedRows, 4, '折叠总行数 3+1');
+  assert.equal(res.c.bubbledRows, 2);
+  assert.equal(res.c.ratio, 1);
+  assert.equal(res.c.wilson.n, 2);
+});
+
+test('T211 ②: 无成员命中 ⇒ 不进分母（④c 无定义）', () => {
+  const merges = mergesOf(2);
+  const measure = measureFrom([
+    { srcMembers: 3, shadowMembers: 1, covered: true, stats: { membersHit: 0, collapsed: 0, bubbled: 0 } },
+    { srcMembers: 3, shadowMembers: 1, covered: true, stats: { membersHit: 0, collapsed: 0, bubbled: 0 } },
+  ]);
+  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure, shadowClaimIds: allMemberIds(merges) });
+  assert.equal(res.c.hitGroups, 0);
+  assert.equal(res.c.ratio, null, '没有命中组 ⇒ 无定义（不是 0%）');
+  assert.equal(res.c.evidence.verdict, '证据不足');
+  assert.match(res.c.evidence.reason, /没有成员命中的组/);
+});
+
+test('T211 ③: 命中但没折叠 ⇒ 分子不加（如实）', () => {
+  const merges = mergesOf(3);
+  const measure = measureFrom([
+    { srcMembers: 3, shadowMembers: 2, covered: true, stats: { membersHit: 3, collapsed: 0, bubbled: 3 } },
+    { srcMembers: 3, shadowMembers: 1, covered: true, stats: { membersHit: 2, collapsed: 2, bubbled: 0 } },
+    { srcMembers: 3, shadowMembers: 2, covered: true, stats: { membersHit: 1, collapsed: 0, bubbled: 1 } },
+  ]);
+  const res = sampleMergeGroups({ source: srcStore, shadow: shadowStore, sourceCache: {}, shadowCache: {}, merges, measure, shadowClaimIds: allMemberIds(merges) });
+  assert.equal(res.c.hitGroups, 3);
+  assert.equal(res.c.collapsedGroups, 1, '只有一组真折叠');
+  assert.equal(res.c.ratio, 1 / 3);
+  assert.equal(res.c.bubbledGroups, 2);
+  assert.equal(res.c.evidence.verdict, '证据不足', '命中组 3 < 10');
 });
