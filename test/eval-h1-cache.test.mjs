@@ -95,16 +95,16 @@ function putTopic(storeRoot, scopeKey) {
   }, { at: ARCHIVE_TS });
 }
 
-function putClaim(storeRoot, scopeKey, { id, validity = null, text = `${TOPIC_KEY} 在干净环境会报 Cannot find module` } = {}) {
+function putClaim(storeRoot, scopeKey, { id, validity = null, kind = 'antipattern', episode = 'ep-aaaaaaa1', text = `${TOPIC_KEY} 在干净环境会报 Cannot find module` } = {}) {
   const store = createStore({ root: storeRoot, now: ARCHIVE_TS });
   store.put('claims', {
     id,
-    kind: 'antipattern',
+    kind,
     text,
     scopeKey,
     threadIds: [],
     state: 'observed',
-    support: [{ episode: 'ep-aaaaaaa1', seq: 3, quote: 'Cannot find module', occurredAt: T0 + 3_000 }],
+    support: [{ episode, seq: 3, quote: text, occurredAt: T0 + 3_000 }],
     counter: [],
     validity: validity ?? { type: 'none', value: null },
     preconditions: [],
@@ -294,5 +294,78 @@ test('h1 缓存: 直通 records 后**磁盘读显著变少**（计数，不靠�
     assert.ok(withRecords < withoutCache, `默认路径必须比逐次读盘少：withRecords=${withRecords} withoutCache=${withoutCache}`);
   } finally {
     fsMod.readFileSync = original;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// ⑦ T209（F1 口径对齐）：unverified（核不了）不算 stale
+//   依据：闸 3 与 scripts/mark-stale.mjs 都写死「unverified ≠ stale」；
+//   改前 runH1 的 staleRows 只判 `res.ok === false`，把"探针读不到"也算成"已失效"。
+// ---------------------------------------------------------------------------
+
+/** 两条 version claim：c-stale（核过且版本不符）/ c-unver（读不到包 ⇒ unverified）。 */
+function buildVersionFixture() {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-h1-unv-'));
+  const storeRoot = path.join(root, 'memory-context');
+  const scopeKey = `w:${root.replace(/[\\]/g, '/')}`;
+  const sid = 'session-ccccccc3-0000-4000-8000-000000000003';
+  const events = [
+    { type: 'user/message', seq: 1, time: T0 + 1_000, data: { content: [{ type: 'text', text: '查一下版本' }] } },
+    { type: 'tool/call', seq: 2, time: T0 + 2_000, data: { turn: 1, step: 1, callId: 'c1', name: 'bash', arguments: '{"command":"node scripts/x.mjs"}' } },
+    { type: 'tool/result', seq: 3, time: T0 + 3_000, data: { turn: 1, step: 1, message: { role: 'tool', toolCallId: 'c1', content: [{ type: 'text', text: 'ok' }] } } },
+  ];
+  const log = writeSessionLog(root, { sid, events });
+  const graph = writeGraph(root, { sid, failures: ["Error: Cannot find module 'yaml'"] });
+  putEpisode(storeRoot, { id: 'ep-ccccccc3', startedAt: T0 + 10_000, scopeKey, logPath: log, graphPath: graph });
+  putTopic(storeRoot, scopeKey);
+  // 文本里必须带 TOPIC_KEY —— walk 是「主题 → 棋局 → claim」走的，不带主题词就一条也命中不了（空卡 ⇒ 分子恒 0）
+  // 文本里必须带 TOPIC_KEY —— walk 是「主题 → 棋局 → claim」走的；support 必须挂在**本夹具那一局**上，
+  // 否则 claim 不属于这个棋局，卡片只出 episode 行、一条 claim 都渲染不出来（分子恒 0，测试就空转）。
+  putClaim(storeRoot, scopeKey, { id: 'c-stale001', kind: 'fact', episode: 'ep-ccccccc3', text: `${TOPIC_KEY} 里 pkg-b 的版本是 1.0.0`, validity: { type: 'version', value: 'pkg-b@1.0.0' } });
+  putClaim(storeRoot, scopeKey, { id: 'c-unver001', kind: 'fact', episode: 'ep-ccccccc3', text: `${TOPIC_KEY} 里 pkg-a 的版本是 1.0.0`, validity: { type: 'version', value: 'pkg-a@1.0.0' } });
+  const store = createStore({ root: storeRoot, now: ARCHIVE_TS });
+  store.writeManifest({ at: ARCHIVE_TS });
+  return { root, storeRoot, scopeKey };
+}
+
+/** 探针替身：pkg-a 读不到（⇒ unverified），pkg-b 读得到但版本不符（⇒ 真 stale）。 */
+const VERSION_PROBE = {
+  stat: () => null,
+  readDir: () => [],
+  readJson: (p) => {
+    if (String(p).includes('pkg-a')) throw new Error('ENOENT');
+    return { name: 'pkg-b', version: '9.9.9' };
+  },
+};
+
+test('h1 口径: unverified（核不了）**不计入** staleRows，且单列成 unverifiedRows', async () => {
+  const vfx = buildVersionFixture();
+  try {
+    const r = await runH1({ storeRoot: vfx.storeRoot, workspace: vfx.root, now: ARCHIVE_TS, signals: 2, probe: VERSION_PROBE });
+    const staleIds = new Set(r.perSignal.flatMap((s) => s.staleIds));
+    const unverifiedIds = new Set(r.perSignal.flatMap((s) => s.unverifiedIds));
+    assert.ok(unverifiedIds.has('c-unver001'), '读不到包的那条必须落在 unverifiedRows（有它才证明这条口径被走到）');
+    assert.ok(!staleIds.has('c-unver001'), 'unverified 绝不能进 staleRows（这就是 T209 修的那一条）');
+    assert.ok(r.unverifiedInjected >= 1, '总量里也要能看到 unverified 的条数');
+    assert.ok(r.postGateUnverified >= 0, '闸后同样单列');
+    // 两个集合不相交
+    for (const id of unverifiedIds) assert.ok(!staleIds.has(id), `${id} 同时出现在 stale 与 unverified`);
+  } finally {
+    rmSync(vfx.root, { recursive: true, force: true });
+  }
+});
+
+test('h1 口径: `ok===false && unverified!==true` 才算 stale（真 stale 仍被数出来）', async () => {
+  const vfx = buildVersionFixture();
+  try {
+    const r = await runH1({ storeRoot: vfx.storeRoot, workspace: vfx.root, now: ARCHIVE_TS, signals: 2, probe: VERSION_PROBE });
+    const staleIds = new Set(r.perSignal.flatMap((s) => s.staleIds));
+    assert.ok(staleIds.has('c-stale001'), '核过且版本不符的那条必须仍然是 stale（口径没被改松）');
+    assert.equal(r.staleDefinition, 'ok===false && unverified!==true', '口径必须写进返回，能被下游看到');
+    // 分子分母自洽：stale 与 unverified 都是 injected 的子集
+    assert.ok(r.staleInjected + r.unverifiedInjected <= r.injected, 'stale + unverified 不能超过分母');
+    assert.equal(r.postGateStaleRate, r.postGateInjected > 0 ? r.postGateStale / r.postGateInjected : null);
+  } finally {
+    rmSync(vfx.root, { recursive: true, force: true });
   }
 });

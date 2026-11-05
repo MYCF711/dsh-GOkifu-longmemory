@@ -770,11 +770,30 @@ function entryFromMergeNode(mergeClaim, options = {}) {
  *
  * 被折叠的成员行不计入 omitted（它们没丢，只是被合并节点代表了）。
  */
+/**
+ * T207：**冒泡行** —— 只命中 1 个成员时，用合并节点那一行 1 换 1，并在行内标注它代表什么。
+ *
+ * 为什么不能"多换 1"：只命中 1 条成员时折叠没有收益（行数不变），但行内标注能让模型知道
+ * "这条是合并组的代表，详见合并节点"—— 这是触发面实验（P(≥1)）要观察的行为；
+ * 不标注的话，冒泡与"直接渲染成员"在卡上无法区分，实验数据就读不出来。
+ * 出处仍取合并节点自己的 support 锚点（闸 0 的 (episode, seq, 日期) 与闸 5 的 quote 规则照旧满足）。
+ */
+function entryFromMergeBubble(mergeClaim, options = {}) {
+  const base = entryFromMergeNode(mergeClaim, options);
+  if (!base) return null;
+  const count = Array.isArray(mergeClaim?.merge?.members)
+    ? mergeClaim.merge.members.filter((x) => typeof x === 'string').length
+    : 0;
+  return { ...base, rawText: singleLine(`代表 ${count} 条 · 详见 ${mergeClaim.id} · ${base.rawText}`) };
+}
+
 function collapseMergeNodes({ entries, view, options = {} }) {
   const list = Array.isArray(entries) ? entries : [];
-  if (!list.length) return list;
+  // T207：运行时计数（触发面实验的数据源；只加字段，不改任何既有语义）
+  const stats = { membersHit: 0, collapsed: 0, bubbled: 0 };
+  if (!list.length) return { entries: list, stats };
   const byMember = mergeIndexByMember(view);
-  if (!byMember.size) return list; // 库里没有合并节点：零成本直通
+  if (!byMember.size) return { entries: list, stats }; // 库里没有合并节点：零成本直通
 
   // 合并节点自身（带 merge.members 的 claim）：它们的行**一律不单独出现**（规则 1）。
   const mergeNodeIds = new Set();
@@ -795,20 +814,27 @@ function collapseMergeNodes({ entries, view, options = {} }) {
   const dropped = new Set();
   const replacement = new Map(); // 首个成员 id → 合并节点 entry（替换行）
 
-  // 规则 2：≥2 个成员被命中 ⇒ 用合并节点替换这些成员行
+  // 规则 2：**≥2 个成员**被命中 ⇒ 用合并节点替换这些成员行（多换 1，原行为不变）
+  // 规则 2'（T207 触发面实验）：**只命中 1 个成员** ⇒ 也冒泡到合并节点（**1 换 1**，行数不变）
   for (const group of groups.values()) {
-    if (group.members.size < 2) continue; // 规则 3：单成员/0 成员不替换
-    const entry = entryFromMergeNode(group.claim, options);
+    const memberCount = group.members.size;
+    stats.membersHit += memberCount;
+    if (memberCount === 0) continue; // 规则 3：0 个成员 ⇒ 合并节点行不出现
+    const entry = memberCount >= 2
+      ? entryFromMergeNode(group.claim, options)
+      : entryFromMergeBubble(group.claim, options);
     if (!entry) continue; // 造不出替代行 ⇒ 不动（宁可多一行，也不丢信息）
     for (const memberId of group.members) dropped.add(memberId);
     replacement.set([...group.members][0], entry);
+    stats.collapsed += memberCount;
+    if (memberCount === 1) stats.bubbled += 1;
   }
   // 规则 1：合并节点自己的行一律撤掉（它已由替换行代表，或本来就不该单独成行）
   for (const entry of list) {
     const id = entry?.claimId;
     if (id && mergeNodeIds.has(id)) dropped.add(id);
   }
-  if (!dropped.size) return list;
+  if (!dropped.size) return { entries: list, stats };
 
   const out = [];
   const placed = new Set();
@@ -824,7 +850,7 @@ function collapseMergeNodes({ entries, view, options = {} }) {
     }
     out.push(entry);
   }
-  return out;
+  return { entries: out, stats };
 }
 
 // ---------------------------------------------------------------------------
@@ -943,17 +969,27 @@ export function buildMemoryCard({
       unknownScope,
       crossScopeWalk,
       signalAt: Number.isFinite(now) ? now : null,
+      // T207：不命中 ⇒ 四个计数全 0（字段始终存在）
+      mergeStats: { candidatesHit: 0, membersHit: 0, collapsed: 0, bubbled: 0 },
     };
   }
 
   const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex });
   // T162a：认「合并节点」。合流（consolidate）会把多条近似 claim 压成一个带 `merge.members` 的节点；
   // 消费侧不认它，合并节点与它的成员就会在同一张卡里重复出现。规则见 collapseMergeNodes 的注释。
-  const entries = collapseMergeNodes({
+  const { entries, stats: collapseStats } = collapseMergeNodes({
     entries: collectedEntries,
     view,
     options: { scope: scopeKey, episodesById: view.episodesById, signalTokens: signalTokensOf(signal) },
   });
+  // T207：`candidatesHit` 数的是"命中了几条合并节点"（来自 hits）——
+  // 合并节点自身不成行（规则 1），所以不能从渲染行里数。
+  let candidatesHit = 0;
+  for (const h of Array.isArray(hits) ? hits : []) {
+    const namedId = typeof h?.claim === 'string' ? h.claim : (typeof h?.claimId === 'string' ? h.claimId : null);
+    if (namedId && isMergeNodeClaim(view.claimsById.get(namedId))) candidatesHit += 1;
+  }
+  const mergeStats = { ...collapseStats, candidatesHit };
   const sorted = entries.slice().sort(compareEntries);
   const droppedProvenance = dropped.noProvenance + dropped.noText;
   const droppedImperative = Number.isFinite(dropped.imperative) ? dropped.imperative : 0;
@@ -1032,6 +1068,8 @@ export function buildMemoryCard({
       crossScopeWalk,
       signalAt: Number.isFinite(now) ? now : null,
       clip: clipUsed,
+      // T207：命中过合并节点、但一行都没留下（成员全不可代表）⇒ 计数照实给出
+      mergeStats,
     };
   }
 
@@ -1065,6 +1103,8 @@ export function buildMemoryCard({
     crossScopeWalk,
     signalAt: Number.isFinite(now) ? now : null,
     clip: clipUsed,
+    // T207：触发面实验的运行时计数（只加字段，不改语义）
+    mergeStats,
   };
 }
 

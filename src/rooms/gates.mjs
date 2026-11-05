@@ -413,14 +413,24 @@ export function probeValidity(record, { workspace = null, now = null, probe = nu
       const raw = String(value ?? '').trim();
       const parsed = parsePackageAtVersion(raw);
       const expected = parsed ? parsed.version : raw;
-      // 候选文件（T158b）：显式 validity.file > claim 自己的 workspace
-      //   > <DSH_HOME>/profiles/*/node_modules/<name>/package.json > <DSH_HOME>/profiles/*/workspace/package.json
+      // 候选文件（T158b；T210 补第 3 面）：
+      //   ① 显式 `validity.file`（调用方指哪读哪，最高优先）
+      //   ② `<workspace>/node_modules/<name>/package.json`（依赖安装布局）
+      //   ③ `<workspace>/<name>/package.json` —— **兄弟仓库布局**（T210 / A1-F2）
+      //      本机实测就是这种：声明 `magpie-chatbox-ai@0.1.0` 的 claim，真实包在 `反代/magpie-chatbox-ai/`。
+      //      少了这一面，真 stale 会被判成 `version-file-unreadable`（unverified ⇒ 闸 3 放行）。
+      //   ④ `<workspace>/package.json`（当前仓库自身）
+      //   ⑤ `<DSH_HOME>/profiles/*/node_modules/<name>/package.json` 与 `.../workspace/package.json`
+      //   顺序理由：先近后远、先"真装了依赖"再"兄弟仓库"再"当前仓库"；**读不到就继续往下走**，
+      //   所以加面不会把"真读不到"变成错判（最终仍回落 `version-file-unreadable` = unverified）。
       const candidates = [];
       if (typeof validity?.file === 'string' && validity.file.trim() !== '') {
         candidates.push(resolveInWorkspace(validity.file, workspace));
       }
       if (parsed && workspace) {
         candidates.push(path.resolve(String(workspace), 'node_modules', parsed.name, 'package.json'));
+        // T210：兄弟仓库布局（本机实测：反代/magpie-chatbox-ai/package.json）
+        candidates.push(path.resolve(String(workspace), parsed.name, 'package.json'));
         candidates.push(path.resolve(String(workspace), 'package.json'));
       }
       candidates.push(resolveInWorkspace('package.json', workspace));

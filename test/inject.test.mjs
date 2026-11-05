@@ -1179,13 +1179,15 @@ test('T162a: 只有两个成员被命中（合并节点没被直接命中）⇒ 
   }
 });
 
-test('T162a: 只命中一个成员 ⇒ 不替换（合并节点自身没被命中，成员照常成行）', () => {
+test('T162a→T207: 只命中一个成员 ⇒ **冒泡**到合并节点（1 换 1，行数不变）', () => {
   const { root, store } = makeMergeFixture();
   try {
     const hits = [mergeHit('ep-mrg00001', 30, 'c-mem0001', 21)];
     const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
     const ids = card.claims.map((c) => c.claimId);
-    assert.deepEqual(ids, ['c-mem0001'], `单成员不替换，实际：${JSON.stringify(ids)}`);
+    assert.deepEqual(ids, ['c-mrg0001'], `单成员应冒泡成合并节点行，实际：${JSON.stringify(ids)}`);
+    assert.equal(card.claims.length, 1, '1 换 1：行数不变');
+    assert.match(String(card.claims[0].text), /代表 2 条 · 详见 c-mrg0001/, `行内要有冒泡标注，实际：${card.claims[0].text}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1227,7 +1229,7 @@ test('T187 ①: 只有合并节点命中 ⇒ 这一条 hit 不成行（合并节
   }
 });
 
-test('T176: 合并节点命中 + 仅 1 个成员命中 ⇒ 只保留成员行（合并节点仍不单独成行）', () => {
+test('T176→T207: 合并节点命中 + 仅 1 个成员命中 ⇒ 冒泡成**一行**合并节点行（不重复、不增行）', () => {
   const { root, store } = makeMergeFixture();
   try {
     const hits = [
@@ -1236,7 +1238,7 @@ test('T176: 合并节点命中 + 仅 1 个成员命中 ⇒ 只保留成员行（
     ];
     const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
     const ids = card.claims.map((c) => c.claimId);
-    assert.deepEqual(ids, ['c-mem0001'], `单成员不替换，合并节点也不该成行，实际：${JSON.stringify(ids)}`);
+    assert.deepEqual(ids, ['c-mrg0001'], `只该留一行合并节点行，实际：${JSON.stringify(ids)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1289,7 +1291,7 @@ test('T177: 0 成员 + 合并节点没被命中 ⇒ 卡上什么都不出现（�
   }
 });
 
-test('T177 回归: ≥2 成员命中仍是断言行（不是指针），单成员仍是成员行', () => {
+test('T177→T207 回归: ≥2 成员多换 1；单成员 1 换 1 冒泡（都不是指针行）', () => {
   const { root, store } = makeMergeFixture();
   try {
     const two = buildMemoryCard({
@@ -1297,13 +1299,15 @@ test('T177 回归: ≥2 成员命中仍是断言行（不是指针），单成�
       store, scope: SCOPE, now: T(24),
     });
     assert.deepEqual(two.claims.map((c) => c.claimId), ['c-mrg0001']);
+    assert.equal(two.claims[0].text, MERGE_QUOTE, '≥2 成员：原样原文，不带冒泡标注');
     assert.notEqual(two.claims[0].kind, 'pointer', '≥2 成员时是替换断言行，不是指针');
 
     const one = buildMemoryCard({
       walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mem0001', 21)]),
       store, scope: SCOPE, now: T(24),
     });
-    assert.deepEqual(one.claims.map((c) => c.claimId), ['c-mem0001']);
+    assert.deepEqual(one.claims.map((c) => c.claimId), ['c-mrg0001'], '单成员：冒泡成合并节点行');
+    assert.match(String(one.claims[0].text), /代表 2 条 · 详见 c-mrg0001/);
     assert.notEqual(one.claims[0].kind, 'pointer');
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -1420,7 +1424,7 @@ const upgradeSignal = () => {
   return signal;
 };
 
-test('T187 ①: 成员被命中 + 合并节点也被命中 ⇒ 成员行保留（不被升级吞掉）', () => {
+test('T187 ①→T207: 成员被命中 + 合并节点也被命中 ⇒ 只留**一行**合并节点行（1 换 1 冒泡）', () => {
   const { root, store } = makeMemberUpgradeFixture();
   try {
     const hits = [
@@ -1429,15 +1433,15 @@ test('T187 ①: 成员被命中 + 合并节点也被命中 ⇒ 成员行保留�
     ];
     const card = buildMemoryCard({ signal: upgradeSignal(), walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
     const ids = card.claims.map((c) => c.claimId);
-    assert.ok(ids.includes('c-up000001'), `成员行必须保留，实际：${JSON.stringify(ids)}`);
-    assert.equal(ids.includes('c-upmrg001'), false, '单成员时合并节点不该成行（规则 3）');
-    assert.equal(card.claims.some((c) => c.kind === 'pointer'), false, '卡上还有成员行，不该退化指针');
+    assert.deepEqual(ids, ['c-upmrg001'], `应当只留一行合并节点行，实际：${JSON.stringify(ids)}`);
+    assert.equal(card.claims.length, 1, '不重复成行');
+    assert.equal(card.claims.some((c) => c.kind === 'pointer'), false, '不是指针行');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('T187 ②: 同一条 claim 命中两次 ⇒ 卡上只出现一次（去重键继续生效）', () => {
+test('T187 ②: 同一条 claim 命中两次 ⇒ 卡上只出现一次（去重后冒泡成一行）', () => {
   const { root, store } = makeMemberUpgradeFixture();
   try {
     const hits = [
@@ -1446,7 +1450,7 @@ test('T187 ②: 同一条 claim 命中两次 ⇒ 卡上只出现一次（去重�
     ];
     const card = buildMemoryCard({ signal: upgradeSignal(), walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
     const ids = card.claims.map((c) => c.claimId);
-    assert.deepEqual(ids, ['c-up000001'], `同一 claim 只该出现一次，实际：${JSON.stringify(ids)}`);
+    assert.deepEqual(ids, ['c-upmrg001'], `同一成员只该出现一次（冒泡后一行），实际：${JSON.stringify(ids)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1503,4 +1507,89 @@ test('T192 回归: 库里没有合并组 ⇒ 升级行为一字不改（golden�
   // ④ walk 结果不被这套逻辑改动：深度仍是 1，且没有 merge 专属的 dropped 计数
   assert.equal(walkResult.depth, 1);
   assert.equal('dropped' in walkResult, false, '无 merge 的 walk 结果不带 dropped 计数');
+});
+
+// ---------------------------------------------------------------------------
+// T207 触发面实验（1/2）：折叠触发从 P(≥2) 降到 P(≥1)
+//
+// 依据 docs/调研/47 的裁决：合流机制成立（12/12 省行）但频率 0/1000（上界 0.38%）。
+// 这一刀把"只命中 1 个成员"也接到合并节点上（**1 换 1**，行数不变，行内标注"代表 N 条 · 详见 <id>"），
+// 用 mergeStats 四个计数把触发面量出来；≥2 成员的"多换 1"行为不变，0 成员仍不出合并行。
+// ---------------------------------------------------------------------------
+
+test('T207 ①: 命中 1 个成员 ⇒ 冒泡（1 换 1，行数不变，行内有代表标注）', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const card = buildMemoryCard({
+      walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mem0001', 21)]),
+      store, scope: SCOPE, now: T(24),
+    });
+    assert.equal(card.claims.length, 1, '1 换 1');
+    assert.equal(card.claims[0].claimId, 'c-mrg0001');
+    assert.match(String(card.claims[0].text), /^代表 2 条 · 详见 c-mrg0001 · /, String(card.claims[0].text));
+    assert.equal(card.mergeStats.bubbled, 1);
+    assert.equal(card.mergeStats.collapsed, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T207 ②: 命中 ≥2 个成员 ⇒ 仍"多换 1"（行数 = 成员数 − 1，行内是原文不加标注）', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const card = buildMemoryCard({
+      walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mem0001', 21), mergeHit('ep-mrg00002', 12, 'c-mem0002', 22)]),
+      store, scope: SCOPE, now: T(24),
+    });
+    assert.equal(card.claims.length, 1, '两条成员 ⇒ 一条合并行');
+    assert.equal(card.claims[0].text, MERGE_QUOTE, '≥2 成员保持原行为：不加冒泡标注');
+    assert.equal(card.mergeStats.collapsed, 2);
+    assert.equal(card.mergeStats.bubbled, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T207 ③: 命中 0 个成员 ⇒ 不出现合并节点行（规则 1 保留）', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    const card = buildMemoryCard({
+      walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23)]),
+      store, scope: SCOPE, now: T(24),
+    });
+    assert.deepEqual(card.claims, []);
+    assert.equal(card.mergeStats.membersHit, 0);
+    assert.equal(card.mergeStats.collapsed, 0);
+    assert.equal(card.mergeStats.bubbled, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T207 ④: mergeStats 四个计数正确（含"库里无合并节点"的全 0）', () => {
+  const { root, store } = makeMergeFixture();
+  try {
+    // 合并节点自己 + 1 个成员 ⇒ 候选 1 / 成员 1 / 折叠 1 / 冒泡 1
+    const a = buildMemoryCard({
+      walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23), mergeHit('ep-mrg00001', 30, 'c-mem0001', 21)]),
+      store, scope: SCOPE, now: T(24),
+    });
+    assert.deepEqual(a.mergeStats, { candidatesHit: 1, membersHit: 1, collapsed: 1, bubbled: 1 });
+
+    // 两个成员、没命中合并节点 ⇒ 候选 0 / 成员 2 / 折叠 2 / 冒泡 0
+    const b = buildMemoryCard({
+      walkResult: walkOf([mergeHit('ep-mrg00001', 30, 'c-mem0001', 21), mergeHit('ep-mrg00002', 12, 'c-mem0002', 22)]),
+      store, scope: SCOPE, now: T(24),
+    });
+    assert.deepEqual(b.mergeStats, { candidatesHit: 0, membersHit: 2, collapsed: 2, bubbled: 0 });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  // 没有 merge 的库：字段存在且全 0（消费方不必判空）
+  const plain = fixture();
+  const card = buildMemoryCard({
+    walkResult: walkOf([hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-0000aa01' })]),
+    store: plain.store, scope: SCOPE, now: T(24),
+  });
+  assert.deepEqual(card.mergeStats, { candidatesHit: 0, membersHit: 0, collapsed: 0, bubbled: 0 });
 });
