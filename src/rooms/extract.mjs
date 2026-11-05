@@ -178,14 +178,72 @@ function edgeSeq(edge) {
 }
 
 /**
+ * 测试**通过**汇总（T251 假阳性）：这类文本是"一切正常"的绿色信号，**不可能是失败原文**。
+ *
+ * 事故：`node --test … | grep -E "^ℹ (tests|pass|fail)"` 这类命令，真失败在别处（`exit 1` 来自后半段），
+ * 但 `errorSnippet` 抓到的是 grep 出来的那一行绿字 ⇒ 建出一条 `[antipattern] ℹ tests 69 ℹ pass 69 ℹ fail 0`，
+ * 既占卡位、又误导模型（"全绿"被当成坑）、还拉低主判据。
+ *
+ * 命中形态（**列全**，且必须没有失败标记才算）：
+ *   ① `node --test` 汇总：`ℹ tests 69 ℹ pass 69 ℹ fail 0`（单行与换行版都认）
+ *   ② TAP 汇总：`# tests 12` / `# pass 12` / `# fail 0`
+ *   ③ mocha/jest：`12 passing` / `0 failing`
+ *   ④ TAP 单点：整行只有 `ok 12`
+ * 反例（**必须仍判失败**）：`fail 1` `fail 2` `✖ …` `not ok 3` `failing tests:` 任何含 `Error/FAIL` 的行。
+ */
+const PASS_SUMMARY_RES = Object.freeze([
+  // 单行与多行两种形态都要认（真库实测都有：`ℹ tests 69 ℹ pass 69 ℹ fail 0` 与换行版）
+  /ℹ\s+tests\s+\d+[\s\S]*?ℹ\s+pass\s+\d+[\s\S]*?ℹ\s+fail\s+0\b/,
+  /(?:^|\n)\s*#\s*tests\s+\d+\s*(?:\n|$)/,
+  /(?:^|\n)\s*#\s*pass\s+\d+\s*(?:\n|$)/,
+  /(?:^|\n)\s*#\s*fail\s+0\s*(?:\n|$)/,
+  /(?:^|\n)\s*\d+\s+passing\b/,
+  /(?:^|\n)\s*0\s+failing\b/,
+  /^\s*ok\s+\d+\s*$/,
+]);
+
+/** 失败标记：出现任意一条，就不许当"通过汇总"（防误伤真失败）。 */
+const FAILURE_MARK_RES = Object.freeze([
+  /(?:^|\n)\s*ℹ\s+fail\s+[1-9]/,
+  /(?:^|\n)\s*#\s*fail\s+[1-9]/,
+  /(?:^|\n)\s*not ok\s+\d+/,
+  /[✖✗]/,
+  /\bFAIL(?:ED|URE)?\b/,
+  /\bfailing tests?\b/,
+  /(?:^|\n)\s*[1-9]\d*\s+failing\b/,
+  /\bError\b/,
+]);
+
+/**
+ * 这段文本是不是"测试通过汇总"（⇒ 不能当失败原文）。
+ * 判定 = 命中任一 PASS 形态 **且** 不含任何失败标记。
+ */
+export function isTestPassSummary(text) {
+  const t = String(text ?? '');
+  if (!t.trim()) return false;
+  if (FAILURE_MARK_RES.some((re) => re.test(t))) return false;
+  return PASS_SUMMARY_RES.some((re) => re.test(t));
+}
+
+/** 通过汇总的形态清单（供审计/证据引用，避免"正则写在代码里没人看得见"）。 */
+export const TEST_PASS_SUMMARY_FORMS = Object.freeze([
+  'ℹ tests N ℹ pass N ℹ fail 0（node --test，单行/换行都认）',
+  '# tests N / # pass N / # fail 0（TAP）',
+  'N passing / 0 failing（mocha、jest）',
+  'ok N（TAP 单点）',
+]);
+
+/**
  * 边的引文。
  * - 失败边：先取「结果原文」`errorSnippet`（工具输出的原文片段）；没有就取 `verify.summary`
  *   （`exit 1` / host-error 的错误原文 —— 那也是原始的失败事实）；再没有才退到动作原文。
  * - 成功/未结算边：用**动作原文**（"怎么做的"才是可复用的那一手）；`exit 0` 这类摘要不当引文。
+ *
+ * T251：`errorSnippet` 若是**测试通过汇总**，它就不是失败原文（真失败在别处）⇒ 跳过它，退到 `verify.summary`。
  */
 function edgeQuote(edge) {
   const snippet = String(edge?.errorSnippet ?? '').trim();
-  if (snippet) return snippet;
+  if (snippet && !isTestPassSummary(snippet)) return snippet;
   if (edge?.result === 'failure') {
     const kind = edge?.verify?.kind;
     const summary = String(edge?.verify?.summary ?? '').trim();
@@ -228,7 +286,7 @@ export function extractSignals({ graph = null, events = null, maxQuote = MAX_QUO
   const commandSuccesses = [];
   const unsettled = [];
   const constraints = [];
-  const dropped = { noSource: 0, noQuote: 0, unknownResult: 0 };
+  const dropped = { noSource: 0, noQuote: 0, unknownResult: 0, falsePositive: 0 };
   const byResult = {};
   const scanned = { edges: 0, events: list.length, userMessages: 0, toolCalls: 0 };
 
@@ -256,6 +314,12 @@ export function extractSignals({ graph = null, events = null, maxQuote = MAX_QUO
     const q = quote(edgeQuote(edge));
     if (!q) {
       dropped.noQuote += 1;
+      continue;
+    }
+    // T251：失败边拿到的是**测试通过汇总** ⇒ 不是失败原文（真失败在别处）⇒ 记 falsePositive、不建 claim。
+    // 判据看**原始 snippet**（即使 edgeQuote 已退到 `exit: exit 1` 这类合成摘要，绿字仍不算失败原文）。
+    if (bucket === 'failures' && isTestPassSummary(String(edge?.errorSnippet ?? '').trim() || q)) {
+      dropped.falsePositive += 1;
       continue;
     }
     const entry = {

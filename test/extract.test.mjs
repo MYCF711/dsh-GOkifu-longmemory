@@ -28,6 +28,8 @@ import {
   MEMORY_LEDGER_CLOSE,
   clip,
   MAX_QUOTE,
+  isTestPassSummary,
+  TEST_PASS_SUMMARY_FORMS,
 } from '../src/rooms/extract.mjs';
 import { loadGraphAt } from '../src/rooms/graphread.mjs';
 
@@ -375,4 +377,66 @@ test('R03: 卡事件的 source.kind 被改成 "user" 时，卡里的行也不得
     '卡里的行一句都不许进',
   );
   assert.equal(r.scanned.userMessages, 1, '事件本身仍算用户消息（只是内容被剥）');
+});
+
+// ---------------------------------------------------------------------------
+// T251 · 假阳性：**测试通过汇总**不是失败原文
+//   事故：`node --test … | grep -E "^ℹ (tests|pass|fail)"` 这类命令，真失败在别处（exit 1 来自后半段），
+//   但 errorSnippet 抓到的是那行绿字 ⇒ 建出 `[antipattern] ℹ tests 69 ℹ pass 69 ℹ fail 0`，
+//   占卡位、误导模型（"全绿"被当成坑）、拉低主判据。
+// ---------------------------------------------------------------------------
+
+test('T251 假阳性：`ℹ tests N ℹ pass N ℹ fail 0` 不是失败信号（记 falsePositive，不建 claim）', () => {
+  const graph = graphOf({
+    e1: edgeOf('e1', 40, { result: 'failure', errorSnippet: 'ℹ tests 69 ℹ pass 69 ℹ fail 0', verify: { kind: 'exit', summary: 'exit 1' } }),
+    e2: edgeOf('e2', 41, { result: 'failure', errorSnippet: 'ℹ tests 69\nℹ pass 69\nℹ fail 0', verify: { kind: 'exit', summary: 'exit 1' } }),
+  });
+  const r = extractSignals({ graph });
+  assert.deepEqual(r.failures, [], '通过汇总（单行/换行）都不许进 failures');
+  assert.equal(r.dropped.falsePositive, 2, '两条都要记进 falsePositive');
+  assert.equal(isTestPassSummary('ℹ tests 69 ℹ pass 69 ℹ fail 0'), true);
+  assert.equal(isTestPassSummary('ℹ tests 699\nℹ pass 694\nℹ fail 0'), true);
+  assert.equal(TEST_PASS_SUMMARY_FORMS.length, 4, '形态清单要列全（供审计引用）');
+});
+
+test('T251 假阳性：等价形态（# pass / # fail 0 / 0 failing / ok N / N passing）都不是失败信号', () => {
+  const graph = graphOf({
+    e1: edgeOf('e1', 50, { result: 'failure', errorSnippet: '# pass 12\n# fail 0', verify: { kind: 'exit', summary: 'exit 1' } }),
+    e2: edgeOf('e2', 51, { result: 'failure', errorSnippet: '0 failing', verify: { kind: 'exit', summary: 'exit 1' } }),
+    e3: edgeOf('e3', 52, { result: 'failure', errorSnippet: 'ok 12', verify: { kind: 'exit', summary: 'exit 1' } }),
+    e4: edgeOf('e4', 53, { result: 'failure', errorSnippet: '12 passing', verify: { kind: 'exit', summary: 'exit 1' } }),
+  });
+  const r = extractSignals({ graph });
+  assert.deepEqual(r.failures, []);
+  assert.equal(r.dropped.falsePositive, 4);
+  for (const t of ['# pass 12\n# fail 0', '0 failing', 'ok 12', '12 passing', '# tests 12']) {
+    assert.equal(isTestPassSummary(t), true, t);
+  }
+});
+
+test('T251 反例：真失败必须仍被判失败（fail 1 / ✖ / not ok / failing tests: / Error）', () => {
+  const graph = graphOf({
+    e1: edgeOf('e1', 60, { result: 'failure', errorSnippet: 'ℹ tests 69\nℹ pass 68\nℹ fail 1', verify: { kind: 'exit', summary: 'exit 1' } }),
+    e2: edgeOf('e2', 61, { result: 'failure', errorSnippet: '✖ should keep working (12ms)', verify: { kind: 'exit', summary: 'exit 1' } }),
+    e3: edgeOf('e3', 62, { result: 'failure', errorSnippet: 'not ok 3 - name', verify: { kind: 'exit', summary: 'exit 1' } }),
+    e4: edgeOf('e4', 63, { result: 'failure', errorSnippet: 'failing tests:', verify: { kind: 'exit', summary: 'exit 1' } }),
+    e5: edgeOf('e5', 64, { result: 'failure', errorSnippet: 'Error: boom', verify: { kind: 'exit', summary: 'exit 1' } }),
+  });
+  const r = extractSignals({ graph });
+  assert.deepEqual(r.failures.map((x) => x.edgeId), ['e1', 'e2', 'e3', 'e4', 'e5'], '真失败一条都不许少');
+  assert.equal(r.dropped.falsePositive, 0, '真失败不许记成假阳性');
+  for (const t of ['ℹ tests 69\nℹ pass 68\nℹ fail 1', '✖ should keep working', 'not ok 3 - x', 'failing tests:', 'Error: boom', 'FAILED']) {
+    assert.equal(isTestPassSummary(t), false, t);
+  }
+});
+
+test('T251 回归：绿汇总与真失败混在一起 ⇒ 仍判失败（不误伤）', () => {
+  const mixed = 'ℹ tests 69\nℹ pass 68\nℹ fail 1\n✖ a test failed\nError: boom';
+  assert.equal(isTestPassSummary(mixed), false, '含失败标记就不算通过汇总');
+  const graph = graphOf({
+    e1: edgeOf('e1', 70, { result: 'failure', errorSnippet: mixed, verify: { kind: 'exit', summary: 'exit 1' } }),
+  });
+  const r = extractSignals({ graph });
+  assert.equal(r.failures.length, 1, '混着真失败的边必须保留');
+  assert.equal(r.dropped.falsePositive, 0);
 });
