@@ -1477,3 +1477,30 @@ test('T187 ③ 回归守卫: 没有 merge 关系的 claim，信号打分升级**
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// T192 回归：升级目标集在源/影两库同口径的前提是"无 merge 的库一字不改"
+//
+// 背景：T192 想把 `pickClaim` 的**升级候选**排除合并节点及其成员（让源库/影库挑出同样的行）。
+// 实测该改法会把 ④a 从 0 弄成 6、④b 从 3 涨到 18，已回滚；但"无 merge 的库行为一字不改"
+// 这条约束必须被钉住 —— 以后再动 pickClaim 的候选集，这条 golden 先红。
+// 断言：逐字节 section / claimId 顺序 / 无合并产物 / walk 结果不带 dropped 计数。
+// ---------------------------------------------------------------------------
+
+test('T192 回归: 库里没有合并组 ⇒ 升级行为一字不改（golden）', () => {
+  const { store } = fixture();
+  const hits = [hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-0000aa01' })];
+  const walkResult = walkOf(hits);
+  const card = buildMemoryCard({ walkResult, store, scope: SCOPE, now: T(24) });
+
+  // ① 卡片逐字节不变（改动前的实现算出来的快照）
+  assert.equal(card.section, MERGE_FREE_GOLDEN, '无 merge 的卡片必须与改动前逐字节相同');
+  // ② claimId 顺序不变
+  assert.deepEqual(card.claims.map((c) => c.claimId), ['c-0000aa01']);
+  // ③ 库里没有合并节点，卡上也不许出现合并产物（块标记 / 合并指针）
+  assert.equal(store.list('claims').some((x) => x?.record?.merge), false, '夹具库里不该有合并节点');
+  assert.equal(card.claims.some((c) => c.merge || c.mergeNodeId || c._mergeBlock), false, '无 merge 的卡上不该有合并标记');
+  // ④ walk 结果不被这套逻辑改动：深度仍是 1，且没有 merge 专属的 dropped 计数
+  assert.equal(walkResult.depth, 1);
+  assert.equal('dropped' in walkResult, false, '无 merge 的 walk 结果不带 dropped 计数');
+});
