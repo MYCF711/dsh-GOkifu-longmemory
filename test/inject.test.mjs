@@ -1212,20 +1212,16 @@ test('T162a 回归守卫: 没有 merge 字段的 claim 卡片逐字节不变', (
 //   4. 没有 merge 字段的 claim 行为一字不改。
 // ---------------------------------------------------------------------------
 
-test('T177: 只有合并节点命中、成员都不命中 ⇒ 卡上是**指针行**（不是断言，也不消失）', () => {
+test('T187 ①: 只有合并节点命中 ⇒ 这一条 hit 不成行（合并节点只在替代 ≥2 成员时出现）', () => {
   const { root, store } = makeMergeFixture();
   try {
     const hits = [mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23)];
     const walkResult = walkOf(hits);
     const card = buildMemoryCard({ walkResult, store, scope: SCOPE, now: T(24) });
     const ids = card.claims.map((c) => c.claimId);
-    assert.deepEqual(ids, ['c-mrg0001'], `应当留一条指针行（claimId = 合并节点 id），实际：${JSON.stringify(ids)}`);
-    assert.equal(card.claims.length, 1);
-    assert.equal(card.claims[0].kind, 'pointer', '必须是指针行，不是断言');
-    assert.notEqual(card.section, null, '不许整行消失（内容丢失比省行更糟）');
-    // 十道闸必须全绿（尤其闸 0 出处 / 闸 5 quote）
+    assert.deepEqual(ids, [], `合并节点自身不许成行（也不退化成 episode 指针），实际：${JSON.stringify(ids)}`);
     const gates = runGates({ card, walkResult, store, scope: SCOPE });
-    assert.equal(gates.ok, true, `指针行必须过闸：${JSON.stringify(gates.errors)}`);
+    assert.equal(gates.ok, true, `空卡也要过闸：${JSON.stringify(gates.errors)}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1264,22 +1260,19 @@ test('T176: 合并节点排在成员之前（walk 顺序）⇒ 仍然只出现�
 });
 
 
-test('T177: 指针行是**机械可区分**的 —— kind=pointer、[stale] 标记、行首是"合并入口"', () => {
+test('T187 ①b: 合并节点行不会以"指针"形态出现（指针行已随 T187 移除）', () => {
   const { root, store } = makeMergeFixture();
   try {
-    const hits = [mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23)];
+    const hits = [
+      mergeHit('ep-mrg00001', 30, 'c-mrg0001', 23),
+      mergeHit('ep-mrg00001', 30, 'c-mem0001', 21),
+      mergeHit('ep-mrg00002', 12, 'c-mem0002', 22),
+    ];
     const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
-    const row = card.claims[0];
-    assert.equal(row.kind, 'pointer', 'kind 必须是 pointer（不是 fact/antipattern/...）');
-    assert.equal(row.marker, 'stale', '与既有 stale 指针行同形（[stale] 标记）');
-    assert.ok(String(row.line).startsWith('- [stale] 合并入口'), `行首必须是"合并入口"，实际：${row.line}`);
-    assert.ok(String(row.text).startsWith('合并入口'), '正文以"合并入口"开头（不是断言语气）');
-    assert.match(String(row.text), /详见 c-mrg0001/, '必须写明指向哪个合并节点');
-    assert.match(String(row.text), /代表 2 条近似记忆/, '必须写明代表几条');
-    // 断言语气的主语/结论式开场不应出现
-    for (const banned of ['- [', '事实：', '结论', '应当', '必须']) {
-      assert.equal(String(row.text).startsWith(banned), false, `指针行不该以断言式开场：${row.text}`);
-    }
+    assert.equal(card.claims.some((c) => c.kind === 'pointer'), false, '不再有指针行');
+    // ≥2 成员 ⇒ 合并节点以**断言行**出现（替代表）
+    assert.deepEqual(card.claims.map((c) => c.claimId), ['c-mrg0001']);
+    assert.notEqual(card.claims[0].kind, 'pointer');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1317,10 +1310,9 @@ test('T177 回归: ≥2 成员命中仍是断言行（不是指针），单成�
   }
 });
 
-test('T177 守卫: 合并节点命中 + 0 成员，但卡上还有别的行 ⇒ **不**插指针行（不许净 +1）', () => {
+test('T187 ①c 守卫: 合并节点命中 + 别的行 ⇒ 只留别的行（不重复、不增行）', () => {
   const { root, store } = makeMergeFixture();
   try {
-    // 补一条与该合并组无关的 claim，并让它被命中 ⇒ 卡上不是空的
     store.putMany('claims', [{
       id: 'c-out0001',
       kind: 'fact',
@@ -1343,8 +1335,144 @@ test('T177 守卫: 合并节点命中 + 0 成员，但卡上还有别的行 ⇒ 
     ];
     const card = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
     const ids = card.claims.map((c) => c.claimId);
-    assert.deepEqual(ids, ['c-out0001'], `卡上还有别的行时不该插指针行（否则净 +1），实际：${JSON.stringify(ids)}`);
-    assert.equal(card.claims.some((c) => c.kind === 'pointer'), false);
+    assert.deepEqual(ids, ['c-out0001'], `只留别的行，实际：${JSON.stringify(ids)}`);
+    assert.equal(new Set(ids).size, ids.length);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// T187：成员命中不许被 `pickClaim` 升级/吞并掉
+//
+// 背景（T179 诊断 + T185 统计）：合流收益卡在"可折组只有 4 个"。
+// 源库 39 组里 35 组"本组成员行 < 2" ⇒ 折叠无从发生。其中 3 组
+// （c-04807d22 / c-e05f1307 / c-ec0fcd25）明明有 **2 个成员锚点被命中**，
+// 卡上却只渲染 1 行 —— 被 `pickClaim` 的"信号判别词打分升级"换掉了。
+// 规则：**成员命中保留成员行**（不升级成合并节点，也不升级成别的 claim）。
+// ---------------------------------------------------------------------------
+
+/** 成员/合并节点正文**不同**的夹具：合并节点的正文才对得上信号判别词。 */
+function makeMemberUpgradeFixture() {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t187-'));
+  const store = createStore({ root, now: T(20) });
+  store.ensureDirs();
+  store.putMany('episodes', [21, 22].map((day, i) => ({
+    id: `ep-up00000${i + 1}`,
+    sessionId: `session-up00000${i + 1}`,
+    scopeKey: SCOPE,
+    startedAt: T(day),
+    firstEventAt: T(day),
+    lastEventAt: T(day),
+    recordedAt: T(day),
+    closure: { logPath: null, graphPath: null, seqFrom: 10 + i, seqTo: 10 + i },
+    l0: '',
+    signals: { failures: 1, successes: 0, unsettled: 0, constraints: 0, tools: [] },
+    state: 'archived',
+  })));
+  const base = (id, ep, seq, day, text, extra = {}) => ({
+    id,
+    kind: 'antipattern',
+    text,
+    scopeKey: SCOPE,
+    threadIds: [],
+    state: 'observed',
+    support: [{ episode: ep, seq, quote: text, occurredAt: T(day) }],
+    counter: [],
+    validity: { type: 'none', value: null },
+    preconditions: [],
+    occurredAt: T(day),
+    recordedAt: T(day),
+    counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null },
+    supersedes: null,
+    ...extra,
+  });
+  const MEMBER_A = '成员甲：yaml 报错原文';
+  const MEMBER_B = '成员乙：yaml 报错原文';
+  const MERGED = 'yaml drift 合并正文（两处报错同源）';
+  store.putMany('claims', [
+    base('c-up000001', 'ep-up000001', 30, 21, MEMBER_A),
+    base('c-up000002', 'ep-up000002', 12, 22, MEMBER_B),
+    base('c-upmrg001', 'ep-up000001', 30, 23, MERGED, {
+      state: 'candidate',
+      support: [
+        { episode: 'ep-up000001', seq: 30, quote: MERGED, occurredAt: T(21) },
+        { episode: 'ep-up000002', seq: 12, quote: MERGED, occurredAt: T(22) },
+      ],
+      merge: {
+        version: 1,
+        key: 'yaml-drift',
+        rule: 'text-similarity',
+        members: ['c-up000001', 'c-up000002'],
+        representative: { claimId: 'c-up000001', episode: 'ep-up000001', seq: 30, quote: MERGED },
+        supportEpisodes: ['ep-up000001', 'ep-up000002'],
+        at: T(23),
+      },
+    }),
+  ]);
+  return { root, store };
+}
+
+/** 信号判别词 yaml / drift（4 字符以上才会进 signalTokens）：合并节点正文命中两个，成员只命中一个。 */
+const upgradeSignal = () => {
+  const signal = signalFromText('yaml drift 相关的问题', { at: T(24) });
+  signal.scopeKey = SCOPE;
+  return signal;
+};
+
+test('T187 ①: 成员被命中 + 合并节点也被命中 ⇒ 成员行保留（不被升级吞掉）', () => {
+  const { root, store } = makeMemberUpgradeFixture();
+  try {
+    const hits = [
+      mergeHit('ep-up000001', 30, 'c-up000001', 21), // 成员甲
+      mergeHit('ep-up000001', 30, 'c-upmrg001', 23), // 合并节点自己
+    ];
+    const card = buildMemoryCard({ signal: upgradeSignal(), walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.ok(ids.includes('c-up000001'), `成员行必须保留，实际：${JSON.stringify(ids)}`);
+    assert.equal(ids.includes('c-upmrg001'), false, '单成员时合并节点不该成行（规则 3）');
+    assert.equal(card.claims.some((c) => c.kind === 'pointer'), false, '卡上还有成员行，不该退化指针');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T187 ②: 同一条 claim 命中两次 ⇒ 卡上只出现一次（去重键继续生效）', () => {
+  const { root, store } = makeMemberUpgradeFixture();
+  try {
+    const hits = [
+      mergeHit('ep-up000001', 30, 'c-up000001', 21),
+      mergeHit('ep-up000001', 30, 'c-up000001', 21),
+    ];
+    const card = buildMemoryCard({ signal: upgradeSignal(), walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.deepEqual(ids, ['c-up000001'], `同一 claim 只该出现一次，实际：${JSON.stringify(ids)}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T187 ③ 回归守卫: 没有 merge 关系的 claim，信号打分升级**照旧**生效', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t187-plain-'));
+  try {
+    const store = createStore({ root, now: T(20) });
+    store.ensureDirs();
+    store.putMany('episodes', [{
+      id: 'ep-pl000001', sessionId: 'session-pl000001', scopeKey: SCOPE,
+      startedAt: T(21), firstEventAt: T(21), lastEventAt: T(21), recordedAt: T(21),
+      closure: { logPath: null, graphPath: null, seqFrom: 10, seqTo: 10 }, l0: '',
+      signals: { failures: 1, successes: 0, unsettled: 0, constraints: 0, tools: [] }, state: 'archived',
+    }]);
+    const plain = (id, text) => ({
+      id, kind: 'fact', text, scopeKey: SCOPE, threadIds: [], state: 'observed',
+      support: [{ episode: 'ep-pl000001', seq: 30, quote: text, occurredAt: T(21) }], counter: [],
+      validity: { type: 'none', value: null }, preconditions: [], occurredAt: T(21), recordedAt: T(21),
+      counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null }, supersedes: null,
+    });
+    store.putMany('claims', [plain('c-pl000001', '和信号无关的一条'), plain('c-pl000002', 'yaml drift 的那条正文')]);
+    const hits = [mergeHit('ep-pl000001', 30, 'c-pl000001', 21)];
+    const card = buildMemoryCard({ signal: upgradeSignal(), walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+    assert.deepEqual(card.claims.map((c) => c.claimId), ['c-pl000002'], '无 merge 关系的 claim 升级行为一字不改');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

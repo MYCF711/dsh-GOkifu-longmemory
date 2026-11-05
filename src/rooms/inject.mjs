@@ -396,6 +396,11 @@ function compareClaims(a, b) {
  * 第 5 条故意收紧：没有 claim 指向命中事件时**不随手抓一条该局别的 claim**（那正是 F8「顺藤摸错枝」），
  * 而是退回指针行。全部按 (episode, seq, occurredAt) 校验，缺源的一律不入卡。
  */
+/** 合并节点（带 merge.members 的 claim）**不参与 claim 选取** —— 它只作为成员的替代行出现（T187）。 */
+function isMergeNodeClaim(claim) {
+  return Boolean(claim && typeof claim === 'object' && claim.merge && typeof claim.merge === 'object' && Array.isArray(claim.merge.members));
+}
+
 function pickClaimBase(hit, view) {
   if (hit?.claim && typeof hit.claim === 'object' && typeof hit.claim.text === 'string') {
     const c = hit.claim;
@@ -423,7 +428,7 @@ function pickClaimBase(hit, view) {
   }
   const list = view.claimsByEpisode.get(String(hit?.episode ?? '')) ?? [];
   if (!list.length || !Number.isFinite(hit?.seq)) return null;
-  const anchored = list.filter((c) => c.support.some((s) => Number(s.seq) === Number(hit.seq)));
+  const anchored = list.filter((c) => !isMergeNodeClaim(c) && c.support.some((s) => Number(s.seq) === Number(hit.seq)));
   if (!anchored.length) return null;
   return [...anchored].sort(compareClaims)[0];
 }
@@ -591,7 +596,7 @@ function pickClaim(hit, view, options = {}) {
   const tokens = Array.isArray(options.signalTokens) ? options.signalTokens : [];
   const episode = String(hit?.episode ?? '');
   if (!tokens.length || !episode) return base;
-  const pool = (view.claimsByEpisode.get(episode) ?? []).filter((c) => Array.isArray(c?.support) && c.support.length);
+  const pool = (view.claimsByEpisode.get(episode) ?? []).filter((c) => !isMergeNodeClaim(c) && Array.isArray(c?.support) && c.support.length);
   if (!pool.length) return base;
   const scoreOf = (c) => {
     const t = String(c?.text ?? '').toLowerCase();
@@ -624,6 +629,11 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
 
   for (const hit of Array.isArray(hits) ? hits : []) {
     if (!hit || typeof hit !== 'object') continue;
+    // T187：**指向合并节点的 hit 不成行** —— 合并节点只作为"≥2 个成员的替代行"出现。
+    // 影库里 walk 会额外返回"指向合并节点"的 hit（源库没有它），若在这里退化成 episode 指针行，
+    // 同一组的卡就会比源库多一行（④a 反增）；直接跳过则两库行数一致。
+    const namedId = typeof hit.claim === 'string' ? hit.claim : (typeof hit.claimId === 'string' ? hit.claimId : null);
+    if (namedId && isMergeNodeClaim(view.claimsById.get(namedId))) continue;
     const claim = pickClaim(hit, view, { signalTokens: signalTokensOf(signal) });
     // Q19-B 预置（默认关）：只保留 hard 约束，丢弃 soft（理由句/闲聊/复述）
     if (preferenceHardOnly && claim && claim.kind === 'preference' && claim.level !== 'hard') {
@@ -744,46 +754,21 @@ function entryFromMergeNode(mergeClaim, options = {}) {
 }
 
 /**
- * T177（方案 C）：合并节点抢到命中位、而卡上没有任何成员行时，渲染一条**指针行**。
- *
- * 为什么要有它：T176 让合并节点"只替换、不主动入选"，但当它自己命中、成员又没被渲染时，
- * 整条记忆会从 1 行变成 0 行（线上 c-091e6917 / c-415e7002 / c-4a7e6c4b 三组）——
- * "不丢记忆"优先于"省行"，所以这里退化成**入口指针**：
- *   · 形状与既有的 stale 指针行一致：`kind: 'pointer'` + `[stale]` 标记（闸 3/4/5/7 都按"非断言"处理）；
- *   · 正文以"合并入口"开头、写明代表了几条、指向合并节点 id —— **不复述断言**，
- *     也不把 representative 的引文当成事实来陈述（只作为"原文入口"给出可追溯的一小段）。
- * 出处仍取合并节点自己的 support 锚点 ⇒ 闸 0 的 (episode, seq, 日期) 与闸 5 的 quote 规则照旧满足。
- */
-function entryFromMergePointer(mergeClaim, options = {}) {
-  const base = entryFromMergeNode(mergeClaim, options);
-  if (!base) return null;
-  const members = Array.isArray(mergeClaim?.merge?.members) ? mergeClaim.merge.members.filter((x) => typeof x === 'string' && x) : [];
-  const body = `合并入口 · 代表 ${members.length} 条近似记忆 · 详见 ${mergeClaim.id} · 原文入口：${base.rawText}`;
-  return {
-    ...base,
-    rawText: singleLine(body),
-    kind: 'pointer',
-    marker: 'stale',
-    state: 'stale',
-  };
-}
-
-/**
  * 卡片选取条目的最后一道：**合并节点只替换、不主动入选**。
  *
- * 规则（T176 收紧；T162a 的"合并节点被命中就渲染它"是线上反增的根因）：
+ * 规则（T176 语义 + T187 收口）：
  *   1. 合并节点**不因为自己命中而单独成行** —— 它只作为"成员的替代行"出现；
  *   2. **≥2 个成员**被命中 ⇒ 用合并节点替换这些成员行（合并节点插在第一个成员的位置）；
- *   3. 只有 1 个成员被命中 ⇒ 保留成员行（单条成员没有"合并"可省，替换反而丢出处）；
+ *   3. 只有 1 个 / 0 个成员被命中 ⇒ 合并节点行撤掉，成员行原样保留（行数 1→1 或 0→0，不增不减）；
  *   4. 没有 `merge` 字段的 claim **一字不改** —— 不建索引、不碰顺序。
  *
- * 为什么改（实测）：`scripts/merge-acceptance.mjs` ④ 上"至少省 1 行"只有 33.3%，
- * 还有两组**反增**（c-3011f83f 1→2、c-41157b78 2→3）：合并节点自己命中 topic、
- * 而它代表的成员没被渲染 ⇒ 净 +1。改成"只替换"后，合并节点要么替代成员（省行），
- * 要么根本不出现（不增行）。
+ * 为什么是这三条（T187 的两次实测）：
+ *   · "合并节点被命中就渲染它"（T162a）会让卡片净 +1（c-3011f83f 1→2、c-41157b78 2→3）；
+ *   · "0 成员时补指针行/代表成员行"（T177 方案 C）同样净 +1，且 ④b 仍有丢行；
+ *   · 真正的丢行来自 `pickClaim` 把成员命中升级成合并节点 —— 那一刀在 pickClaim 里（成员保留），
+ *     这里只要保证"合并节点只在替代 ≥2 个成员时出现"，④a/④b 就同时为 0。
  *
- * 被折叠的成员行不计入 omitted（它们没丢，只是被合并节点代表了）；
- * 造不出替代行（无锚点/无出处）时**不动** —— 宁可多一行，也不丢信息。
+ * 被折叠的成员行不计入 omitted（它们没丢，只是被合并节点代表了）。
  */
 function collapseMergeNodes({ entries, view, options = {} }) {
   const list = Array.isArray(entries) ? entries : [];
@@ -809,35 +794,19 @@ function collapseMergeNodes({ entries, view, options = {} }) {
 
   const dropped = new Set();
   const replacement = new Map(); // 首个成员 id → 合并节点 entry（替换行）
-  const pointer = new Map(); // 合并节点 id → 指针行（方案 C）
-  const pointerCandidates = []; // 候选指针行（按出现顺序；只有"卡上再无别的行"时才真正插入）
 
   // 规则 2：≥2 个成员被命中 ⇒ 用合并节点替换这些成员行
   for (const group of groups.values()) {
-    if (group.members.size < 2) continue; // 规则 3：单成员不替换
+    if (group.members.size < 2) continue; // 规则 3：单成员/0 成员不替换
     const entry = entryFromMergeNode(group.claim, options);
     if (!entry) continue; // 造不出替代行 ⇒ 不动（宁可多一行，也不丢信息）
     for (const memberId of group.members) dropped.add(memberId);
     replacement.set([...group.members][0], entry);
   }
-
-  // 合并节点**自己**的行：三态（T176 + T177 方案 C）
+  // 规则 1：合并节点自己的行一律撤掉（它已由替换行代表，或本来就不该单独成行）
   for (const entry of list) {
     const id = entry?.claimId;
-    if (!id || !mergeNodeIds.has(id)) continue;
-    const group = groups.get(id);
-    if (group && group.members.size >= 2) { dropped.add(id); continue; } // 已由替换行代表
-    if (group && group.members.size === 1) { dropped.add(id); continue; } // 保留成员行（规则 3）
-    // 0 个成员行 ⇒ **候选**指针行（T177 方案 C）：先记下，等外层看"卡上是不是真的空了"再决定。
-    // 为什么不当场插：若卡上还有别的行，多插一条指针行就是"净 +1"（线上 c-3011f83f 1→2、
-    // c-41157b78 2→3 就是这样）。只有"不插就整卡空掉"时才插 —— 不丢记忆，也不增行。
-    const mergeClaim = view?.claimsById?.get?.(id) ?? null;
-    const pointerEntry = mergeClaim ? entryFromMergePointer(mergeClaim, options) : null;
-    if (pointerEntry) {
-      dropped.add(id);
-      pointer.set(pointerEntry.claimId ?? id, pointerEntry);
-      pointerCandidates.push(pointerEntry);
-    }
+    if (id && mergeNodeIds.has(id)) dropped.add(id);
   }
   if (!dropped.size) return list;
 
@@ -854,11 +823,6 @@ function collapseMergeNodes({ entries, view, options = {} }) {
       continue;
     }
     out.push(entry);
-  }
-  // T177：只有"卡上一条行都不剩"时才用指针行兜底（不丢记忆，且不制造净 +1）
-  if (out.length === 0 && pointerCandidates.length > 0) {
-    out.push(pointerCandidates[0]);
-    placed.add(pointerCandidates[0].claimId);
   }
   return out;
 }
