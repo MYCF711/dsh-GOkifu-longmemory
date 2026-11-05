@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.178.0（2026-11-05）
+
+### `mergeStats.candidatesHit` 死值 → `groupsHit`（T226）
+audit-13 §①：`candidatesHit` 数的是"hits 里是合并节点的条数"，而 **T193 之后 walk 不再把合并节点当 hit 返回** ⇒ **结构上永远 0**。
+违反 `AGENTS.md` §2.4「指标先有消费者」。
+
+**重定义为 `groupsHit`**（本次命中的**合并组**数，按"卡片里出现该组 ≥1 个成员"去重）：
+`membersHit` 是**行数**、推不出**组数**；两者一起才构成 **组/行两个分母**，且 `groupsHit` **会动**。
+
+影库 39 组实测：`{groupsHit: 41, membersHit: 58, collapsed: 58, bubbled: 28}` · `groupsWithHit: 25`；
+分布 `{0:14, 1:11, 2:12, 3:2}` ⇒ **四个字段都有真实分布，无死值**。
+
+### 诚实交代：`mergeStats` **从未写进** `card-samples.jsonl`
+T207 那条"同时写进 card-samples"**从未落地**（写入点在 `src/plugin.mjs`，只传 `scope/scopeFrom/digest/tokens/section`）。
+⇒ 既有 497 条样本**不受影响**（从来没有 `candidatesHit` 键）；要落盘需一行改动，**已记为下一刀**。
+
+### 顺带扫的其它字段
+`at 497 · scope 10 · scopeFrom 3 · digest 286 · tokens 115 · section 212 · pid 9` —— 全部有真实基数，**无恒常量**（`pid` 53 条 null 是旧行，已知）。
+
+### 验证
+61 条 inject 测试全绿；765 条测试（760 pass / 0 fail / 5 skip）；`check PASS`（51 篇）。
+
 ## 0.177.0（2026-11-05）
 
 ### 移除零消费者的 `mergeRepresentativeOf` 索引（T227）

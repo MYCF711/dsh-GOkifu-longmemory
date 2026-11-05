@@ -790,7 +790,7 @@ function entryFromMergeBubble(mergeClaim, options = {}) {
 function collapseMergeNodes({ entries, view, options = {} }) {
   const list = Array.isArray(entries) ? entries : [];
   // T207：运行时计数（触发面实验的数据源；只加字段，不改任何既有语义）
-  const stats = { membersHit: 0, collapsed: 0, bubbled: 0 };
+  const stats = { groupsHit: 0, membersHit: 0, collapsed: 0, bubbled: 0 };
   if (!list.length) return { entries: list, stats };
   const byMember = mergeIndexByMember(view);
   if (!byMember.size) return { entries: list, stats }; // 库里没有合并节点：零成本直通
@@ -810,6 +810,9 @@ function collapseMergeNodes({ entries, view, options = {} }) {
     group.members.add(entry.claimId);
     groups.set(mergeClaim.id, group);
   }
+  // T226：本次命中的**合并组**数（按"组里有 ≥1 个成员成行"去重）——
+  // 与 membersHit（行数）一起构成 组/行 两个分母；0 组表示这张卡上没有任何合并组被触发。
+  stats.groupsHit = groups.size;
 
   const dropped = new Set();
   const replacement = new Map(); // 首个成员 id → 合并节点 entry（替换行）
@@ -969,8 +972,8 @@ export function buildMemoryCard({
       unknownScope,
       crossScopeWalk,
       signalAt: Number.isFinite(now) ? now : null,
-      // T207：不命中 ⇒ 四个计数全 0（字段始终存在）
-      mergeStats: { candidatesHit: 0, membersHit: 0, collapsed: 0, bubbled: 0 },
+      // T207/T226：不命中 ⇒ 四个计数全 0（字段始终存在）
+      mergeStats: { groupsHit: 0, membersHit: 0, collapsed: 0, bubbled: 0 },
     };
   }
 
@@ -982,14 +985,10 @@ export function buildMemoryCard({
     view,
     options: { scope: scopeKey, episodesById: view.episodesById, signalTokens: signalTokensOf(signal) },
   });
-  // T207：`candidatesHit` 数的是"命中了几条合并节点"（来自 hits）——
-  // 合并节点自身不成行（规则 1），所以不能从渲染行里数。
-  let candidatesHit = 0;
-  for (const h of Array.isArray(hits) ? hits : []) {
-    const namedId = typeof h?.claim === 'string' ? h.claim : (typeof h?.claimId === 'string' ? h.claimId : null);
-    if (namedId && isMergeNodeClaim(view.claimsById.get(namedId))) candidatesHit += 1;
-  }
-  const mergeStats = { ...collapseStats, candidatesHit };
+  // T226：`candidatesHit` 已删除 —— T193 之后 walk 不再把合并节点当 hit 返回，
+  // 那个计数**结构上永远 0**（AGENTS §2.4「指标先有消费者」）。改用 collapseMergeNodes 里
+  // 由"卡片里出现该组的 ≥1 个成员"去重得到的 `groupsHit`（组数），它才会动。
+  const mergeStats = { ...collapseStats };
   const sorted = entries.slice().sort(compareEntries);
   const droppedProvenance = dropped.noProvenance + dropped.noText;
   const droppedImperative = Number.isFinite(dropped.imperative) ? dropped.imperative : 0;
