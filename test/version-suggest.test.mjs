@@ -41,9 +41,9 @@ test('T229 非法版本号 ⇒ null（不静默产出怪值）', () => {
   assert.equal(bumpVersion('v0.158.0', 'patch'), null);
 });
 
-test('T229 分桶：每档列出自己的文件（最多 20 个）', () => {
+test('T229 分桶：纯函数不截断（截断是报告的展示层行为）', () => {
   const files = [...Array(25).fill(0).map((_, i) => `test/t${i}.test.mjs`), 'src/rooms/inject.mjs'];
   const { buckets } = suggestBump(files);
-  assert.equal(buckets.patch.length, 20);
+  assert.equal(buckets.patch.length, 25, '纯函数返回全部，不替调用方截断');
   assert.deepEqual(buckets.minor, ['src/rooms/inject.mjs']);
 });
