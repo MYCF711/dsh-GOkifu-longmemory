@@ -34,6 +34,7 @@ import {
   messageText,
   name,
   sanitizeConfig,
+  signalFromMessages,
 } from '../src/plugin.mjs';
 import { scopeKeyFromPath } from '../src/rooms/inject.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
@@ -935,4 +936,42 @@ test('T160: gateClaimIdsFromGates 去重、限 5 个、只收字符串', async (
   assert.deepEqual(gateClaimIdsFromGates({ errors: [{ detail: { ids: ['c-1', null, 42, ''] } }] }), ['c-1']);
   assert.deepEqual(gateClaimIdsFromGates({ errors: [] }), []);
   assert.deepEqual(gateClaimIdsFromGates(null), []);
+});
+
+// ---------------------------------------------------------------- T267（合法信号：最近 N 条消息的硬实体）
+//
+// 合法性：这些实体在 pre-step 这一刻就在 payload.messages 里（availableAtSeq <= injectionSeq），
+// 不是整局棋谱主题那种事后统计（T264 已证明那是作弊）。
+
+test('T267 ①: 最近消息里的文件路径/错误码被抽中（含 assistant 与 tool 角色）', () => {
+  const messages = [
+    { role: 'user', content: '跑一下测试' },
+    { role: 'assistant', content: [{ type: 'text', text: '我看 src/rooms/inject.mjs' }] },
+    { role: 'tool', content: 'Error: ENOENT no such file or directory' },
+    { role: 'user', content: '修掉它' },
+  ];
+  const out = signalFromMessages(messages);
+  assert.equal(out.text, '修掉它', '最后一条 user 消息必须原样保留（golden）');
+  assert.ok(out.entities.includes('enoent'), JSON.stringify(out.entities));
+  assert.ok(out.entities.some((e) => e.includes('src/rooms')), JSON.stringify(out.entities));
+});
+
+test('T267 ②: 只有最后一条 user 消息时，text 与现状完全一致（golden）', () => {
+  const messages = [{ role: 'user', content: '单条消息' }];
+  assert.equal(signalFromMessages(messages).text, lastUserText(messages));
+  assert.equal(signalFromMessages([]).text, '');
+  // 没有实体的普通消息 ⇒ 实体为空（不制造噪声）
+  assert.deepEqual(signalFromMessages([{ role: 'user', content: '你好' }]).entities, []);
+});
+
+test('T267 ③: 只取最近 N 条（注入点之后的消息不算进来）', () => {
+  const messages = [
+    { role: 'user', content: '很久以前提过 D:/old/legacy.mjs 与 ENOENT' },
+    { role: 'user', content: '中间' },
+    { role: 'user', content: '现在只说你好' },
+  ];
+  const recent = signalFromMessages(messages, { lastN: 1 });
+  assert.equal(recent.entities.length, 0, 'lastN=1 时看不到最早那条消息里的实体');
+  const all = signalFromMessages(messages, { lastN: 3 });
+  assert.ok(all.entities.some((e) => e.includes('legacy')), JSON.stringify(all.entities));
 });
