@@ -45,15 +45,15 @@ const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || proces
 // 用分数形式写死，避免 0.3426 与 0.342592… 这种四舍五入把真实基线卡在门外的假红。
 export const HOLDOUT_BASELINE = Object.freeze({
   n: 114,
-  strictHits: 39,
+  strictHits: 55,
   relatedHits: 79,
-  strictMin: 39 / 114, // 34.21%（**合法口径**起点；任何下降即红）
+  strictMin: 55 / 114, // 48.25%（**中文 bigram + IDF 过滤**口径；任何下降即红）
   coverMin: 79 / 114, // 69.30%（宽松命中 = 覆盖）
   // 2026-11-05 重定基线：旧基线 37/108 = 34.26% 是在**含事后信息**的信号下测的
   // （T249/T263 把"该局实际碰过的文件"加进信号 —— 那是 `pre-step` 时拿不到的东西）。
   // T264 把信号限定为"注入时刻可得"（用户原话 + 原话内实体），真实冷启动 = 39/114。
   // **这不是放水**：判据与 `related` 定义一字未动，只是把被污染的测量基准换成真实值。
-  note: '合法口径考卷（repeat + self，n=114，信号仅限注入时刻可得）的起点，不是目标',
+  note: '合法口径考卷（n=114，信号仅限注入时刻可得）+ 中文 bigram 判据（IDF 0.02）；尺子修正不是产品改进',
 });
 
 const LIMITS = {

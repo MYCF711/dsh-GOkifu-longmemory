@@ -11,7 +11,11 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  bigramOverlapCount,
+  buildBigramDf,
+  isDiscriminative,
   buildExam,
+  chineseBigrams,
   compareSignalModes,
   claimsByEpisode,
   discriminativeTokens,
@@ -287,4 +291,74 @@ test('T264 ③ 原话里没有实体 ⇒ B 路 == A 路（不许凭空造信号�
   assert.equal(it.taskEntities.length, 0);
   assert.ok(it.signals.postHoc.includes('src/post-hoc.ts'), 'C 路仍可含事后实体（仅对照）');
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ── T284：中文二元组 ─────────────────────────────────────────────────────────
+
+test('T284 ① 中文 bigram：「反代插件卷」vs 卡上「反代插件」能认出重合（旧 includes 认不出）', () => {
+  const signal = '反代插件卷的问题';
+  const claim = '反代插件的路由不生效';
+  // 旧口径：整段当一个 token ⇒ includes 不命中
+  assert.equal(overlapCount(signal, claim) >= 2, false, '旧口径不应命中');
+  // 新口径：bigram 滑窗
+  const bg = bigramOverlapCount(signal, claim);
+  assert.ok(bg >= 2, `bigram 应 ≥2，实际 ${bg}：${JSON.stringify([...chineseBigrams(signal)])}`);
+  assert.equal(judgeStrict({ related: true, overlap: 0, shared: [], bigram: bg }), true, '并集判据应判严格命中');
+});
+
+test('T284 ② 完全无关的中文 ⇒ 不重合', () => {
+  const signal = '反代插件卷的问题';
+  const claim = '今天天气不错，适合出去走走';
+  assert.equal(bigramOverlapCount(signal, claim), 0);
+  assert.equal(judgeStrict({ related: true, overlap: 0, shared: [], bigram: 0 }), false);
+});
+
+test('T284 ③ 误判不升：bigram 路径在无关样本上的命中率 ≤ 原判别词路径的历史基线', () => {
+  // 无关对：两个毫无共享 bigram 的中文串 ⇒ 0；共享 1 个 bigram ⇒ 不到门槛（≥2）
+  assert.equal(bigramOverlapCount('反代插件卷的问题', '插件的配置'), 1, '只共享「插件」1 个 bigram');
+  assert.equal(judgeStrict({ related: true, overlap: 0, shared: [], bigram: 1 }), false, '1 个 bigram 不够');
+  // 英文/路径仍走原判别词路径（不许因为中文改动而放松）
+  assert.equal(judgeStrict({ related: true, overlap: 0, shared: [], bigram: 99 }), true);
+  assert.equal(judgeStrict({ related: false, overlap: 99, shared: ['x'], bigram: 99 }), false, 'related 定义一字未动');
+});
+
+test('T284 ④ chineseBigrams：中文 2 字滑窗 + 英文/数字保原样', () => {
+  const b = chineseBigrams('反代插件 abc.ts');
+  assert.ok(b.has('反代') && b.has('代插') && b.has('插件'), JSON.stringify([...b]));
+  assert.ok(b.has('abc.ts'), '英文/路径保持原样');
+  assert.equal(b.has('反代插'), false, '不是 3 字窗');
+});
+
+// ── T286：bigram 的 IDF 过滤 ────────────────────────────────────────────────
+
+const mkClaims = (texts) => texts.map((t, i) => ({ id: `c-${i}`, text: t }));
+
+test('T286 ① 泛词 bigram（df 高）不算判别性 ⇒ 不计入重合', () => {
+  // 「看看」出现在 50/100 条 claim 里（df=0.5）；「反代」出现 1 次
+  const claims = mkClaims([...Array.from({ length: 49 }, () => '你再看看这个'), '反代插件的路由', ...Array.from({ length: 50 }, () => '随便什么')]);
+  const filter = buildBigramDf(claims);
+  assert.equal(isDiscriminative('看看', filter, 0.02), false, '「看看」是泛词');
+  assert.equal(isDiscriminative('反代', filter, 0.02), true, '「反代」是判别性 bigram');
+  // 「你再看看」对同一段文本：泛词 bigram 被剔，过滤后必须**严格小于**不过滤
+  const raw = bigramOverlapCount('你再看看', '你再看看这个');
+  const filtered = bigramOverlapCount('你再看看', '你再看看这个', { filter, maxRatio: 0.02 });
+  assert.ok(raw >= 2, `不过滤时应 ≥2，实际 ${raw}`);
+  assert.ok(filtered < raw, `过滤后 ${filtered} 应小于 ${raw}（泛词被剔）`);
+  assert.equal(isDiscriminative('看看', filter, 0.02), false, '「看看」仍是泛词');
+});
+
+test('T286 ② 罕见 bigram 仍计入 ⇒ 真命中不被误杀', () => {
+  const claims = mkClaims(['反代插件卷的路由', ...Array.from({ length: 99 }, () => '别的内容')]);
+  const filter = buildBigramDf(claims);
+  assert.ok(bigramOverlapCount('反代插件卷', '反代插件的路由', { filter, maxRatio: 0.02 }) >= 2, '判别性 bigram 应照常命中');
+});
+
+test('T286 ③ 阈值 0.02 下误判率不高于不过滤（泛词被剔）', () => {
+  const claims = mkClaims([...Array.from({ length: 50 }, () => '你看看文件'), ...Array.from({ length: 50 }, (_, i) => `独特词${i}号`)]);
+  const filter = buildBigramDf(claims);
+  const unrelated = '我要求的是代码，不是占用高额内存的东西';
+  const raw = bigramOverlapCount('你看看文件', unrelated, {});
+  const filtered = bigramOverlapCount('你看看文件', unrelated, { filter, maxRatio: 0.02 });
+  assert.ok(filtered <= raw, `过滤后 ${filtered} 不应高于 ${raw}`);
+  assert.equal(filtered, 0, '全泛词 ⇒ 0');
 });
