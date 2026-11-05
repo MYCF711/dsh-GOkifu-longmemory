@@ -1,8 +1,8 @@
 {
   "stats": {
-    "claims": 1516,
-    "episodesWithClaims": 93,
-    "self": 93,
+    "claims": 1570,
+    "episodesWithClaims": 95,
+    "self": 95,
     "repeat": 19,
     "skipped": 0,
     "frozen": true
@@ -10,11 +10,11 @@
   "skipped": [],
   "version": 1,
   "control": {
-    "n": 336,
-    "bridged": 3,
-    "tokenHit": 15,
-    "bridgeRate": 0.008928571428571428,
-    "tokenRate": 0.044642857142857144,
+    "n": 342,
+    "bridged": 4,
+    "tokenHit": 11,
+    "bridgeRate": 0.011695906432748537,
+    "tokenRate": 0.03216374269005848,
     "examples": [
       {
         "item": "self:ep-d70b7c2f",
@@ -42,44 +42,44 @@
       }
     ]
   },
-  "generatedAt": 1793873662142,
-  "n": 112,
+  "generatedAt": 1793883995817,
+  "n": 114,
   "errors": 0,
-  "strictHits": 46,
+  "strictHits": 39,
   "relatedHits": 79,
-  "strictRate": 0.4107142857142857,
-  "relatedRate": 0.7053571428571429,
+  "strictRate": 0.34210526315789475,
+  "relatedRate": 0.6929824561403509,
   "wilson": {
     "strict": {
-      "phat": 0.4107142857142857,
-      "lower": 0.3240369028320017,
-      "upper": 0.5033135481286204,
-      "n": 112,
+      "phat": 0.34210526315789475,
+      "lower": 0.26144067569416146,
+      "upper": 0.43306449056291585,
+      "n": 114,
       "z": 1.96
     },
     "related": {
-      "phat": 0.7053571428571429,
-      "lower": 0.6152493563162678,
-      "upper": 0.7818446064743015,
-      "n": 112,
+      "phat": 0.6929824561403509,
+      "lower": 0.6031723261159853,
+      "upper": 0.7702102484586981,
+      "n": 114,
       "z": 1.96
     }
   },
   "rows": {
-    "related": 138,
-    "pending": 49,
-    "unrelated": 203
+    "related": 154,
+    "pending": 26,
+    "unrelated": 212
   },
   "byKind": {
     "self/root": {
-      "n": 73,
-      "strict": 16,
-      "related": 46
+      "n": 74,
+      "strict": 17,
+      "related": 48
     },
-    "self/shortRootEntities": {
-      "n": 11,
-      "strict": 8,
-      "related": 9
+    "self/shortRoot": {
+      "n": 12,
+      "strict": 0,
+      "related": 7
     },
     "self/firstUser": {
       "n": 9,
@@ -101,14 +101,22 @@
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
       "signal": "E:/Documents/dsh-go/HANDOFF.md\n读这个交接文件，然后写方案，一个问题一个问题的拷问我：只在方向上提问。\n初始目标：用GO实现DSH，初衷保持DSH的官方初衷：一切皆插件。\n你可以先搜集本机相关内容，保存到工作区",
       "expectedClaimIds": 169,
-      "rendered": 3,
-      "related": 0,
+      "rendered": 5,
+      "related": 3,
       "strict": 0,
       "pending": 0,
-      "unrelated": 3,
+      "unrelated": 2,
       "hitStrict": false,
-      "hitRelated": false,
+      "hitRelated": true,
       "rows": [
+        {
+          "claimId": "c-d010a5aa",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-8cc34e32"
+        },
         {
           "claimId": "c-6578c3cb",
           "related": false,
@@ -126,31 +134,47 @@
           "episode": "ep-62bcb7d2"
         },
         {
-          "claimId": "c-7ef2f75c",
-          "related": false,
+          "claimId": "c-ac805904",
+          "related": true,
           "strict": false,
           "pending": false,
           "overlap": 0,
-          "episode": "ep-0ef39d3a"
+          "episode": "ep-c0a5847a"
+        },
+        {
+          "claimId": "c-24b33a42",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-c0a5847a"
         }
       ]
     },
     {
       "itemId": "self:ep-543cf0b2",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-543cf0b2",
       "scopeKey": "w:d:/DeepSeek Harness/反代/work buddy",
-      "signal": "/tmp/wbm/WBMultiLogin.exe_extracted _pr-audit ElementResolutionError: page.fill timed out after 3433ms: page.fill failed",
+      "signal": "处理一下",
       "expectedClaimIds": 26,
       "rendered": 5,
-      "related": 2,
+      "related": 5,
       "strict": 0,
       "pending": 0,
-      "unrelated": 3,
+      "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
       "rows": [
+        {
+          "claimId": "c-d296e620",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-00b50089"
+        },
         {
           "claimId": "c-5175f1dc",
           "related": true,
@@ -168,28 +192,20 @@
           "episode": "ep-9ce43a15"
         },
         {
-          "claimId": "c-4531a6d0",
-          "related": false,
+          "claimId": "c-67dca9bc",
+          "related": true,
           "strict": false,
           "pending": false,
           "overlap": 0,
-          "episode": "ep-03bc3e53"
+          "episode": "ep-543cf0b2"
         },
         {
-          "claimId": "c-fbe74d18",
-          "related": false,
+          "claimId": "c-29fb7042",
+          "related": true,
           "strict": false,
           "pending": false,
           "overlap": 0,
-          "episode": "ep-1286ce28"
-        },
-        {
-          "claimId": "c-2d4fdcf7",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 0,
-          "episode": "ep-1cf2b33f"
+          "episode": "ep-1e82afca"
         }
       ]
     },
@@ -199,7 +215,7 @@
       "signalSource": "root",
       "episode": "ep-bc4ab3cb",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到",
+      "signal": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到 s://opc.fiime.cn/zh-cn/download opc.fiime.cn",
       "expectedClaimIds": 15,
       "rendered": 3,
       "related": 0,
@@ -282,7 +298,7 @@
           "related": true,
           "strict": true,
           "pending": false,
-          "overlap": 3,
+          "overlap": 11,
           "episode": "ep-a9f16ff0"
         },
         {
@@ -290,7 +306,7 @@
           "related": false,
           "strict": false,
           "pending": true,
-          "overlap": 2,
+          "overlap": 6,
           "episode": "ep-543cf0b2"
         },
         {
@@ -298,7 +314,7 @@
           "related": false,
           "strict": false,
           "pending": true,
-          "overlap": 2,
+          "overlap": 7,
           "episode": "ep-fdbfa78c"
         }
       ]
@@ -310,7 +326,7 @@
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "D:\\主工作区\\repos\\dsh-GOkifu-compact\\evidence\\归档收尾-验证单-2026-11-02.md\n继续任务，那个会话我已经归档，你去验证",
-      "expectedClaimIds": 97,
+      "expectedClaimIds": 102,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -394,7 +410,7 @@
       "episode": "ep-8cc34e32",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/长期记忆系统",
       "signal": "开启superagent模式，做好定时任务，写好goal，把任务清单列出来，写好AGENTS，记住最小交付房间理论，不要粉色大象。直接开跑吧，开一个私人仓库，然后按照magpie脚手架仓库的仓库维护准则进行维护。每次功能的实现都进行版本发布",
-      "expectedClaimIds": 83,
+      "expectedClaimIds": 84,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -470,7 +486,7 @@
       "episode": "ep-1e82afca",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "重启好了，你再看看工具调用",
-      "expectedClaimIds": 204,
+      "expectedClaimIds": 213,
       "rendered": 3,
       "related": 1,
       "strict": 0,
@@ -511,7 +527,7 @@
       "signalSource": "root",
       "episode": "ep-32a78774",
       "scopeKey": "w:d:/DeepSeek Harness/反代/monkey code",
-      "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的monkey code相关供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商",
+      "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的monkey code相关供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商 s://github.com/betsy20/",
       "expectedClaimIds": 45,
       "rendered": 2,
       "related": 2,
@@ -526,7 +542,7 @@
           "related": true,
           "strict": true,
           "pending": false,
-          "overlap": 3,
+          "overlap": 7,
           "episode": "ep-32a78774"
         },
         {
@@ -534,7 +550,7 @@
           "related": true,
           "strict": true,
           "pending": false,
-          "overlap": 3,
+          "overlap": 7,
           "episode": "ep-32a78774"
         }
       ]
@@ -546,7 +562,7 @@
       "episode": "ep-62bcb7d2",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
       "signal": "你读本地的AGENTS和相关文件，然后完善这些文件，这些都是deepseekv4.1f自己写的，自己在执行，你实时写入的AGENTS能及时载入他们的会话引导方向。要求就是完成我当时提出的目标",
-      "expectedClaimIds": 91,
+      "expectedClaimIds": 99,
       "rendered": 5,
       "related": 2,
       "strict": 0,
@@ -605,10 +621,10 @@
       "scopeKey": "w:d:/DeepSeek Harness/反代",
       "signal": "magpie的灵犀插件修复一下报错不走magpie只能路由自动跳过之类的机制而是直接给DSH输出报错导致任务终止的bug\n{\n  \"id\": \"chatcmpl-lingxi-1793632740\",\n  \"model\": \"deepsee",
       "expectedClaimIds": 52,
-      "rendered": 3,
+      "rendered": 2,
       "related": 1,
       "strict": 1,
-      "pending": 2,
+      "pending": 1,
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
@@ -620,14 +636,6 @@
           "pending": true,
           "overlap": 42,
           "episode": "ep-25d39e67"
-        },
-        {
-          "claimId": "c-5facfc92",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 29,
-          "episode": "ep-5e4ee30c"
         },
         {
           "claimId": "c-9b3a8ccf",
@@ -782,12 +790,120 @@
       ]
     },
     {
+      "itemId": "self:ep-4480912b",
+      "kind": "self",
+      "signalSource": "root",
+      "episode": "ep-4480912b",
+      "scopeKey": "w:d:/DeepSeek Harness/反代/wps",
+      "signal": "既然插件无法算tok/s，magpie也无法算tok/s，那在DSH算总没问题吧？DSH这边是接收方，你看下能不能在dsh算灵犀的模型的tok/s然后返回magpie",
+      "expectedClaimIds": 28,
+      "rendered": 4,
+      "related": 2,
+      "strict": 1,
+      "pending": 0,
+      "unrelated": 2,
+      "hitStrict": true,
+      "hitRelated": true,
+      "rows": [
+        {
+          "claimId": "c-2a1d9e2e",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-601f0764"
+        },
+        {
+          "claimId": "c-3c38320a",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-4480912b"
+        },
+        {
+          "claimId": "c-dc0d6a9e",
+          "related": true,
+          "strict": true,
+          "pending": false,
+          "overlap": 3,
+          "episode": "ep-4480912b"
+        },
+        {
+          "claimId": "c-3370be80",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-1cf2b33f"
+        }
+      ]
+    },
+    {
+      "itemId": "self:ep-a1400ad0",
+      "kind": "self",
+      "signalSource": "root",
+      "episode": "ep-a1400ad0",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace",
+      "signal": "海绵宝宝大闹蟹皇堡的手机apk破解版帮我找一个，扫一下有没有病毒和后门就i行了",
+      "expectedClaimIds": 17,
+      "rendered": 5,
+      "related": 5,
+      "strict": 0,
+      "pending": 0,
+      "unrelated": 0,
+      "hitStrict": false,
+      "hitRelated": true,
+      "rows": [
+        {
+          "claimId": "c-d296e620",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-00b50089"
+        },
+        {
+          "claimId": "c-3d57d307",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-a1400ad0"
+        },
+        {
+          "claimId": "c-280d7b5f",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-a1400ad0"
+        },
+        {
+          "claimId": "c-02a7d85a",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-a1400ad0"
+        },
+        {
+          "claimId": "c-fbe74d18",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-1286ce28"
+        }
+      ]
+    },
+    {
       "itemId": "self:ep-03bc3e53",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-03bc3e53",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "\"E:\\AStudio\\AStudio.exe\"看一下有没有具体的模型请求目录，我在软件GUI只有auto",
+      "signal": "\"E:\\AStudio\\AStudio.exe\"看一下有没有具体的模型请求目录，我在软件GUI只有auto e:\\astudio\\astudio.exe astudio.exe",
       "expectedClaimIds": 4,
       "rendered": 2,
       "related": 0,
@@ -870,56 +986,6 @@
           "pending": false,
           "overlap": 0,
           "episode": "ep-1286ce28"
-        }
-      ]
-    },
-    {
-      "itemId": "self:ep-4480912b",
-      "kind": "self",
-      "signalSource": "root",
-      "episode": "ep-4480912b",
-      "scopeKey": "w:d:/DeepSeek Harness/反代/wps",
-      "signal": "既然插件无法算tok/s，magpie也无法算tok/s，那在DSH算总没问题吧？DSH这边是接收方，你看下能不能在dsh算灵犀的模型的tok/s然后返回magpie",
-      "expectedClaimIds": 14,
-      "rendered": 4,
-      "related": 2,
-      "strict": 1,
-      "pending": 0,
-      "unrelated": 2,
-      "hitStrict": true,
-      "hitRelated": true,
-      "rows": [
-        {
-          "claimId": "c-2a1d9e2e",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 0,
-          "episode": "ep-601f0764"
-        },
-        {
-          "claimId": "c-04b2e518",
-          "related": true,
-          "strict": false,
-          "pending": false,
-          "overlap": 0,
-          "episode": "ep-4480912b"
-        },
-        {
-          "claimId": "c-dc0d6a9e",
-          "related": true,
-          "strict": true,
-          "pending": false,
-          "overlap": 3,
-          "episode": "ep-4480912b"
-        },
-        {
-          "claimId": "c-3370be80",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 0,
-          "episode": "ep-1cf2b33f"
         }
       ]
     },
@@ -1276,7 +1342,7 @@
       "hitRelated": false,
       "rows": [
         {
-          "claimId": "c-dc0d6a9e",
+          "claimId": "c-580cb483",
           "related": false,
           "strict": false,
           "pending": false,
@@ -1307,7 +1373,7 @@
       "signalSource": "root",
       "episode": "ep-d70b7c2f",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
-      "signal": "好了，刚刚是因为热切换导致所有工具全部丢失，现在只有bash能用了，应该在插件中增加提示，要求更改后重启才能生效，而不是更改后直接把工具剥离丢失",
+      "signal": "好了，刚刚是因为热切换导致所有工具全部丢失，现在只有bash能用了，应该在插件中增加提示，要求更改后重启才能生效，而不是更改后直接把工具剥离丢失 bash",
       "expectedClaimIds": 43,
       "rendered": 3,
       "related": 1,
@@ -1322,7 +1388,7 @@
           "related": true,
           "strict": true,
           "pending": false,
-          "overlap": 5,
+          "overlap": 6,
           "episode": "ep-d70b7c2f"
         },
         {
@@ -1330,7 +1396,7 @@
           "related": false,
           "strict": false,
           "pending": false,
-          "overlap": 0,
+          "overlap": 1,
           "episode": "ep-1286ce28"
         },
         {
@@ -1544,6 +1610,14 @@
       "hitRelated": true,
       "rows": [
         {
+          "claimId": "c-5175f1dc",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-00b50089"
+        },
+        {
           "claimId": "c-d296e620",
           "related": true,
           "strict": false,
@@ -1566,14 +1640,6 @@
           "pending": false,
           "overlap": 0,
           "episode": "ep-16d5a1e2"
-        },
-        {
-          "claimId": "c-5175f1dc",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 0,
-          "episode": "ep-00b50089"
         }
       ]
     },
@@ -1725,14 +1791,14 @@
       "signalSource": "root",
       "episode": "ep-eb9b65ea",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace",
-      "signal": "https://github.com/DIYgod/RSSHub\n这个是干嘛的",
+      "signal": "https://github.com/DIYgod/RSSHub\n这个是干嘛的 s://github.com/diygod/rsshub github.com/diygod",
       "expectedClaimIds": 3,
       "rendered": 4,
       "related": 1,
-      "strict": 0,
-      "pending": 1,
-      "unrelated": 2,
-      "hitStrict": false,
+      "strict": 1,
+      "pending": 2,
+      "unrelated": 1,
+      "hitStrict": true,
       "hitRelated": true,
       "rows": [
         {
@@ -1740,23 +1806,23 @@
           "related": false,
           "strict": false,
           "pending": true,
-          "overlap": 2,
+          "overlap": 4,
           "episode": "ep-62b1cd78"
         },
         {
           "claimId": "c-678d239a",
           "related": true,
-          "strict": false,
+          "strict": true,
           "pending": false,
-          "overlap": 1,
+          "overlap": 3,
           "episode": "ep-294c4c1d"
         },
         {
           "claimId": "c-1c966596",
           "related": false,
           "strict": false,
-          "pending": false,
-          "overlap": 1,
+          "pending": true,
+          "overlap": 3,
           "episode": "ep-2955fa30"
         },
         {
@@ -1776,7 +1842,7 @@
       "episode": "ep-dcc6efd2",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
       "signal": "找一些这些里面有没有每日额度或者每月额度，不充钱就能用的，或者免费额度的。上次找过一次。再找一次",
-      "expectedClaimIds": 23,
+      "expectedClaimIds": 27,
       "rendered": 3,
       "related": 0,
       "strict": 0,
@@ -1819,36 +1885,28 @@
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
       "signal": "<goal_round>\nObjective: \"按 dsh-ui/PLAN.md §8 的分层（L0 壳 / L1 契约 / L2 ds-core / L3 ds-shell / L4 部件 / L5 第三方插件）把界面线继续往上搭：① ",
       "expectedClaimIds": 83,
-      "rendered": 4,
-      "related": 1,
-      "strict": 1,
-      "pending": 3,
+      "rendered": 3,
+      "related": 2,
+      "strict": 2,
+      "pending": 1,
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
       "rows": [
         {
-          "claimId": "c-17bba130",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 7,
-          "episode": "ep-62bcb7d2"
-        },
-        {
-          "claimId": "c-aeab2b70",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 7,
-          "episode": "ep-62bcb7d2"
-        },
-        {
           "claimId": "c-fd84fb1d",
           "related": true,
           "strict": true,
           "pending": false,
-          "overlap": 8,
+          "overlap": 10,
+          "episode": "ep-226dbf4f"
+        },
+        {
+          "claimId": "c-a0463d94",
+          "related": true,
+          "strict": true,
+          "pending": false,
+          "overlap": 13,
           "episode": "ep-226dbf4f"
         },
         {
@@ -1891,7 +1949,7 @@
           "strict": false,
           "pending": false,
           "overlap": 0,
-          "episode": "ep-4480912b"
+          "episode": "ep-1e82afca"
         },
         {
           "claimId": "c-0be349c8",
@@ -1920,21 +1978,13 @@
       "signal": "修一下之前的realme手机上的大肥鱼聊天bot，今天断掉了",
       "expectedClaimIds": 16,
       "rendered": 5,
-      "related": 3,
+      "related": 4,
       "strict": 0,
       "pending": 0,
-      "unrelated": 2,
+      "unrelated": 1,
       "hitStrict": false,
       "hitRelated": true,
       "rows": [
-        {
-          "claimId": "c-ba2232e2",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 0,
-          "episode": "ep-bde12afa"
-        },
         {
           "claimId": "c-1ef91c04",
           "related": false,
@@ -1958,6 +2008,14 @@
           "pending": false,
           "overlap": 0,
           "episode": "ep-601f0764"
+        },
+        {
+          "claimId": "c-c8357264",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-bd0161a1"
         },
         {
           "claimId": "c-41157b78",
@@ -2075,7 +2133,7 @@
       "signalSource": "root",
       "episode": "ep-5cf57bb4",
       "scopeKey": "w:d:/DeepSeek Harness/反代/AIysis code",
-      "signal": "\"E:\\Alysis Code\\Alysis Code.exe\"把这个软件的不充钱账号可用deepseek系模型按照脚手架仓库反代成接近官方原生api调用的体验",
+      "signal": "\"E:\\Alysis Code\\Alysis Code.exe\"把这个软件的不充钱账号可用deepseek系模型按照脚手架仓库反代成接近官方原生api调用的体验 e:\\alysis",
       "expectedClaimIds": 25,
       "rendered": 5,
       "related": 5,
@@ -2133,7 +2191,7 @@
       "signalSource": "root",
       "episode": "ep-2955fa30",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace",
-      "signal": "\"F:\\Steamcommunity_302\\Steamcommunity_302.exe\"\n我到底要怎么配才能让我自己能加速github，又能让magpie那边不因为开了加速而崩溃，然后DHS里面的会话能正确用github？？",
+      "signal": "\"F:\\Steamcommunity_302\\Steamcommunity_302.exe\"\n我到底要怎么配才能让我自己能加速github，又能让magpie那边不因为开了加速而崩溃，然后DHS里面的会话能正确用github？？ f:\\st",
       "expectedClaimIds": 6,
       "rendered": 5,
       "related": 2,
@@ -2206,7 +2264,7 @@
           "related": false,
           "strict": false,
           "pending": true,
-          "overlap": 11,
+          "overlap": 19,
           "episode": "ep-25d39e67"
         },
         {
@@ -2214,7 +2272,7 @@
           "related": true,
           "strict": true,
           "pending": false,
-          "overlap": 11,
+          "overlap": 14,
           "episode": "ep-00b50089"
         }
       ]
@@ -2380,100 +2438,100 @@
     {
       "itemId": "self:ep-4188510d",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-4188510d",
       "scopeKey": "w:d:/DeepSeek Harness/反代/magpie-amgicrew-auth",
-      "signal": "/tmp/chk11266.py /tmp/pr2.py Error: URL hostname \"github.com\" resolves to a non-public IP address",
+      "signal": "处理一下pr",
       "expectedClaimIds": 10,
-      "rendered": 5,
-      "related": 2,
-      "strict": 2,
+      "rendered": 4,
+      "related": 4,
+      "strict": 0,
       "pending": 0,
-      "unrelated": 3,
-      "hitStrict": true,
+      "unrelated": 0,
+      "hitStrict": false,
       "hitRelated": true,
       "rows": [
         {
-          "claimId": "c-22b83bcb",
-          "related": false,
+          "claimId": "c-658ba7bb",
+          "related": true,
           "strict": false,
           "pending": false,
-          "overlap": 1,
-          "episode": "ep-22d3bd16"
-        },
-        {
-          "claimId": "c-5175f1dc",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 1,
-          "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-78bc8a43",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 1,
-          "episode": "ep-0eba65b1"
+          "overlap": 0,
+          "episode": "ep-4188510d"
         },
         {
           "claimId": "c-678d239a",
           "related": true,
-          "strict": true,
+          "strict": false,
           "pending": false,
-          "overlap": 6,
+          "overlap": 0,
           "episode": "ep-294c4c1d"
         },
         {
-          "claimId": "c-137e7002",
+          "claimId": "c-4fca33d1",
           "related": true,
-          "strict": true,
+          "strict": false,
           "pending": false,
-          "overlap": 6,
-          "episode": "ep-4188510d"
+          "overlap": 0,
+          "episode": "ep-1e82afca"
+        },
+        {
+          "claimId": "c-d296e620",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-00b50089"
         }
       ]
     },
     {
       "itemId": "self:ep-c460d468",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-c460d468",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "_tmp/replace-invite-method.mjs docs/internals.md Error: cannot edit \"<path>\": file changed since it was read — re-read t",
+      "signal": "把这个发仓库并公开吧",
       "expectedClaimIds": 14,
-      "rendered": 3,
-      "related": 1,
-      "strict": 1,
-      "pending": 2,
-      "unrelated": 0,
-      "hitStrict": true,
-      "hitRelated": true,
+      "rendered": 4,
+      "related": 0,
+      "strict": 0,
+      "pending": 0,
+      "unrelated": 4,
+      "hitStrict": false,
+      "hitRelated": false,
       "rows": [
         {
-          "claimId": "c-7ed7c9cd",
+          "claimId": "c-7b3fb03e",
           "related": false,
           "strict": false,
-          "pending": true,
-          "overlap": 6,
-          "episode": "ep-f4e6c960"
-        },
-        {
-          "claimId": "c-87729e7c",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 6,
-          "episode": "ep-28168c77"
-        },
-        {
-          "claimId": "c-5175f1dc",
-          "related": true,
-          "strict": true,
           "pending": false,
-          "overlap": 8,
-          "episode": "ep-00b50089"
+          "overlap": 0,
+          "episode": "ep-3f03c71c"
+        },
+        {
+          "claimId": "c-d38f856f",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-9ce43a15"
+        },
+        {
+          "claimId": "c-36feb6c9",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-bc4ab3cb"
+        },
+        {
+          "claimId": "c-79d352c9",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-f7f835b1"
         }
       ]
     },
@@ -2507,7 +2565,7 @@
           "strict": false,
           "pending": false,
           "overlap": 0,
-          "episode": "ep-4480912b"
+          "episode": "ep-1e82afca"
         },
         {
           "claimId": "c-2aabd572",
@@ -2649,7 +2707,7 @@
       "signalSource": "root",
       "episode": "ep-f46d6330",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "看一下\"E:\\codar-desktop\\Codar科搭.exe\"这个软件的v4.1f模型是不是1017版本的",
+      "signal": "看一下\"E:\\codar-desktop\\Codar科搭.exe\"这个软件的v4.1f模型是不是1017版本的 e:\\codar-desktop\\codar",
       "expectedClaimIds": 26,
       "rendered": 3,
       "related": 0,
@@ -2691,7 +2749,7 @@
       "signalSource": "root",
       "episode": "ep-75e7347e",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
-      "signal": "安装失败\n@tencent-connect/dsh-qqbot@latest\n帮我装一下",
+      "signal": "安装失败\n@tencent-connect/dsh-qqbot@latest\n帮我装一下 tencent-connect/dsh-qqbot dsh-qqbot",
       "expectedClaimIds": 13,
       "rendered": 3,
       "related": 1,
@@ -2791,7 +2849,7 @@
       "signalSource": "root",
       "episode": "ep-ad38cf8c",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "\"E:\\Chatbox\\Chatbox.exe\"严格按照magpie脚手架仓库的规则反代这个项目",
+      "signal": "\"E:\\Chatbox\\Chatbox.exe\"严格按照magpie脚手架仓库的规则反代这个项目 e:\\chatbox\\chatbox.exe chatbox.exe",
       "expectedClaimIds": 15,
       "rendered": 3,
       "related": 1,
@@ -2814,7 +2872,7 @@
           "related": true,
           "strict": true,
           "pending": false,
-          "overlap": 2,
+          "overlap": 5,
           "episode": "ep-ad38cf8c"
         },
         {
@@ -2844,120 +2902,120 @@
       "hitRelated": true,
       "rows": [
         {
+          "claimId": "c-6afdb391",
+          "related": false,
+          "strict": false,
+          "pending": true,
+          "overlap": 16,
+          "episode": "ep-1e82afca"
+        },
+        {
           "claimId": "c-5175f1dc",
           "related": true,
           "strict": true,
           "pending": false,
-          "overlap": 11,
-          "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-60a4ecdd",
-          "related": false,
-          "strict": false,
-          "pending": true,
           "overlap": 17,
-          "episode": "ep-135c7f7d"
+          "episode": "ep-00b50089"
         }
       ]
     },
     {
       "itemId": "self:ep-be4fc599",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-be4fc599",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "/chat/completions /tmp/avail.mjs Error: DeepSeek returned no web_search_tool_result blocks; the request may not have tri",
+      "signal": "选哪个api性能最好？",
       "expectedClaimIds": 3,
-      "rendered": 5,
-      "related": 2,
-      "strict": 2,
-      "pending": 1,
-      "unrelated": 2,
-      "hitStrict": true,
+      "rendered": 4,
+      "related": 1,
+      "strict": 0,
+      "pending": 0,
+      "unrelated": 3,
+      "hitStrict": false,
       "hitRelated": true,
       "rows": [
         {
-          "claimId": "c-7ed7c9cd",
+          "claimId": "c-8d3813fa",
           "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-25d39e67"
+        },
+        {
+          "claimId": "c-501233ca",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-f7f835b1"
+        },
+        {
+          "claimId": "c-14094f31",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-f46d6330"
+        },
+        {
+          "claimId": "c-1c7b09df",
+          "related": true,
           "strict": false,
           "pending": false,
           "overlap": 1,
-          "episode": "ep-f4e6c960"
-        },
-        {
-          "claimId": "c-87729e7c",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 1,
-          "episode": "ep-28168c77"
-        },
-        {
-          "claimId": "c-4531a6d0",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-03bc3e53"
-        },
-        {
-          "claimId": "c-5175f1dc",
-          "related": true,
-          "strict": true,
-          "pending": false,
-          "overlap": 2,
-          "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-fbe74d18",
-          "related": true,
-          "strict": true,
-          "pending": false,
-          "overlap": 12,
-          "episode": "ep-1286ce28"
+          "episode": "ep-be4fc599"
         }
       ]
     },
     {
       "itemId": "self:ep-147f0bf4",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-147f0bf4",
       "scopeKey": "w:d:/DeepSeek Harness/反代/magpie-amgicrew-auth",
-      "signal": "/api/v1/auth/status /api/v1/flows/models Error: DeepSeek returned no web_search_tool_result blocks; the request may not ",
+      "signal": "看下是不是这个修复方案",
       "expectedClaimIds": 9,
-      "rendered": 3,
-      "related": 1,
-      "strict": 1,
-      "pending": 2,
+      "rendered": 4,
+      "related": 4,
+      "strict": 0,
+      "pending": 0,
       "unrelated": 0,
-      "hitStrict": true,
+      "hitStrict": false,
       "hitRelated": true,
       "rows": [
         {
+          "claimId": "c-80cb2d09",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-147f0bf4"
+        },
+        {
+          "claimId": "c-5175f1dc",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-00b50089"
+        },
+        {
+          "claimId": "c-34a72797",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-d70b7c2f"
+        },
+        {
           "claimId": "c-fbe74d18",
           "related": true,
-          "strict": true,
+          "strict": false,
           "pending": false,
-          "overlap": 12,
+          "overlap": 0,
           "episode": "ep-1286ce28"
-        },
-        {
-          "claimId": "c-3983bee4",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 3,
-          "episode": "ep-0eba65b1"
-        },
-        {
-          "claimId": "c-4531a6d0",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-03bc3e53"
         }
       ]
     },
@@ -3007,7 +3065,7 @@
           "strict": false,
           "pending": false,
           "overlap": 0,
-          "episode": "ep-4480912b"
+          "episode": "ep-1e82afca"
         },
         {
           "claimId": "c-b4544b7c",
@@ -3026,7 +3084,7 @@
       "episode": "ep-d52b6ca5",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
       "signal": "去找一下当前magpie里面没有，但是有每日免费额度、积分这种不充钱就能用deepseek v4.1f模型的软件",
-      "expectedClaimIds": 9,
+      "expectedClaimIds": 10,
       "rendered": 1,
       "related": 0,
       "strict": 0,
@@ -3406,58 +3464,50 @@
     {
       "itemId": "self:ep-b4664e8f",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-b4664e8f",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "/src/codar/http.mjs _tmp/verify-loader.mjs Error: DeepSeek returned no web_search_tool_result blocks; the request may no",
+      "signal": "修一下codar的报错",
       "expectedClaimIds": 5,
-      "rendered": 5,
-      "related": 2,
-      "strict": 2,
-      "pending": 1,
-      "unrelated": 2,
-      "hitStrict": true,
-      "hitRelated": true,
+      "rendered": 4,
+      "related": 0,
+      "strict": 0,
+      "pending": 0,
+      "unrelated": 4,
+      "hitStrict": false,
+      "hitRelated": false,
       "rows": [
         {
-          "claimId": "c-7ed7c9cd",
+          "claimId": "c-19d45e1f",
           "related": false,
           "strict": false,
           "pending": false,
-          "overlap": 1,
-          "episode": "ep-f4e6c960"
+          "overlap": 0,
+          "episode": "ep-ad38cf8c"
         },
         {
-          "claimId": "c-5175f1dc",
-          "related": true,
-          "strict": true,
-          "pending": false,
-          "overlap": 2,
-          "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-87729e7c",
+          "claimId": "c-bd8e3fba",
           "related": false,
           "strict": false,
           "pending": false,
-          "overlap": 1,
-          "episode": "ep-28168c77"
+          "overlap": 0,
+          "episode": "ep-f46d6330"
         },
         {
-          "claimId": "c-4531a6d0",
+          "claimId": "c-2e4a3e07",
           "related": false,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-03bc3e53"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-f7f835b1"
         },
         {
-          "claimId": "c-fbe74d18",
-          "related": true,
-          "strict": true,
+          "claimId": "c-762f6c5d",
+          "related": false,
+          "strict": false,
           "pending": false,
-          "overlap": 13,
-          "episode": "ep-1286ce28"
+          "overlap": 0,
+          "episode": "ep-f7f835b1"
         }
       ]
     },
@@ -3578,36 +3628,86 @@
       ]
     },
     {
-      "itemId": "self:ep-0ef39d3a",
+      "itemId": "self:ep-2209a95a",
       "kind": "self",
-      "signalSource": "shortRootEntities",
-      "episode": "ep-0ef39d3a",
-      "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
-      "signal": "/profiles/desktop /tmp/dsh-index.html ERR_MODULE_NOT_FOUND(packageName, fileURLToPath(base), null)",
-      "expectedClaimIds": 9,
-      "rendered": 2,
-      "related": 1,
-      "strict": 1,
-      "pending": 1,
-      "unrelated": 0,
-      "hitStrict": true,
+      "signalSource": "shortRoot",
+      "episode": "ep-2209a95a",
+      "scopeKey": "w:d:/DeepSeek Harness/反代/wps",
+      "signal": "处理一下",
+      "expectedClaimIds": 5,
+      "rendered": 4,
+      "related": 3,
+      "strict": 0,
+      "pending": 0,
+      "unrelated": 1,
+      "hitStrict": false,
       "hitRelated": true,
       "rows": [
         {
-          "claimId": "c-d4977bf8",
-          "related": false,
+          "claimId": "c-7871dcf3",
+          "related": true,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-1e82afca"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-2209a95a"
         },
         {
-          "claimId": "c-b4d7bfb1",
+          "claimId": "c-5175f1dc",
           "related": true,
-          "strict": true,
+          "strict": false,
           "pending": false,
-          "overlap": 6,
-          "episode": "ep-0ef39d3a"
+          "overlap": 0,
+          "episode": "ep-00b50089"
+        },
+        {
+          "claimId": "c-d296e620",
+          "related": true,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-00b50089"
+        },
+        {
+          "claimId": "c-316934a7",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-1cf2b33f"
+        }
+      ]
+    },
+    {
+      "itemId": "self:ep-0ef39d3a",
+      "kind": "self",
+      "signalSource": "shortRoot",
+      "episode": "ep-0ef39d3a",
+      "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
+      "signal": "修一下是哪个插件的问题",
+      "expectedClaimIds": 9,
+      "rendered": 2,
+      "related": 0,
+      "strict": 0,
+      "pending": 0,
+      "unrelated": 2,
+      "hitStrict": false,
+      "hitRelated": false,
+      "rows": [
+        {
+          "claimId": "c-9fcfd507",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-e336b9dd"
+        },
+        {
+          "claimId": "c-a7d52330",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-1e82afca"
         }
       ]
     },
@@ -3833,7 +3933,7 @@
       "signalSource": "root",
       "episode": "ep-d512e747",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "https://github.com/411304344/opencode-cnb-account参考这个项目，以magpie脚手架仓库为根本，制作magpie插件，目标是cnb供应商",
+      "signal": "https://github.com/411304344/opencode-cnb-account参考这个项目，以magpie脚手架仓库为根本，制作magpie插件，目标是cnb供应商 s://github.com/411304344/op",
       "expectedClaimIds": 6,
       "rendered": 4,
       "related": 0,
@@ -3898,7 +3998,7 @@
           "related": false,
           "strict": false,
           "pending": true,
-          "overlap": 3,
+          "overlap": 10,
           "episode": "ep-0ef39d3a"
         },
         {
@@ -3906,7 +4006,7 @@
           "related": false,
           "strict": false,
           "pending": true,
-          "overlap": 4,
+          "overlap": 11,
           "episode": "ep-62b1cd78"
         },
         {
@@ -3914,7 +4014,7 @@
           "related": false,
           "strict": false,
           "pending": true,
-          "overlap": 3,
+          "overlap": 10,
           "episode": "ep-03bc3e53"
         },
         {
@@ -3988,58 +4088,58 @@
     {
       "itemId": "self:ep-bdd26050",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-bdd26050",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "/tmp/check.json /tmp/h2.txt Error: tool call timed out after 30000ms",
+      "signal": "处理一下",
       "expectedClaimIds": 5,
       "rendered": 5,
       "related": 1,
-      "strict": 1,
-      "pending": 4,
-      "unrelated": 0,
-      "hitStrict": true,
+      "strict": 0,
+      "pending": 0,
+      "unrelated": 4,
+      "hitStrict": false,
       "hitRelated": true,
       "rows": [
         {
-          "claimId": "c-d296e620",
-          "related": true,
-          "strict": true,
+          "claimId": "c-ef6c8e1b",
+          "related": false,
+          "strict": false,
           "pending": false,
-          "overlap": 3,
+          "overlap": 0,
+          "episode": "ep-1e82afca"
+        },
+        {
+          "claimId": "c-5175f1dc",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
           "episode": "ep-00b50089"
         },
         {
-          "claimId": "c-fbe74d18",
-          "related": false,
+          "claimId": "c-d296e620",
+          "related": true,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-1286ce28"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-00b50089"
         },
         {
-          "claimId": "c-2142b2d4",
+          "claimId": "c-2e17ebe4",
           "related": false,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-bc4ab3cb"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-9ce43a15"
         },
         {
-          "claimId": "c-00a2178a",
+          "claimId": "c-d64eff5f",
           "related": false,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-bc4ab3cb"
-        },
-        {
-          "claimId": "c-22b83bcb",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-22d3bd16"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-f7f835b1"
         }
       ]
     },
@@ -4072,52 +4172,19 @@
     {
       "itemId": "self:ep-685dfadb",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-685dfadb",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace",
-      "signal": "/api/plugin/list DSH-GO/.github/workflows/ci.yml KeyError: 'jobs'",
+      "signal": "这是什么情况？",
       "expectedClaimIds": 3,
-      "rendered": 4,
-      "related": 1,
-      "strict": 1,
+      "rendered": 0,
+      "related": 0,
+      "strict": 0,
       "pending": 0,
-      "unrelated": 3,
-      "hitStrict": true,
-      "hitRelated": true,
-      "rows": [
-        {
-          "claimId": "c-fbe74d18",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 0,
-          "episode": "ep-1286ce28"
-        },
-        {
-          "claimId": "c-d296e620",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 0,
-          "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-5175f1dc",
-          "related": false,
-          "strict": false,
-          "pending": false,
-          "overlap": 0,
-          "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-d24f41e4",
-          "related": true,
-          "strict": true,
-          "pending": false,
-          "overlap": 2,
-          "episode": "ep-685dfadb"
-        }
-      ]
+      "unrelated": 0,
+      "hitStrict": false,
+      "hitRelated": false,
+      "rows": []
     },
     {
       "itemId": "self:ep-3f03c71c",
@@ -4175,13 +4242,13 @@
       "signalSource": "root",
       "episode": "ep-5e91a1bc",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "\"F:\\Steamcommunity_302\\AGENTS.md\"根据这个修复一下github网络",
+      "signal": "\"F:\\Steamcommunity_302\\AGENTS.md\"根据这个修复一下github网络 f:\\steamcommunity_302\\agents.md agents.md",
       "expectedClaimIds": 2,
       "rendered": 5,
       "related": 0,
       "strict": 0,
-      "pending": 0,
-      "unrelated": 5,
+      "pending": 1,
+      "unrelated": 4,
       "hitStrict": false,
       "hitRelated": false,
       "rows": [
@@ -4189,8 +4256,8 @@
           "claimId": "c-34fef2f7",
           "related": false,
           "strict": false,
-          "pending": false,
-          "overlap": 1,
+          "pending": true,
+          "overlap": 3,
           "episode": "ep-25d39e67"
         },
         {
@@ -4288,108 +4355,116 @@
     {
       "itemId": "self:ep-6294ad9f",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-6294ad9f",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
-      "signal": "/gokifu/api /tmp/ctx.mjs Error: notIncludes: 声明正文里不许再有 compaction-basic",
+      "signal": "修一下",
       "expectedClaimIds": 2,
-      "rendered": 4,
+      "rendered": 5,
       "related": 0,
       "strict": 0,
-      "pending": 3,
-      "unrelated": 1,
+      "pending": 0,
+      "unrelated": 5,
       "hitStrict": false,
       "hitRelated": false,
       "rows": [
         {
-          "claimId": "c-fa559a36",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-5175f1dc",
+          "claimId": "c-4531a6d0",
           "related": false,
           "strict": false,
           "pending": false,
-          "overlap": 1,
+          "overlap": 0,
+          "episode": "ep-03bc3e53"
+        },
+        {
+          "claimId": "c-c6ddadd5",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-d70b7c2f"
+        },
+        {
+          "claimId": "c-d3c38fdd",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-0ef39d3a"
+        },
+        {
+          "claimId": "c-7ef2f75c",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-0ef39d3a"
+        },
+        {
+          "claimId": "c-d296e620",
+          "related": false,
+          "strict": false,
+          "pending": false,
+          "overlap": 0,
           "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-9df9ae3d",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-1286ce28"
-        },
-        {
-          "claimId": "c-4c2e49ea",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-1286ce28"
         }
       ]
     },
     {
       "itemId": "self:ep-25af318d",
       "kind": "self",
-      "signalSource": "shortRootEntities",
+      "signalSource": "shortRoot",
       "episode": "ep-25af318d",
       "scopeKey": "w:d:/DeepSeek Harness/反代",
-      "signal": "/tmp/e.txt /tmp/o.txt exit code 1",
+      "signal": "CNB模型报错",
       "expectedClaimIds": 3,
       "rendered": 5,
-      "related": 0,
+      "related": 1,
       "strict": 0,
-      "pending": 5,
-      "unrelated": 0,
+      "pending": 0,
+      "unrelated": 4,
       "hitStrict": false,
-      "hitRelated": false,
+      "hitRelated": true,
       "rows": [
         {
-          "claimId": "c-96a746f1",
+          "claimId": "c-9f3f19d5",
           "related": false,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-5e91a1bc"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-3f03c71c"
         },
         {
-          "claimId": "c-13f0ea15",
+          "claimId": "c-93e789f9",
           "related": false,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-1e82afca"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-bdd26050"
         },
         {
-          "claimId": "c-2e17ebe4",
+          "claimId": "c-3c861a8e",
           "related": false,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-9ce43a15"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-b4664e8f"
         },
         {
-          "claimId": "c-87a93382",
+          "claimId": "c-9fde1a8e",
           "related": false,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-00b50089"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-b4664e8f"
         },
         {
-          "claimId": "c-fb2c07af",
-          "related": false,
+          "claimId": "c-bb40eb0c",
+          "related": true,
           "strict": false,
-          "pending": true,
-          "overlap": 2,
-          "episode": "ep-d512e747"
+          "pending": false,
+          "overlap": 0,
+          "episode": "ep-25af318d"
         }
       ]
     },
@@ -4507,7 +4582,7 @@
       "signalSource": "root",
       "episode": "ep-821c88d9",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
-      "signal": "请依次调用 bash 执行 `uname -s`，再调用 web_search 查询 DeepSeek Harness 0.2.2 rc.1（只查询一次）。最后回复 BASH=<uname输出>；SEARCH=<成功或失败及原因>。",
+      "signal": "请依次调用 bash 执行 `uname -s`，再调用 web_search 查询 DeepSeek Harness 0.2.2 rc.1（只查询一次）。最后回复 BASH=<uname输出>；SEARCH=<成功或失败及原因>。 bas",
       "expectedClaimIds": 1,
       "rendered": 4,
       "related": 1,
@@ -4546,19 +4621,19 @@
           "related": false,
           "strict": false,
           "pending": true,
-          "overlap": 4,
+          "overlap": 5,
           "episode": "ep-c0a5847a"
         }
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:247",
+      "itemId": "repeat:ep-8a73e06b:256",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
-      "expectedClaimIds": 236,
+      "expectedClaimIds": 245,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -4578,13 +4653,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-9becea64:247",
+      "itemId": "repeat:ep-9becea64:256",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9becea64",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
-      "expectedClaimIds": 236,
+      "expectedClaimIds": 245,
       "rendered": 5,
       "related": 4,
       "strict": 4,
@@ -4636,13 +4711,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:332",
+      "itemId": "repeat:ep-8a73e06b:341",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
-      "expectedClaimIds": 299,
+      "expectedClaimIds": 308,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -4662,29 +4737,21 @@
       ]
     },
     {
-      "itemId": "repeat:ep-a09a4535:332",
+      "itemId": "repeat:ep-a09a4535:341",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
-      "expectedClaimIds": 299,
-      "rendered": 3,
+      "expectedClaimIds": 308,
+      "rendered": 2,
       "related": 2,
       "strict": 2,
-      "pending": 1,
+      "pending": 0,
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
       "rows": [
-        {
-          "claimId": "c-bcf4f97a",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 6,
-          "episode": "ep-0ef39d3a"
-        },
         {
           "claimId": "c-5175f1dc",
           "related": true,
@@ -4704,29 +4771,21 @@
       ]
     },
     {
-      "itemId": "repeat:ep-ed98c462:332",
+      "itemId": "repeat:ep-ed98c462:341",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-ed98c462",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
-      "expectedClaimIds": 299,
-      "rendered": 3,
+      "expectedClaimIds": 308,
+      "rendered": 2,
       "related": 2,
       "strict": 2,
-      "pending": 1,
+      "pending": 0,
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
       "rows": [
-        {
-          "claimId": "c-bcf4f97a",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 6,
-          "episode": "ep-0ef39d3a"
-        },
         {
           "claimId": "c-5175f1dc",
           "related": true,
@@ -4746,29 +4805,21 @@
       ]
     },
     {
-      "itemId": "repeat:ep-a09a4535:247",
+      "itemId": "repeat:ep-a09a4535:256",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: cannot write \"<path>\": file changed since it was read — re-read the file, then retry",
-      "expectedClaimIds": 236,
-      "rendered": 4,
+      "expectedClaimIds": 245,
+      "rendered": 3,
       "related": 3,
       "strict": 3,
-      "pending": 1,
+      "pending": 0,
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
       "rows": [
-        {
-          "claimId": "c-bcf4f97a",
-          "related": false,
-          "strict": false,
-          "pending": true,
-          "overlap": 6,
-          "episode": "ep-0ef39d3a"
-        },
         {
           "claimId": "c-6d74f391",
           "related": true,
@@ -4778,31 +4829,31 @@
           "episode": "ep-9becea64"
         },
         {
-          "claimId": "c-8d599212",
-          "related": true,
-          "strict": true,
-          "pending": false,
-          "overlap": 11,
-          "episode": "ep-1e82afca"
-        },
-        {
           "claimId": "c-5175f1dc",
           "related": true,
           "strict": true,
           "pending": false,
           "overlap": 9,
           "episode": "ep-00b50089"
+        },
+        {
+          "claimId": "c-8d599212",
+          "related": true,
+          "strict": true,
+          "pending": false,
+          "overlap": 11,
+          "episode": "ep-1e82afca"
         }
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:327",
+      "itemId": "repeat:ep-8a73e06b:337",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web ",
-      "expectedClaimIds": 302,
+      "expectedClaimIds": 312,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -4822,13 +4873,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-9d375d75:327",
+      "itemId": "repeat:ep-9d375d75:337",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9d375d75",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web ",
-      "expectedClaimIds": 302,
+      "expectedClaimIds": 312,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -4848,13 +4899,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-a09a4535:327",
+      "itemId": "repeat:ep-a09a4535:337",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web ",
-      "expectedClaimIds": 302,
+      "expectedClaimIds": 312,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -4874,13 +4925,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-e336b9dd:327",
+      "itemId": "repeat:ep-e336b9dd:337",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-e336b9dd",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web ",
-      "expectedClaimIds": 302,
+      "expectedClaimIds": 312,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -4984,13 +5035,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:204",
+      "itemId": "repeat:ep-8a73e06b:213",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "error: old_string was not found in \"<path>\"",
-      "expectedClaimIds": 204,
+      "expectedClaimIds": 213,
       "rendered": 2,
       "related": 2,
       "strict": 2,
@@ -5018,13 +5069,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-c0a5847a:247",
+      "itemId": "repeat:ep-c0a5847a:256",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-c0a5847a",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
       "signal": "error: this goal operation requires a direct human turn on a top-level agent",
-      "expectedClaimIds": 236,
+      "expectedClaimIds": 245,
       "rendered": 4,
       "related": 1,
       "strict": 1,
@@ -5068,13 +5119,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-e336b9dd:83",
+      "itemId": "repeat:ep-e336b9dd:84",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-e336b9dd",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: url hostname \"raw.githubusercontent.com\" resolves to a non-public ip address",
-      "expectedClaimIds": 83,
+      "expectedClaimIds": 84,
       "rendered": 4,
       "related": 1,
       "strict": 1,
@@ -5118,13 +5169,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-c0a5847a:204",
+      "itemId": "repeat:ep-c0a5847a:213",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-c0a5847a",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
       "signal": "json.decoder.jsondecodeerror: expecting value: line <line> column 1 (char 0)",
-      "expectedClaimIds": 204,
+      "expectedClaimIds": 213,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -5144,13 +5195,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:204",
+      "itemId": "repeat:ep-8a73e06b:213",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "sed: -e expression #<n>, char 1: unknown command: `,'",
-      "expectedClaimIds": 204,
+      "expectedClaimIds": 213,
       "rendered": 2,
       "related": 1,
       "strict": 1,
@@ -5204,13 +5255,13 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:259",
+      "itemId": "repeat:ep-8a73e06b:268",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "syntaxerror: missing ) after argument list at checksyntax (node:internal/main/check_syntax:<line>)",
-      "expectedClaimIds": 247,
+      "expectedClaimIds": 256,
       "rendered": 1,
       "related": 1,
       "strict": 1,
