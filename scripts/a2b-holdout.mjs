@@ -461,6 +461,15 @@ export function negativeControl({ store, exam, perItem = 3, signalMode = null } 
 /** 跑全套考卷（只读）。 */
 export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = null, cache = null, signalMode = null } = {}) {
   const walkCache = cache ?? createWalkCache(store);
+  // T286：**IDF 过滤器必须真的接上** —— `buildBigramDf` 之前定义了却从没被调用，
+  // 于是 `bigramFilter` 恒为 null ⇒ 过滤不生效，读数停在"不过滤"的 50.88%（含泛词水分）。
+  // 用**全库 claim** 统计 bigram 的 df；`maxDfRatio` 默认 0.02（三档对照见 evidence/T286-bigram-idf.md）。
+  const bigramFilter = (() => {
+    try {
+      const claims = (store.list('claims') ?? []).map((e) => e.record ?? e);
+      return buildBigramDf(claims);
+    } catch { return null; }
+  })();
   const results = [];
   for (const item of exam?.items ?? []) {
     const at = Number.isFinite(item.at) ? item.at : (Number.isFinite(now) ? now : Date.now());
@@ -477,7 +486,7 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
       continue;
     }
     // 判分必须用**该路自己的信号**（否则 task 臂会拿 B 的信号判分，口径就串了）
-    results.push(judgeCard({ card, store, item: { ...item, signal: text } }));
+    results.push(judgeCard({ card, store, item: { ...item, signal: text }, bigramFilter }));
   }
   const evaluated = results.filter((r) => !r.error);
   const strictHits = evaluated.filter((r) => r.hitStrict).length;
