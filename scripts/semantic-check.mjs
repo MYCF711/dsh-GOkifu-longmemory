@@ -56,6 +56,8 @@ export function episodeWindow(times) {
  */
 export function runSemanticChecks({ claims, timeIndexOf, tolerance = 0, nowWindow = null } = {}) {
   const out = { pass: 0, fail: 0, unverified: 0, buckets: {}, samples: [], checked: 0 };
+  // T277 · SI-6 用：全部可判定引用的 delta = support.occurredAt − events[seq].time
+  const deltas = [];
   const bump = (kind, row) => {
     out.fail += 1;
     out.buckets[kind] = (out.buckets[kind] ?? 0) + 1;
@@ -86,6 +88,7 @@ export function runSemanticChecks({ claims, timeIndexOf, tolerance = 0, nowWindo
         // SI-1 时间对齐（查不到该 seq 的时间 ⇒ unverified，不判红）
         if (!Number.isFinite(actual)) { out.unverified += 1; continue; }
         if (!Number.isFinite(declared)) { bump('SI-1-missing-occurredAt', { claimId: claim.id, episode, seq }); continue; }
+        deltas.push({ delta: declared - actual, claimId: claim.id, episode, seq });
         if (Math.abs(actual - declared) > tolerance) {
           bump('SI-1-time-mismatch', { claimId: claim.id, episode, seq, declared, actual, deltaMs: actual - declared }); continue;
         }
@@ -126,6 +129,33 @@ export function runSemanticChecks({ claims, timeIndexOf, tolerance = 0, nowWindo
       }
     }
   }
+  // ── SI-6 · 偏移分布的"竖线"检测（T277）────────────────────────────────
+  // 系统性错误给一条竖线（delta 全等于同一常数），随机错误给分散残差。
+  // 判据：可判定引用数 ≥ MIN_SI6_N 且**同一 delta 的占比 ≥ 0.8** 且 |delta| > 1ms（排除容差噪声）⇒ 系统性偏移。
+  // delta ≈ 0 的竖线是"大家都取对了"，不报。
+  const MIN_SI6_N = 5;
+  const SHARE = 0.8;
+  const stats = { n: deltas.length, constant: null, share: 0, top: [] };
+  if (deltas.length >= MIN_SI6_N) {
+    const freq = new Map();
+    for (const d of deltas) {
+      const key = Math.round(d.delta); // 1ms 容差桶
+      freq.set(key, (freq.get(key) ?? 0) + 1);
+    }
+    const sorted = [...freq.entries()].sort((a, b) => b[1] - a[1]);
+    const [topDelta, topCount] = sorted[0];
+    const share = topCount / deltas.length;
+    stats.constant = topDelta;
+    stats.share = Number(share.toFixed(4));
+    stats.top = sorted.slice(0, 3).map(([delta, count]) => ({ delta, count }));
+    if (share >= SHARE && Math.abs(topDelta) > 1) {
+      out.fail += 1;
+      out.buckets['SI-6-systematic-offset'] = 1;
+      const sample = deltas.find((d) => Math.round(d.delta) === topDelta);
+      if (out.samples.length < 5) out.samples.push({ kind: 'SI-6-systematic-offset', claimId: sample?.claimId, episode: sample?.episode, seq: sample?.seq, delta: topDelta, share: Number(share.toFixed(4)), n: deltas.length });
+    }
+  }
+  out.si6 = stats;
   return out;
 }
 
@@ -191,6 +221,7 @@ export function runCli(argv = process.argv.slice(2)) {
   lines.push(`抽样 ${claims.length}/${payload.total} 条 · 检查引用 ${res.checked} 处 · 容差 ${flags.tolerance} ms`);
   lines.push(`  pass ${res.pass} · fail ${res.fail} · unverified ${res.unverified}`);
   for (const [k, v] of Object.entries(res.buckets)) lines.push(`  ✗ ${k}: ${v}`);
+  if (res.si6) lines.push(`  SI-6 偏移分布：n=${res.si6.n} · 众数 delta=${res.si6.constant ?? 'n/a'} ms · 占比 ${(res.si6.share * 100).toFixed(1)}% · top ${JSON.stringify(res.si6.top)}`);
   for (const s of res.samples) lines.push(`    · ${s.kind} ${s.claimId} @ ${s.episode} seq ${s.seq}${s.declared !== undefined ? `（声明 ${s.declared} vs 事件 ${s.actual}，Δ ${s.deltaMs} ms）` : ''}`);
   lines.push(`结论：${verdict === 'pass' ? 'pass' : 'fail（含 unverified）'}`);
   return { code: verdict === 'pass' ? 0 : 1, stdout: lines.join('\n') };
