@@ -27,7 +27,7 @@ const userMessage = (seq, text) => ({
   type: 'user/message',
   seq,
   time: T0 + seq * 1000,
-  data: { content: [{ type: 'text', text }] },
+  data: { source: { kind: 'user' }, role: 'user', content: [{ type: 'text', text }] },
 });
 const failureEdge = (id, filePath, errorSnippet = ERROR_TEXT, ts = T0 + 500) => ({
   id,

@@ -30,6 +30,7 @@ import {
   SOFT_KINDS,
   CJK_STOPWORDS,
   EN_STOPWORDS,
+  collectRootUserTexts,
 } from '../src/rooms/topic.mjs';
 
 const CWD = 'D:\\work\\demo';
@@ -52,7 +53,20 @@ const userMessage = (seq, text, time = 1_700_000_000_000 + seq) => ({
   type: 'user/message',
   seq,
   time,
-  data: { content: [{ type: 'text', text }] },
+  // 形状与真日志一致（T245）：`data.role` + `data.source.kind` 都在。
+  // 缺了它们就是"来源不明"——R03/R04 都按 fail-closed 处理（判据见 `R04: 注入卡不当根用户` 那组用例）。
+  data: { content: [{ type: 'text', text }], role: 'user', source: { kind: 'user' } },
+});
+
+/**
+ * 注入卡事件：形状逐字取自真日志（T244 实测 628 条）——
+ * `type:"user/message"` + `role:"user"`，唯一区别是 `data.source.kind === "dsh-gokifu-longmemory"`。
+ */
+const cardMessage = (seq, text = 'MEMORY: …\n<memory-ledger>\n- [observed] 产品目标是记忆系统。\n</memory-ledger>', time = 1_700_000_000_000 + seq) => ({
+  type: 'user/message',
+  seq,
+  time,
+  data: { content: [{ type: 'text', text }], role: 'user', source: { kind: 'dsh-gokifu-longmemory' } },
 });
 
 function episodeA() {
@@ -308,4 +322,64 @@ test('T233/F1-③: end 与 start 相同 ⇒ 不重复、不崩', () => {
   const occ = failureOcc(failureEpisode({ start: 4400, end: 4400 }));
   assert.equal(occ.length, 1, '同一 (edgeId, quote) 只记一次');
   assert.equal(occ[0].seq, 4400);
+});
+
+/* ── 自证污染：注入卡不得当根用户（T245）────────────────────────
+ * 判据：`data.source.kind === "user"`（与 R03 的 `isUserMessage` 同口径）。
+ * 为什么不能只看 `type`：注入卡也是 `user/message` + `role:"user"`，只看 type 会让
+ * "卡恰好排在第一"时把卡当成根用户原话 —— 当前 730 局没出事，纯靠"卡不在首位"。
+ */
+
+test('R04: 注入卡排在首位 ⇒ 不当根用户（取后面那条真用户消息）', () => {
+  const roots = collectRootUserTexts({
+    events: [
+      cardMessage(1),
+      userMessage(2, '真实任务：把记忆卡排除在语料之外。'),
+    ],
+    graph: null,
+  });
+  assert.equal(roots.length, 1, '只认一条根用户消息');
+  assert.equal(roots[0].seq, 2, '跳过卡（seq 1），取真用户消息（seq 2）');
+  assert.ok(!roots[0].text.includes('<memory-ledger>'), '根用户文本里不许出现卡');
+  assert.ok(!roots[0].text.includes('MEMORY: '), '卡前言也不许进来');
+});
+
+test('R04: 真用户消息在首位 ⇒ 照常抽取（golden：文本与 seq 不变）', () => {
+  const roots = collectRootUserTexts({
+    events: [
+      userMessage(1, '任务：实现 link 相关边。记忆系统要把棋谱写进同一张网。'),
+      cardMessage(2),
+    ],
+    graph: null,
+  });
+  assert.equal(roots.length, 1);
+  assert.equal(roots[0].seq, 1);
+  assert.equal(roots[0].text, '任务：实现 link 相关边。记忆系统要把棋谱写进同一张网。');
+});
+
+test('R04: 只有卡、没有真用户消息 ⇒ 根用户为空（fail-closed，不拿卡顶替）', () => {
+  const roots = collectRootUserTexts({ events: [cardMessage(1), cardMessage(2)], graph: null });
+  assert.deepEqual(roots, [], '宁可没有根用户，也不把注入卡当用户原话');
+});
+
+test('R04: 老事件没有 source.kind ⇒ 按 role==="user" 兜底（兼容旧日志）', () => {
+  const legacy = {
+    type: 'user/message',
+    seq: 3,
+    time: 1_700_000_000_003,
+    data: { role: 'user', content: [{ type: 'text', text: '必须只读' }] },
+  };
+  const roots = collectRootUserTexts({ events: [legacy], graph: null });
+  assert.equal(roots.length, 1);
+  assert.equal(roots[0].text, '必须只读');
+});
+
+test('R04: 来源不明（无 source.kind 且无 role）⇒ 不作根用户（fail-closed）', () => {
+  const bare = {
+    type: 'user/message',
+    seq: 4,
+    time: 1_700_000_000_004,
+    data: { content: [{ type: 'text', text: '必须只读' }] },
+  };
+  assert.deepEqual(collectRootUserTexts({ events: [bare], graph: null }), []);
 });
