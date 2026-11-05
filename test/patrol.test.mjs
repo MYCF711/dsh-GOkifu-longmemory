@@ -49,3 +49,36 @@ test('patrol: 空输入不炸（没装 store 的机器上也能跑）', () => {
   const empty = parseAudit('');
   assert.equal(empty.refs, null);
 });
+
+// ---------------------------------------------------------------- T250（主判据进巡检）
+//
+// 巡检以前没有 A2b 行 —— 主人改判后它是**第一验收面**，看不到就等于没有。
+// 数据只读 `metrics-guard --json` 的结果（阈值/红绿/样本来源全不由 patrol 决定）。
+
+import { a2bRowOf } from '../scripts/patrol.mjs';
+
+test('T250 ①: 正常 JSON ⇒ 一行主判据（带 n 与 sampleSource）', () => {
+  const row = a2bRowOf(JSON.stringify({ ok: true, values: { a2bStrict: 0.3426, a2bCover: 0.6852, a2bN: 108, sampleSource: 'holdout' } }));
+  assert.equal(row.ok, true);
+  assert.match(row.text, /^\| 主判据 A2b \| /);
+  assert.match(row.text, /n=108/);
+  assert.match(row.text, /holdout/);
+  assert.match(row.text, /34\.3%/);
+  assert.match(row.text, /68\.5%/);
+});
+
+test('T250 ②: metrics-guard 判红 ⇒ patrol 该行也红，并带原因（不重写阈值）', () => {
+  const row = a2bRowOf(JSON.stringify({ ok: false, fails: ['A2b 严格 0.3 < 0.3426（sampleSource=holdout n=108）'], values: { a2bStrict: 0.3, a2bCover: 0.5, a2bN: 108, sampleSource: 'holdout' } }));
+  assert.equal(row.ok, false);
+  assert.match(row.text, /\*\*要看\*\*/);
+  assert.match(row.text, /A2b 严格 0\.3/, '原因要原样带出来');
+});
+
+test('T250 ③: 拿不到 JSON ⇒ fail-closed（显示 **要看**，不静默略过）', () => {
+  for (const bad of ['', 'not json', null, undefined]) {
+    const row = a2bRowOf(bad);
+    assert.equal(row.ok, false, `输入 ${String(bad)} 必须 fail-closed`);
+    assert.match(row.text, /\*\*要看\*\*/);
+    assert.match(row.text, /fail-closed/);
+  }
+});

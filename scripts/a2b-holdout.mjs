@@ -206,6 +206,20 @@ export function buildExam({ store, home = defaultHome(), minSignalChars = 12, in
       const raw = (rootText || firstUser || fallback || '').trim();
       if (raw) { finalSignal = raw; signalSource = 'shortRoot'; }
     }
+    // ── T249：短信号换成"该局的硬实体信号" ──────────────────────────────────
+    // 为什么：任务原话 <12 字（「处理一下」「继续」）时，任何检索都不可能命中 —— 这是
+    // **信号源不够**，不是检索差（T249 实测：11 条里 9 条换成实体信号后能严格命中）。
+    // 做法：取该局棋谱主题里的 file×2 + tool×2 + error×1 作为信号（机械、可复现、不带模型判断）；
+    // 仍保留 taskText 供追溯，signalSource 改记为 shortRootEntities，便于分桶统计。
+    const taskText = finalSignal;
+    if (signalSource === 'shortRoot') {
+      const topics = Array.isArray(episode?.topics) ? episode.topics : [];
+      const pickKeys = (kind, n) => topics.filter((t) => t && t.kind === kind && typeof t.key === 'string').map((t) => t.key).slice(0, n);
+      // 只用**file×2 + error×1**：通用工具名（bash/cat/cd/awk）会让"判别词 ≥2"这条被高频词灌水
+      // （T249 实测：带上 tool 后 11 条多命中 1 条，但对照组判别词误判从 6.06% 涨到 16.67%）。
+      const entitySignal = [...pickKeys('file', 2), ...pickKeys('error', 1)].join(' ').trim();
+      if (entitySignal) { finalSignal = entitySignal; signalSource = 'shortRootEntities'; }
+    }
     if (!finalSignal) { skipped.push({ episode: episodeId, why: `no-signal(root=${rootText.length},firstUser=${firstUser.length},fallback=${fallback.length})` }); continue; }
     items.push({
       id: `self:${episodeId}`,
@@ -213,6 +227,7 @@ export function buildExam({ store, home = defaultHome(), minSignalChars = 12, in
       episode: episodeId,
       scopeKey: typeof episode.scopeKey === 'string' ? episode.scopeKey : null,
       signal: finalSignal,
+      taskText,
       at: Number.isFinite(episode.endedAt) ? episode.endedAt : (Number.isFinite(episode.lastEventAt) ? episode.lastEventAt : null),
       expected: { episodes: [episodeId], claimIds: claimIds.slice() },
       signalSource,

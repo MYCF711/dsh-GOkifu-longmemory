@@ -57,6 +57,33 @@ export function parseAudit(text) {
   };
 }
 
+/**
+ * T250：**主判据 A2b** 的巡检行。
+ *
+ * 数据来源是 `metrics-guard.mjs --json` 的输出（`ok / fails / values.{a2bStrict,a2bCover,a2bN,sampleSource}`），
+ * **本文件不重写任何阈值** —— 红/绿、样本来源、n 全部由 metrics-guard 决定，patrol 只负责显示。
+ * fail-closed：拿不到 JSON（进程挂了/输出不是 JSON）⇒ 该行显示 `**要看**` 并带原因，绝不静默略过。
+ *
+ * @param {string|null} guardStdout metrics-guard --json 的 stdout
+ * @returns {{text:string, ok:boolean}}
+ */
+export function a2bRowOf(guardStdout) {
+  const raw = String(guardStdout ?? '').trim();
+  let out = null;
+  try { out = JSON.parse(raw); } catch { out = null; }
+  if (!out || typeof out !== 'object') {
+    return { ok: false, text: '| 主判据 A2b | 拿不到 metrics-guard 的输出（fail-closed） | **要看** |' };
+  }
+  const v = out.values ?? {};
+  const pct = (x) => (Number.isFinite(x) ? (x * 100).toFixed(1) + '%' : 'n/a');
+  const n = Number.isFinite(v.a2bN) ? v.a2bN : '?';
+  const source = v.sampleSource ?? 'report';
+  const body = '严格 ' + pct(v.a2bStrict) + '（n=' + n + ' · ' + source + '）· 覆盖 ' + pct(v.a2bCover);
+  if (out.ok === true) return { ok: true, text: '| 主判据 A2b | ' + body + ' | 通过 |' };
+  const reasons = Array.isArray(out.fails) && out.fails.length ? out.fails.join('；') : '未通过（无原因字符串）';
+  return { ok: false, text: '| 主判据 A2b | ' + body + ' | **要看**：' + reasons + ' |' };
+}
+
 export function verdictOf(audit) {
   const problems = [];
   if (audit.crossScope > 0) problems.push(`跨作用域 ${audit.crossScope} 条（A5 必须 0）`);
@@ -71,24 +98,25 @@ const auditRun = run([path.join(REPO, 'scripts', 'audit-card-samples.mjs'), '--c
 const audit = parseAudit(auditRun.out);
 const verdict = verdictOf(audit);
 
-let guard = null;
-if (process.argv.includes('--full')) {
-  const g = run([path.join(REPO, 'scripts', 'metrics-guard.mjs')]);
-  guard = { ok: g.ok && /metrics-guard PASS/.test(g.out), line: (g.out.split('\n').find((l) => /metrics-guard/.test(l)) ?? '').trim() };
-}
+// T250：**主判据（A2b 召回相关度）默认就跑** —— 它是第一验收面，不该只挂在 --full 上。
+// 只读 metrics-guard 的判定结果（--json），阈值一律不在本文件出现。
+const guardRun = run([path.join(REPO, 'scripts', 'metrics-guard.mjs'), '--json']);
+const a2b = a2bRowOf(guardRun.out);
 
 const lines = [
   `# 巡检 ${day} ${clock}`,
   '',
   '| 项 | 读数 | 判定 |',
   '|---|---|---|',
+  a2b.text, // T250：主判据永远第一行
   `| A3 心跳 | inject=${stats.inject ?? '?'} · skip=${stats.skip ?? '?'} · gates-failed=${stats.gatesFailed ?? '?'} | ${stats.inject > 0 ? '通过' : '无注入（查是否没信号）'} |`,
   `| A5 跨作用域 | ${audit.crossScope ?? '?'} | ${audit.crossScope === 0 ? '通过' : '**最高优先级**'} |`,
   `| A6 文字层 | ok ${audit.atSeq ?? '?'}/${audit.refs ?? '?'} · offset ${audit.elsewhere ?? 0} · notFound ${audit.missing ?? '?'} · unreadable ${audit.unreadable ?? 0} · 日期 ${audit.dateOk ?? '?'}/${audit.refs ?? '?'} | ${verdict.ok ? '通过' : '**要看**'} |`,
   `| 样本 | ${audit.samples ?? '?'} 张（当前宿主 pid=${audit.pid ?? '?'}） | — |`,
-  ...(guard ? [`| 六轴闸 | ${guard.line || '（无输出）'} | ${guard.ok ? '通过' : '**红了**'} |`] : []),
   '',
-  verdict.ok ? '结论：三项体检全绿。' : `结论：需要处理 —— ${verdict.problems.join('；')}。`,
+  (verdict.ok && a2b.ok)
+    ? '结论：三项体检 + 主判据（A2b）全绿。'
+    : `结论：需要处理 —— ${[a2b.ok ? null : '主判据 A2b 红了', ...verdict.problems].filter(Boolean).join('；')}。`,
   '',
   `命令：\`node scripts/patrol.mjs${process.argv.includes('--full') ? ' --full' : ''}\``,
 ].join('\n');
