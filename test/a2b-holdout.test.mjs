@@ -11,7 +11,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  bigramOverlapCount,
   buildExam,
+  chineseBigrams,
   compareSignalModes,
   claimsByEpisode,
   discriminativeTokens,
@@ -287,4 +289,40 @@ test('T264 ③ 原话里没有实体 ⇒ B 路 == A 路（不许凭空造信号�
   assert.equal(it.taskEntities.length, 0);
   assert.ok(it.signals.postHoc.includes('src/post-hoc.ts'), 'C 路仍可含事后实体（仅对照）');
   fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+// ── T284：中文二元组 ─────────────────────────────────────────────────────────
+
+test('T284 ① 中文 bigram：「反代插件卷」vs 卡上「反代插件」能认出重合（旧 includes 认不出）', () => {
+  const signal = '反代插件卷的问题';
+  const claim = '反代插件的路由不生效';
+  // 旧口径：整段当一个 token ⇒ includes 不命中
+  assert.equal(overlapCount(signal, claim) >= 2, false, '旧口径不应命中');
+  // 新口径：bigram 滑窗
+  const bg = bigramOverlapCount(signal, claim);
+  assert.ok(bg >= 2, `bigram 应 ≥2，实际 ${bg}：${JSON.stringify([...chineseBigrams(signal)])}`);
+  assert.equal(judgeStrict({ related: true, overlap: 0, shared: [], bigram: bg }), true, '并集判据应判严格命中');
+});
+
+test('T284 ② 完全无关的中文 ⇒ 不重合', () => {
+  const signal = '反代插件卷的问题';
+  const claim = '今天天气不错，适合出去走走';
+  assert.equal(bigramOverlapCount(signal, claim), 0);
+  assert.equal(judgeStrict({ related: true, overlap: 0, shared: [], bigram: 0 }), false);
+});
+
+test('T284 ③ 误判不升：bigram 路径在无关样本上的命中率 ≤ 原判别词路径的历史基线', () => {
+  // 无关对：两个毫无共享 bigram 的中文串 ⇒ 0；共享 1 个 bigram ⇒ 不到门槛（≥2）
+  assert.equal(bigramOverlapCount('反代插件卷的问题', '插件的配置'), 1, '只共享「插件」1 个 bigram');
+  assert.equal(judgeStrict({ related: true, overlap: 0, shared: [], bigram: 1 }), false, '1 个 bigram 不够');
+  // 英文/路径仍走原判别词路径（不许因为中文改动而放松）
+  assert.equal(judgeStrict({ related: true, overlap: 0, shared: [], bigram: 99 }), true);
+  assert.equal(judgeStrict({ related: false, overlap: 99, shared: ['x'], bigram: 99 }), false, 'related 定义一字未动');
+});
+
+test('T284 ④ chineseBigrams：中文 2 字滑窗 + 英文/数字保原样', () => {
+  const b = chineseBigrams('反代插件 abc.ts');
+  assert.ok(b.has('反代') && b.has('代插') && b.has('插件'), JSON.stringify([...b]));
+  assert.ok(b.has('abc.ts'), '英文/路径保持原样');
+  assert.equal(b.has('反代插'), false, '不是 3 字窗');
 });

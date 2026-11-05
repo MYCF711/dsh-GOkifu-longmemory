@@ -44,6 +44,33 @@ export function discriminativeTokens(text) {
   return String(text ?? '').toLowerCase().split(/[^a-z0-9一-鿿]+/).filter((t) => t.length >= 4 && t !== 'path');
 }
 
+/**
+ * T284：中文二元组。中文连续段按 **2 字滑窗**切 bigram；英文/数字/路径保持原样。
+ * 为什么：中文整段被当一个 token 时，`includes` 几乎不可能命中（T281：B 类 overlap 分布 {0:24,1:4,3:1}），
+ * 尺子把"明明相关"的卡判成不相关。bigram 是语言中立的机械切法，不含模型判断。
+ */
+export function chineseBigrams(text) {
+  const out = new Set();
+  const src = String(text ?? '');
+  // 中文连续段：2 字滑窗
+  for (const run of src.match(/[一-鿿]+/g) ?? []) {
+    for (let i = 0; i + 2 <= run.length; i += 1) out.add(run.slice(i, i + 2));
+  }
+  // 英文/数字/路径：保持原样（按非词字符切，长度 ≥3）
+  for (const tok of src.toLowerCase().split(/[^a-z0-9_./-]+/)) {
+    if (tok.length >= 3) out.add(tok);
+  }
+  return out;
+}
+
+/** 判别性 bigram 重合数：信号的 bigram 在 claim 文本里出现了几个。 */
+export function bigramOverlapCount(signalText, claimText) {
+  const hay = String(claimText ?? '').toLowerCase();
+  let n = 0;
+  for (const bg of chineseBigrams(signalText)) if (hay.includes(bg)) n += 1;
+  return n;
+}
+
 /** 词重合数（同一套判别词口径）。 */
 export function overlapCount(signalText, claimText) {
   const tokens = discriminativeTokens(signalText);
@@ -101,9 +128,10 @@ export function sharedHardEntities(signalText, claimText) {
  *   strict ⇔ related **且**（≥minOverlap 个判别词重合 **或** ≥1 个硬实体重合）
  * `related` 的定义（support.episode === 该局）**一字不动** —— 那是 ground truth。
  */
-export function judgeStrict({ related, overlap, shared, minOverlap = 2 }) {
+export function judgeStrict({ related, overlap, shared, bigram = 0, minOverlap = 2 }) {
   if (!related) return false;
-  return overlap >= minOverlap || (Array.isArray(shared) && shared.length >= 1);
+  // T284：并集 —— 英文/路径照旧走判别词；中文走 bigram；硬实体桥不变。
+  return overlap >= minOverlap || bigram >= minOverlap || (Array.isArray(shared) && shared.length >= 1);
 }
 
 /** Wilson 95% 区间（与 merge-acceptance 同公式，避免口径漂移）。 */
@@ -313,6 +341,8 @@ export function judgeCard({ card, store, item, minOverlap = 2 } = {}) {
   const rows = [];
   let related = 0;
   let strict = 0;
+  let strictTokensOnly = 0;
+  let bigramOnly = 0;
   let pending = 0;
   let unrelated = 0;
   for (const row of Array.isArray(card?.claims) ? card.claims : []) {
@@ -322,13 +352,20 @@ export function judgeCard({ card, store, item, minOverlap = 2 } = {}) {
     const supportEps = (Array.isArray(record?.support) ? record.support : []).map((s) => String(s?.episode ?? ''));
     const isRelated = supportEps.some((ep) => expectedEpisodes.has(ep)) || expectedIds.has(claimId);
     const overlap = overlapCount(item?.signal ?? '', record?.text ?? '');
-    const isStrict = isRelated && overlap >= minOverlap;
-    const isPending = !isRelated && overlap >= minOverlap;
+    const bigram = bigramOverlapCount(item?.signal ?? '', record?.text ?? '');
+    const shared = sharedHardEntities(item?.signal ?? '', record?.text ?? '');
+    // T284：并集 —— 判别词 ≥2（英文/路径）或 **bigram ≥2（中文）** 或 硬实体 ≥1
+    const isStrict = isRelated && (overlap >= minOverlap || bigram >= minOverlap || shared.length >= 1);
+    const isStrictTokens = isRelated && overlap >= minOverlap;                   // 旧判据（对照）
+    const isStrictBigram = isRelated && bigram >= minOverlap && overlap < minOverlap; // 仅靠 bigram 才成立
+    const isPending = !isRelated && (overlap >= minOverlap || bigram >= minOverlap);
     if (isRelated) related += 1;
     if (isStrict) strict += 1;
+    if (isStrictTokens) strictTokensOnly += 1;
+    if (isStrictBigram) bigramOnly += 1;
     if (isPending) pending += 1;
     if (!isRelated && !isPending) unrelated += 1;
-    rows.push({ claimId, related: isRelated, strict: isStrict, pending: isPending, overlap, episode: supportEps[0] ?? null });
+    rows.push({ claimId, related: isRelated, strict: isStrict, strictTokens: isStrictTokens, strictByBigramOnly: isStrictBigram, pending: isPending, overlap, bigram, shared, episode: supportEps[0] ?? null });
   }
   return {
     itemId: item?.id ?? null,
@@ -341,6 +378,8 @@ export function judgeCard({ card, store, item, minOverlap = 2 } = {}) {
     rendered: rows.length,
     related,
     strict,
+    strictTokens: strictTokensOnly,
+    strictByBigramOnly: bigramOnly,
     pending,
     unrelated,
     hitStrict: strict > 0,
