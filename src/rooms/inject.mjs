@@ -498,6 +498,11 @@ function pickSourceBySignal(support, { signalTokens = [], currentSeq = null, fal
 }
 
 function entryFromClaim(hit, claim, options = {}) {
+  // T252（2026-11-05）：`invalidated` 的 claim 一律不渲染。
+  // walk 的候选集早已剔除它（`dropped.invalidated`），但 hit 自带 claim 对象、
+  // 或 hit 直接点名 claimId 的**旁路**会绕过那道过滤 —— 这里在渲染入口再堵一次。
+  // stale / disputed **不在此列**：它们仍进卡并带各自 marker（有信息量）。
+  if (claim && claim.state === 'invalidated') return null;
   // 2026-11-04（M4 线上抽查发现）：u:owner 类级 claim 的 support 跨多个工作区，
   // 直接取 support[0] 会把"别项目的失败原文 + ep"渲染进本项目的卡（A5 的实质越界）。
   // 这里只选**同作用域**的 support；同作用域一条都没有 ⇒ 不渲染（返回 null）。
