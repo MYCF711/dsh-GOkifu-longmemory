@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.22（2026-11-05）
+
+### 巡检接入语义不变量（T269）
+`patrol.mjs` 新增 `semanticRowOf(stdout, exitCode)`：**只读** semantic-check 的输出与 exit code，**不重写任何 SI 判据**。
+排在 A6 之后；失败带 SI 类型分桶 + **首例 claimId**；**超时 120s**（超时记 unverified 不卡死）；输出不是 JSON ⇒ 红（fail-closed）。
+
+**当场抓到一条真问题**：`pass 35 · fail 1（SI-5-missing-toOccurredAt · 首例 c-00a2178a）`。
+**整轮 52.98 秒**（加这一步只多约 8 秒）。
+
+### T270：那条 `notFound 1` 不是新产生的
+`c-39b8ac53`（`ep-226dbf4f` seq 3670）—— **2026-11-03 就记录了**，T230 已诊断过同一条。
+归因：**D（`[stderr]` 被吞）+ C（200 字截断 + `…`）**；
+`support.episode/seq/occurredAt` 都是对的，**坏的是"引文不是逐字原文"** ⇒ **不需要紧急处理**。
+
+### 验证
+12 条 patrol 测试全绿；`check PASS`（58 篇）。
+
 ## 0.2.21（2026-11-05）
 
 ### 真实消息语料采集 + T267 收益复算器（T268）

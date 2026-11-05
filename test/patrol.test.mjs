@@ -2,7 +2,7 @@
 // 钉住三件事：心跳行解析（gates-failed 在「原因」行）、审计摘要解析、判定规则（A5/A6/日期）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLiveStats, parseAudit, verdictOf } from '../scripts/patrol.mjs';
+import { parseLiveStats, parseAudit, verdictOf, semanticRowOf } from '../scripts/patrol.mjs';
 
 const LIVE = [
   '共 100 行 · 2026/11/4 10:00 → 2026/11/4 23:00 · shadow 0 行',
@@ -81,4 +81,41 @@ test('T250 ③: 拿不到 JSON ⇒ fail-closed（显示 **要看**，不静默�
     assert.match(row.text, /\*\*要看\*\*/);
     assert.match(row.text, /fail-closed/);
   }
+});
+
+// ── T269：语义不变量（SI）接进巡检 ───────────────────────────────────────────
+test('T269 ①: pass ⇒ 通过（带 pass/fail/unverified 三项计数）', () => {
+  const r = semanticRowOf(JSON.stringify({ pass: 38, fail: 0, unverified: 0, buckets: {}, samples: [] }), 0);
+  assert.equal(r.ok, true);
+  assert.match(r.text, /语义不变量/);
+  assert.match(r.text, /pass 38 · fail 0 · unverified 0/);
+  assert.match(r.text, /通过/);
+});
+
+test('T269 ②: fail ⇒ **要看** 且带 SI 类型与首例 claimId', () => {
+  const payload = { pass: 36, fail: 2, unverified: 0, buckets: { 'SI-5-missing-toOccurredAt': 1, 'SI-4-claim-time-out-of-window': 1 }, samples: [{ claimId: 'c-00a2178a', kind: 'SI-5-missing-toOccurredAt' }] };
+  const r = semanticRowOf(JSON.stringify(payload), 1);
+  assert.equal(r.ok, false);
+  assert.match(r.text, /\*\*要看\*\*/);
+  assert.match(r.text, /SI-5-missing-toOccurredAt 1/);
+  assert.match(r.text, /c-00a2178a/);
+});
+
+test('T269 ③: unverified > 0 ⇒ 也要看（fail-closed）', () => {
+  const r = semanticRowOf(JSON.stringify({ pass: 0, fail: 0, unverified: 3, buckets: {}, samples: [] }), 1);
+  assert.equal(r.ok, false);
+  assert.match(r.text, /unverified 3/);
+});
+
+test('T269 ④: 超时/杀进程（exitCode=null）⇒ **要看** 且写明超时', () => {
+  const r = semanticRowOf('', null);
+  assert.equal(r.ok, false);
+  assert.match(r.text, /超时/);
+  assert.match(r.text, /\*\*要看\*\*/);
+});
+
+test('T269 ⑤: 输出不是 JSON ⇒ 红（绝不静默略过）', () => {
+  const r = semanticRowOf('boom', 2);
+  assert.equal(r.ok, false);
+  assert.match(r.text, /拿不到 semantic-check 的输出/);
 });
