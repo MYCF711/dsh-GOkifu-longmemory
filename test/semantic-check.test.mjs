@@ -92,3 +92,39 @@ test('T272 ③: claim.occurredAt 晚于所有 support ⇒ 红（首次发生不�
   });
   assert.equal(r.buckets['SI-4b-claim-after-support'], 1);
 });
+
+// ── T277：SI-6 偏移分布的"竖线"检测 ─────────────────────────────────────────
+const mkRef = (i, delta) => ({ id: `c-${i}`, occurredAt: 1_000_000 + delta, support: [{ episode: 'ep-1', seq: 10 + i, occurredAt: 1_000_000 + delta }] });
+
+test('T277 ①: delta 全 = +4ms ⇒ 红（系统性偏移，报常数与占比）', () => {
+  const events = Array.from({ length: 6 }, (_, i) => T(10 + i, 1_000_000));
+  const claims = Array.from({ length: 6 }, (_, i) => mkRef(i, 4));
+  const r = runSemanticChecks({ claims, timeIndexOf: idx(events), tolerance: 10 });
+  assert.equal(r.buckets['SI-6-systematic-offset'], 1, '竖线必须报');
+  assert.equal(r.si6.constant, 4, '常数 = +4ms');
+  assert.equal(r.si6.share, 1, '占比 100%');
+});
+
+test('T277 ②: delta 全 0 ⇒ 绿（大家都取对了，不是系统性取错）', () => {
+  const events = Array.from({ length: 6 }, (_, i) => T(10 + i, 1_000_000));
+  const claims = Array.from({ length: 6 }, (_, i) => mkRef(i, 0));
+  const r = runSemanticChecks({ claims, timeIndexOf: idx(events) });
+  assert.equal(r.fail, 0);
+  assert.equal(r.buckets['SI-6-systematic-offset'], undefined);
+});
+
+test('T277 ③: delta 随机分散 ⇒ 绿（随机噪声不是系统性 bug）', () => {
+  const deltas = [0, 3, -2, 7, -5, 11];
+  const events = Array.from({ length: 6 }, (_, i) => T(10 + i, 1_000_000));
+  const claims = deltas.map((d, i) => mkRef(i, d));
+  const r = runSemanticChecks({ claims, timeIndexOf: idx(events), tolerance: 100 });
+  assert.equal(r.buckets['SI-6-systematic-offset'], undefined, '分散残差不许报');
+  assert.equal(r.si6.share < 0.8, true, `占比 ${r.si6.share} 应 < 0.8`);
+});
+
+test('T277 ④: 1ms 噪声（全 = +1ms）不算系统性偏移（阈值 |delta| > 1ms）', () => {
+  const events = Array.from({ length: 6 }, (_, i) => T(10 + i, 1_000_000));
+  const claims = Array.from({ length: 6 }, (_, i) => mkRef(i, 1));
+  const r = runSemanticChecks({ claims, timeIndexOf: idx(events), tolerance: 1 });
+  assert.equal(r.buckets['SI-6-systematic-offset'], undefined, '+1ms 属容差噪声');
+});
