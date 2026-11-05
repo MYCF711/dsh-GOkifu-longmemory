@@ -7,6 +7,7 @@
 //   ④ 守卫：本工具只读（--apply 直接退出 1；--copy 与真库同目录也退出 1）
 
 import test from 'node:test';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 
 import {
@@ -72,7 +73,10 @@ test('T259 ④: 守卫 —— 只读工具拒绝 --apply，且拒绝 --copy 指�
   assert.equal(applyRes.code, 1);
   assert.match(applyRes.stdout, /拒绝 --apply/);
 
-  const same = runCli(['--copy', process.env.DSH_HOME + '/memory-context']);
+  // 不用 process.env.DSH_HOME：CI 上它未设置 ⇒ 路径变成 "undefined/memory-context"，
+  // 与真库根不相等 ⇒ 守卫不触发（Linux CI 红）。改成显式 --real，两侧同一根，确定可判。
+  const real = 'tmp/definitely-not-the-real-store';
+  const same = runCli(['--real', real, '--copy', real]);
   assert.equal(same.code, 1);
   assert.match(same.stdout, /同一个目录/);
 
