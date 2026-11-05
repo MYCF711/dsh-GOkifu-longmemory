@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.12（2026-11-05）
+
+### invalidated 不进卡（T252）
+查清：`walk` 的候选集**早就**剔除 invalidated（`dropped.invalidated`），但 `inject` 的 `entryFromClaim` **不查 state** ——
+hit 自带 claim 对象、或直接点名 claimId 的**旁路**绕过那道过滤 ⇒ **不堵上的话，T251 的"标 invalidated"等于没修**。
+
+改法（一行）：`entryFromClaim` 开头 `if (claim && claim.state === 'invalidated') return null;`
+`stale` / `disputed` **不动**（仍进卡并带各自 marker）。
+
+### 诚实交代
+- T252 的原始改动**被 `reset --hard` 冲掉**（第十次），已按 teammate 描述重补；
+- teammate 的机制级对照测试**没能复现**（fixture 的 store.put 时序问题），**已回退**；
+- **真库目前没有 invalidated 的 claim**（T251 是 dry-run），"标记前后对照"**无法产出**，不编。
+
+### 验证
+827 条测试（822 pass / 0 fail / 5 skip）；`check PASS`（53 篇）。
+
 ## 0.2.11（2026-11-05）
 
 ### shortRoot 换硬实体信号（T249）
