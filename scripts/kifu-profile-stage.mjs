@@ -294,20 +294,21 @@ Write-Host "然后由你在桌面点「重启」让配置生效（本脚本不�
 }
 
 /** 主流程：读 profile patch → stage → （--apply 时）写 tmp 三个文件。 */
-export function runStage({ home = defaultHome(), profile = 'desktop', apply = false, repoRoot = REPO_ROOT } = {}) {
+export function runStage({ home = defaultHome(), profile = 'desktop', apply = false, repoRoot = REPO_ROOT, allowStructural = false } = {}) {
   const profileDir = path.join(home, 'profiles', profile);
   const patchPath = path.join(profileDir, 'cordis.patch.yml');
   if (!fs.existsSync(patchPath)) return { code: 2, error: `找不到 profile patch：${patchPath}` };
   const source = fs.readFileSync(patchPath, 'utf8');
   const staged = stagePatch(source, { toolsBlock: toolsEntryBlock(repoRoot) });
-  const check = verifyPatch(staged.text);
+  const baseSha = sha256(source);
+  const check = verifyPatch(staged.text, { home, profile, allowStructural });
 
   const tmpDir = path.join(repoRoot, 'tmp');
   const stagedPath = path.join(tmpDir, 'cordis.patch.staged.yml');
   const shPath = path.join(tmpDir, 'apply-kifu-profile.sh');
   const ps1Path = path.join(tmpDir, 'apply-kifu-profile.ps1');
   const backupDir = path.join(profileDir, 'backup');
-  const scripts = buildApplyScripts({ stagedPath, targetPath: patchPath, backupDir });
+  const scripts = buildApplyScripts({ stagedPath, targetPath: patchPath, backupDir, baseSha });
 
   const result = {
     code: check.ok ? 0 : 3,
@@ -368,7 +369,12 @@ export function formatReport(r) {
   const d = r.diffSummary;
   lines.push(`diff：-${d.removedLines} / +${d.addedLines} 行（${d.beforeLines} → ${d.afterLines}）`);
   const engine = r.verify.engine ?? 'none';
-  lines.push(`校验：${r.verify.ok ? 'OK' : `失败（${r.verify.errors.join('; ')}）`} · 条目 ${r.verify.parsedEntries} 个 · yaml 模块 ${engine !== 'none' ? `可用（${engine}）` : '不可用'}`);
+  const isStructural = engine === 'fallback-structural' || r.verify.validation === 'structural-only';
+  lines.push(`校验：${r.verify.ok ? 'OK' : `失败（${r.verify.errors.join('; ')}）`} · 条目 ${r.verify.parsedEntries} 个 · ${isStructural ? 'yaml 模块 未使用' : engine !== 'none' ? `yaml 模块 可用（${engine}）` : 'yaml 模块 不可用'}`);
+  if (isStructural) {
+    lines.push('⚠ 结构校验，不是 YAML 校验（engine=fallback-structural）');
+    lines.push('⚠ 结构模式不解析 YAML 流式语法（[ { 锚点 等），可能在语法非法时判 ok');
+  }
   if (engine === 'none') lines.push('⚠ 结构校验，不是 YAML 校验（无引擎，已 fail-closed 拒绝写入）');
   else if (r.verify.validation === 'structural-only') lines.push(r.verify.warning ?? '⚠ 结构校验，不是 YAML 校验（已显式 --allow-structural）');
   lines.push(`工具面条目：${r.added === 0 ? '已存在（跳过）' : '已追加 1 条'}`);
@@ -390,7 +396,11 @@ export function runCli(argv = process.argv.slice(2)) {
     return {
       code: res.ok ? 0 : (res.code ?? 3),
       stdout: res.ok
-        ? `校验 OK（引擎 ${res.engine ?? 'none'} · 条目 ${res.parsedEntries} 个 · yaml 模块 可用）`
+        ? (res.validation === 'structural-only'
+          ? [`校验 OK（引擎 fallback-structural · 条目 ${res.parsedEntries} 个 · yaml 模块 未使用）`,
+             '⚠ 结构校验，不是 YAML 校验（engine=fallback-structural）',
+             '⚠ 结构模式不解析 YAML 流式语法（[ { 锚点 等），可能在语法非法时判 ok'].join(String.fromCharCode(10))
+          : `校验 OK（引擎 ${res.engine ?? 'none'} · 条目 ${res.parsedEntries} 个 · yaml 模块 可用）`)
         : `校验失败：\n${res.errors.map((e) => `  - ${e}`).join('\n')}`,
     };
   }
