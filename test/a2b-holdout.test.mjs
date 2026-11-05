@@ -12,6 +12,7 @@ import path from 'node:path';
 
 import {
   buildExam,
+  compareSignalModes,
   claimsByEpisode,
   discriminativeTokens,
   hardEntities,
@@ -194,39 +195,96 @@ test('T248 ⑤ 不相关对照组：误判率不高于原口径（放水的反�
   assert.ok(c.bridgeRate <= c.tokenRate, `硬实体误判率(${c.bridgeRate}) 不应高于原口径(${c.tokenRate})`);
 });
 
-test('T249 shortRoot：短任务原话换成该局硬实体信号（file×2 + error×1），无实体时保留原样', () => {
+test('T249/T264 shortRoot：短任务原话**不再**换成事后实体（只留原话），事后实体单列 C 路', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't249-'));
   const home = path.join(tmp, 'home');
   fs.mkdirSync(path.join(home, 'g1'), { recursive: true });
-  fs.mkdirSync(path.join(home, 'g2'), { recursive: true });
-  const mkGraph = (dir, text) => fs.writeFileSync(path.join(dir, 'graph.json'), JSON.stringify({ nodes: { n1: { id: 'n1', kind: 'user', text } }, edges: {} }));
-  mkGraph(path.join(home, 'g1'), '处理一下');
-  mkGraph(path.join(home, 'g2'), '修一下');
-  const episodes = [
-    {
-      id: 'ep-s1', scopeKey: 'w:/demo', endedAt: 1000, closure: { graphPath: 'g1/graph.json' },
-      topics: [
-        { kind: 'file', key: '_tmp/replace-invite-method.mjs', count: 2 },
-        { kind: 'file', key: 'docs/internals.md', count: 1 },
-        { kind: 'file', key: 'third/path.mjs', count: 1 },
-        { kind: 'tool', key: 'bash', count: 9 },
-        { kind: 'error', key: 'Error: cannot edit "<path>": file changed since it was read', count: 1 },
-      ],
-    },
-    { id: 'ep-s2', scopeKey: 'w:/demo', endedAt: 2000, closure: { graphPath: 'g2/graph.json' }, topics: [] },
-  ];
-  const claims = [claim('c-a', ['ep-s1']), claim('c-b', ['ep-s2'])];
-  const exam = buildExam({ store: fakeStore(claims, episodes), home, includeRepeat: false });
-  const a = exam.items.find((x) => x.episode === 'ep-s1');
-  assert.equal(a.signalSource, 'shortRootEntities', '有实体 ⇒ 换成实体信号');
-  assert.equal(a.taskText, '处理一下', '原始任务原话要留着供追溯');
-  assert.ok(a.signal.includes('_tmp/replace-invite-method.mjs'), `信号应含文件路径：${a.signal}`);
-  assert.ok(a.signal.includes('docs/internals.md'), '最多取 2 个文件');
-  assert.equal(a.signal.includes('third/path.mjs'), false, '第 3 个文件不进信号');
-  assert.equal(a.signal.includes('bash'), false, '通用工具名不进信号（会用高频词灌水）');
-  assert.ok(a.signal.includes('Error: cannot edit'), '错误码进信号');
-  const b = exam.items.find((x) => x.episode === 'ep-s2');
-  assert.equal(b.signalSource, 'shortRoot', '无实体 ⇒ 保留原样，如实标注');
-  assert.equal(b.signal, '修一下');
+  fs.writeFileSync(path.join(home, 'g1', 'graph.json'), JSON.stringify({ nodes: { n1: { id: 'n1', kind: 'user', text: '处理一下' } }, edges: {} }));
+  const episodes = [{
+    id: 'ep-s1', scopeKey: 'w:/demo', endedAt: 1000, closure: { graphPath: 'g1/graph.json' },
+    topics: [{ kind: 'file', key: '_tmp/replace-invite-method.mjs', count: 2 }, { kind: 'error', key: 'Error: cannot edit', count: 1 }],
+  }];
+  const exam = buildExam({ store: fakeStore([claim('c-a', ['ep-s1'])], episodes), home, includeRepeat: false });
+  const it = exam.items.find((x) => x.episode === 'ep-s1');
+  assert.equal(it.signalSource, 'shortRoot', 'T264 起 shortRoot 不再改标签（信号就是原话）');
+  assert.equal(it.signal, '处理一下', '合法信号 = 用户原话');
+  assert.equal(it.taskEntities.length, 0, '原话里没有实体');
+  assert.ok(it.signals.postHoc.includes('_tmp/replace-invite-method.mjs'), '事后实体只在 C 路');
+  assert.equal(it.signalMeta.postHoc.injectionTime, false, 'C 路必须标成事后');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('T263/T264 self/root：合法信号 = 原话 + **原话内**实体；事后实体只进 C 路', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't263-'));
+  const home = path.join(tmp, 'home');
+  fs.mkdirSync(path.join(home, 'g1'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'g1', 'graph.json'), JSON.stringify({ nodes: { n1: { id: 'n1', kind: 'user', text: '读一下 E:/docs/HANDOFF.md 然后写方案' } }, edges: {} }));
+  const episodes = [{
+    id: 'ep-r1', scopeKey: 'w:/demo', endedAt: 1000, closure: { graphPath: 'g1/graph.json' },
+    topics: [{ kind: 'file', key: 'src/post-hoc.ts', count: 3 }, { kind: 'error', key: 'TypeError: boom', count: 1 }],
+  }];
+  const exam = buildExam({ store: fakeStore([claim('c-r', ['ep-r1'])], episodes), home, includeRepeat: false });
+  const it = exam.items.find((x) => x.episode === 'ep-r1');
+  assert.equal(it.signalSource, 'root');
+  assert.equal(it.signal, it.signals.taskPlusEntity, '默认信号 = B 路（合法）');
+  assert.ok(it.signal.includes('E:/docs/HANDOFF.md'), `B 路应含原话里的路径：${it.signal}`);
+  assert.equal(it.signal.includes('src/post-hoc.ts'), false, 'B 路不许含事后信息');
+  assert.ok(it.signals.postHoc.includes('src/post-hoc.ts'), 'C 路（对照）才含事后信息');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('T264 ① 信号不含事后信息：B 路的实体必须能在**用户原话**里找到', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't264-'));
+  const home = path.join(tmp, 'home');
+  fs.mkdirSync(path.join(home, 'g1'), { recursive: true });
+  // 原话里有一条路径；棋谱主题里另有一条**原话没有**的路径（事后信息）
+  fs.writeFileSync(path.join(home, 'g1', 'graph.json'), JSON.stringify({ nodes: { n1: { id: 'n1', kind: 'user', text: '读一下 E:/docs/HANDOFF.md 然后写方案' } }, edges: {} }));
+  const episodes = [{
+    id: 'ep-x1', scopeKey: 'w:/demo', endedAt: 1000, closure: { graphPath: 'g1/graph.json' },
+    topics: [{ kind: 'file', key: 'src/secret/post-hoc.ts', count: 3 }, { kind: 'error', key: 'TypeError: boom', count: 1 }],
+  }];
+  const exam = buildExam({ store: fakeStore([claim('c-x', ['ep-x1'])], episodes), home, includeRepeat: false });
+  const it = exam.items.find((x) => x.episode === 'ep-x1');
+  const taskText = it.signals.task;
+  // ① B 路：出现的实体必须全部出自原话
+  assert.ok(it.signals.taskPlusEntity.includes('e:/docs/handoff.md'), `B 路应含原话里的路径：${it.signals.taskPlusEntity}`);
+  for (const ent of it.taskEntities) assert.ok(taskText.toLowerCase().includes(String(ent).toLowerCase()), `实体 ${ent} 必须来自原话`);
+  // ② 事后实体只许出现在 C 路
+  assert.equal(it.signals.taskPlusEntity.includes('src/secret/post-hoc.ts'), false, 'B 路不许含事后信息');
+  assert.ok(it.signals.postHoc.includes('src/secret/post-hoc.ts'), 'C 路（对照）才允许含事后信息');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('T264 ② 合法信号（A/B）标 injectionTime=true，C 路标 false 且不进主判据', () => {
+  const exam = {
+    items: [{
+      id: 'i1', kind: 'self', episode: 'ep-1', scopeKey: 'w:/demo', at: 1,
+      signal: 'b', signals: { task: 'a', taskPlusEntity: 'b', postHoc: 'c' },
+      signalMeta: {
+        task: { injectionTime: true, desc: '用户原话' },
+        taskPlusEntity: { injectionTime: true, desc: '原话+原话内实体' },
+        postHoc: { injectionTime: false, desc: '事后' },
+      },
+      expected: { episodes: ['ep-1'], claimIds: [] },
+    }],
+  };
+  const c = compareSignalModes({ store: { list: () => [], get: () => null }, exam, cache: null });
+  assert.equal(c.task.injectionTime, true);
+  assert.equal(c.taskPlusEntity.injectionTime, true);
+  assert.equal(c.postHoc.injectionTime, false, 'C 路必须标成事后（作弊对照）');
+  assert.equal(c.task.desc, '用户原话');
+});
+
+test('T264 ③ 原话里没有实体 ⇒ B 路 == A 路（不许凭空造信号）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 't264b-'));
+  const home = path.join(tmp, 'home');
+  fs.mkdirSync(path.join(home, 'g1'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'g1', 'graph.json'), JSON.stringify({ nodes: { n1: { id: 'n1', kind: 'user', text: '处理一下' } }, edges: {} }));
+  const episodes = [{ id: 'ep-y1', scopeKey: 'w:/demo', endedAt: 1, closure: { graphPath: 'g1/graph.json' }, topics: [{ kind: 'file', key: 'src/post-hoc.ts', count: 1 }] }];
+  const exam = buildExam({ store: fakeStore([claim('c-y', ['ep-y1'])], episodes), home, includeRepeat: false });
+  const it = exam.items.find((x) => x.episode === 'ep-y1');
+  assert.equal(it.signals.taskPlusEntity, '处理一下', '原话无实体 ⇒ B 路就是原话本身');
+  assert.equal(it.taskEntities.length, 0);
+  assert.ok(it.signals.postHoc.includes('src/post-hoc.ts'), 'C 路仍可含事后实体（仅对照）');
   fs.rmSync(tmp, { recursive: true, force: true });
 });

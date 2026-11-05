@@ -150,6 +150,17 @@ export function rootTaskText(episode, { home = defaultHome() } = {}) {
   }
 }
 
+/**
+ * 该局的硬实体信号（T249/T263 共用口径）：棋谱主题里的 **file×2 + error×1**。
+ * 只用 file+error：通用工具名（bash/cat/cd/awk）会让"判别词 ≥2"这条被高频词灌水
+ * （T249 实测：带 tool 时多命中 1 条，但对照组判别词误判 6.06% → 16.67%）。
+ */
+export function episodeEntitySignal(episode) {
+  const topics = Array.isArray(episode?.topics) ? episode.topics : [];
+  const pickKeys = (kind, n) => topics.filter((t) => t && t.kind === kind && typeof t.key === 'string').map((t) => t.key).slice(0, n);
+  return [...pickKeys('file', 2), ...pickKeys('error', 1)].join(' ').trim();
+}
+
 /** 该局第一条用户消息的原文（日志里第一条 user/message；比 l1 更接近"任务原话"）。 */
 export function firstUserText(episode, { home = defaultHome() } = {}) {
   const lp = episode?.closure?.logPath;
@@ -211,15 +222,30 @@ export function buildExam({ store, home = defaultHome(), minSignalChars = 12, in
     // **信号源不够**，不是检索差（T249 实测：11 条里 9 条换成实体信号后能严格命中）。
     // 做法：取该局棋谱主题里的 file×2 + tool×2 + error×1 作为信号（机械、可复现、不带模型判断）；
     // 仍保留 taskText 供追溯，signalSource 改记为 shortRootEntities，便于分桶统计。
+    // ── T264：**注入时刻可得** 的信号（考卷作弊修正）──────────────────────────
+    // 真实注入发生在 `agent/pre-step`：那时只知道**用户说了什么**，不知道这局接下来会碰哪些文件。
+    // 所以合法信号只有两路：
+    //   A · task          = 用户原话（根用户 / firstUser）
+    //   B · taskPlusEntity = 原话 + **原话里出现的**硬实体（路径/错误码/包名/命令）
+    // 而 T249/T263 用的 `episodeEntitySignal`（该局棋谱主题）是**事后信息**——
+    // 拿"这局实际碰过的文件"当线索去检索"这局该召回什么"，等于用答案当题面。
+    // 它保留为 C 路（postHoc），只作对照，标 injectionTime: false，**不进主判据**。
     const taskText = finalSignal;
-    if (signalSource === 'shortRoot') {
-      const topics = Array.isArray(episode?.topics) ? episode.topics : [];
-      const pickKeys = (kind, n) => topics.filter((t) => t && t.kind === kind && typeof t.key === 'string').map((t) => t.key).slice(0, n);
-      // 只用**file×2 + error×1**：通用工具名（bash/cat/cd/awk）会让"判别词 ≥2"这条被高频词灌水
-      // （T249 实测：带上 tool 后 11 条多命中 1 条，但对照组判别词误判从 6.06% 涨到 16.67%）。
-      const entitySignal = [...pickKeys('file', 2), ...pickKeys('error', 1)].join(' ').trim();
-      if (entitySignal) { finalSignal = entitySignal; signalSource = 'shortRootEntities'; }
-    }
+    const postHocSignal = episodeEntitySignal(episode);          // C：事后（作弊）
+    const taskEntities = [...hardEntities(taskText)];            // 原话里出现的实体
+    const taskEntitySignal = taskEntities.join(' ').trim();
+    // 合法默认信号 = B（原话 + 原话内实体）
+    finalSignal = [taskText, taskEntitySignal].filter(Boolean).join(' ').trim();
+    const signals = {
+      task: taskText || null,                                    // A
+      taskPlusEntity: finalSignal || null,                       // B（主判据）
+      postHoc: postHocSignal ? [taskText, postHocSignal].filter(Boolean).join(' ') : null, // C（对照）
+    };
+    const signalMeta = {
+      task: { injectionTime: true, desc: '用户原话' },
+      taskPlusEntity: { injectionTime: true, desc: '用户原话 + 原话内硬实体' },
+      postHoc: { injectionTime: false, desc: '用户原话 + 该局棋谱主题（**事后信息，作弊对照**）' },
+    };
     if (!finalSignal) { skipped.push({ episode: episodeId, why: `no-signal(root=${rootText.length},firstUser=${firstUser.length},fallback=${fallback.length})` }); continue; }
     items.push({
       id: `self:${episodeId}`,
@@ -228,6 +254,9 @@ export function buildExam({ store, home = defaultHome(), minSignalChars = 12, in
       scopeKey: typeof episode.scopeKey === 'string' ? episode.scopeKey : null,
       signal: finalSignal,
       taskText,
+      signals,
+      signalMeta,
+      taskEntities,
       at: Number.isFinite(episode.endedAt) ? episode.endedAt : (Number.isFinite(episode.lastEventAt) ? episode.lastEventAt : null),
       expected: { episodes: [episodeId], claimIds: claimIds.slice() },
       signalSource,
@@ -255,6 +284,8 @@ export function buildExam({ store, home = defaultHome(), minSignalChars = 12, in
       at: Number.isFinite(frozen?.splitAt) ? frozen.splitAt : null,
       expected: { episodes: prior.slice(), claimIds: [...new Set(expectedIds)] },
       signalSource: 'signature',
+      // repeat 题只有"签名"这一路信号（没有该局主题）⇒ task/composite 都是签名本身，entity 为 null
+      signals: { task: row.sig, entity: null, composite: row.sig },
       judge: 'claim.support 含 prior 局 ⇒ related；与签名 ≥2 判别词重合 ⇒ strict',
     });
     seen.add(row.episode);
@@ -324,7 +355,7 @@ export function judgeCard({ card, store, item, minOverlap = 2 } = {}) {
  * 用同一判据（判别词 / 硬实体）判"是否相关"。误判率 = 被判相关的比例。
  * 放水的判据会在这里暴露：如果硬实体桥把无关 claim 也判相关，误判率会显著上升。
  */
-export function negativeControl({ store, exam, perItem = 3 } = {}) {
+export function negativeControl({ store, exam, perItem = 3, signalMode = null } = {}) {
   const claims = store.list('claims').map((e) => e.record).filter(Boolean).sort((a, b) => String(a.id).localeCompare(String(b.id)));
   const byId = new Map(claims.map((c) => [String(c.id), c]));
   let n = 0;
@@ -344,8 +375,10 @@ export function negativeControl({ store, exam, perItem = 3 } = {}) {
       const c = byId.get(String(pool[i * step].id));
       if (!c) continue;
       n += 1;
-      const shared = sharedHardEntities(item.signal, c.text ?? '');
-      const overlap = overlapCount(item.signal, c.text ?? '');
+      const sig = signalMode ? (item?.signals?.[signalMode] ?? '') : item.signal;
+      if (!String(sig ?? '').trim()) continue;
+      const shared = sharedHardEntities(sig, c.text ?? '');
+      const overlap = overlapCount(sig, c.text ?? '');
       if (shared.length >= 1) {
         bridged += 1;
         if (examples.length < 3) examples.push({ item: item.id, claimId: c.id, shared: shared.slice(0, 3), text: String(c.text).slice(0, 60) });
@@ -357,12 +390,14 @@ export function negativeControl({ store, exam, perItem = 3 } = {}) {
 }
 
 /** 跑全套考卷（只读）。 */
-export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = null, cache = null } = {}) {
+export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = null, cache = null, signalMode = null } = {}) {
   const walkCache = cache ?? createWalkCache(store);
   const results = [];
   for (const item of exam?.items ?? []) {
     const at = Number.isFinite(item.at) ? item.at : (Number.isFinite(now) ? now : Date.now());
-    const signal = signalFromText(item.signal, { at });
+    const text = signalMode ? (item?.signals?.[signalMode] ?? null) : item.signal;
+    if (text == null || String(text).trim() === '') continue; // 该模式没有信号 ⇒ 不进分母
+    const signal = signalFromText(text, { at });
     if (item.scopeKey) signal.scopeKey = item.scopeKey;
     let card = null;
     try {
@@ -372,7 +407,8 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
       results.push({ itemId: item.id, kind: item.kind, signalSource: item.signalSource, episode: item.episode, error: String(error?.message ?? error), hitStrict: false, hitRelated: false, rendered: 0 });
       continue;
     }
-    results.push(judgeCard({ card, store, item }));
+    // 判分必须用**该路自己的信号**（否则 task 臂会拿 B 的信号判分，口径就串了）
+    results.push(judgeCard({ card, store, item: { ...item, signal: text } }));
   }
   const evaluated = results.filter((r) => !r.error);
   const strictHits = evaluated.filter((r) => r.hitStrict).length;
@@ -389,7 +425,7 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
     if (r.hitStrict) byKind[k].strict += 1;
     if (r.hitRelated) byKind[k].related += 1;
   }
-  const control = negativeControl({ store, exam });
+  const control = negativeControl({ store, exam, signalMode });
   return {
     version: HOLDOUT_VERSION,
     control,
@@ -408,6 +444,30 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
     byKind,
     results,
   };
+}
+
+/**
+ * T263 · 三路信号对照（同一批题）：task（只用任务原话）/ entity（只用硬实体）/ composite（原话+实体）。
+ * 每条考卷的 `signals` 里三种信号都存着；没有该路信号的题**不进该路的分母**（如实标注 n）。
+ */
+export function compareSignalModes({ store, exam, limit = 5, budgetTokens = 500, cache = null, modes = ['task', 'taskPlusEntity', 'postHoc'] } = {}) {
+  const walkCache = cache ?? createWalkCache(store);
+  const out = {};
+  for (const mode of modes) {
+    const r = runHoldout({ store, exam, limit, budgetTokens, cache: walkCache, signalMode: mode });
+    out[mode] = {
+      n: r.n,
+      strictHits: r.strictHits,
+      strictRate: r.strictRate,
+      wilson: r.wilson.strict,
+      control: r.control,
+      byKind: r.byKind,
+      // 信号可得性：true = 注入时刻（pre-step）就能拿到；false = 事后信息（作弊对照，不进主判据）
+      injectionTime: exam?.items?.find((x) => x?.signalMeta?.[mode])?.signalMeta?.[mode]?.injectionTime ?? null,
+      desc: exam?.items?.find((x) => x?.signalMeta?.[mode])?.signalMeta?.[mode]?.desc ?? null,
+    };
+  }
+  return out;
 }
 
 const pct = (x) => (Number.isFinite(x) ? `${(x * 100).toFixed(2)}%` : 'n/a');
@@ -434,9 +494,20 @@ export async function main(argv = process.argv.slice(2)) {
   const limit = Number(opt('limit', '5'));
   const exam = buildExam({ store, home, minSignalChars, includeRepeat: !argv.includes('--no-repeat') });
   const result = runHoldout({ store, exam, limit, now: Date.now() });
+  const compare = argv.includes('--compare') ? compareSignalModes({ store, exam, limit }) : null;
   const out = { stats: exam.stats, skipped: exam.skipped.slice(0, 20), ...result, results: argv.includes('--json') ? result.results : undefined };
   if (argv.includes('--json')) { console.log(JSON.stringify(out, null, 2)); return 0; }
   console.log(formatReport(result));
+  if (compare) {
+    console.log('');
+    console.log('三路信号对照（同一批题 · 严格命中 / Wilson / 对照误判）：');
+    for (const mode of Object.keys(compare)) {
+      const c = compare[mode];
+      const ctrl = c.control ?? {};
+      const avail = c.injectionTime === true ? 'injectionTime=✅可达' : (c.injectionTime === false ? 'injectionTime=❌事后(作弊)' : 'injectionTime=?');
+      console.log(`  ${mode.padEnd(15)} n=${c.n} · 严格 ${c.strictHits}/${c.n} = ${pct(c.strictRate)} · Wilson [${pct(c.wilson.lower)}, ${pct(c.wilson.upper)}] · ${avail} · 对照 n=${ctrl.n ?? 0} 硬实体误判 ${ctrl.bridged ?? 0}（${pct(ctrl.bridgeRate)}）· 判别词误判 ${ctrl.tokenHit ?? 0}（${pct(ctrl.tokenRate)}）`);
+    }
+  }
   console.log(`构造：claims ${exam.stats.claims} · 有 claim 的局 ${exam.stats.episodesWithClaims} · self ${exam.stats.self} · repeat ${exam.stats.repeat} · 跳过 ${exam.stats.skipped}`);
   return 0;
 }
