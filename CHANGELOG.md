@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.176.0（2026-11-05）
+
+### 知识库第 51 篇：一个字段怎么才算"活着"（T228）
+`docs/调研/51-死字段与活指标-2026-11-05.md` —— **活着 = L1 被读 × L2 会变 × L3 改变决定**（三条全中，不是三选一）。
+
+| 今晚的案例 | 缺哪条 | 处置 |
+|---|---|---|
+| `mergeStats.candidatesHit` | **L2**（T193 后结构上恒 0） | 删 / 重定义 |
+| `mergeRepresentativeOf` | **L1 + L3**（除测试无人读、无决定） | 删 / 接上快速路径 + 基准 |
+| `tmp/` 旧测试副本 | 扫描面问题（连 L1 都不该问） | 移出 + 扫描面断言 |
+| **A4 p50 绝对相等** | **判据死了**（三条全中但比较式不可能稳定） | 改量级判据 |
+
+**最后一条最危险**：周期性假红会**训练人忽略告警** —— 它腐蚀的是对告警的信任，比死字段更伤。
+
+### 三条 [外] 事实
+- **ESLint**：write-only 不算用、自读自改不算用 ⇒ **死是默认，活要声明**（`/* exported */`）。
+- **ESLint**：`reportUnusedDisableDirectives` 连"从未生效过的 disable 注释"都报。
+- **Go deadcode**：死 = 从 `main` 不可达 + **判断力**；"reported as dead ≠ 可安全删… Some judgement is required"；结论**只对一种 GOOS/GOARCH 成立**。
+
+### 验证
+`check PASS`（51 篇）。
+
 ## 0.175.0（2026-11-05）
 
 ### profile 一键脚本：**三道防线全部武装**（T223 + audit-13 驱动）
