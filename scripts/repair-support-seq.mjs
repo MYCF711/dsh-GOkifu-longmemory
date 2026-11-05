@@ -23,6 +23,8 @@ import path from 'node:path';
 import { createStore } from '../src/rooms/persist.mjs';
 import { readFrames, parseEvents } from '../src/rooms/logread.mjs';
 import { normalizeText } from './provenance-p2.mjs';
+import { singleLine } from '../src/rooms/inject.mjs';
+import { normalizeCardText, collectStrings } from './audit-card-samples.mjs';
 
 export const REPAIR_VERSION = 1;
 
@@ -36,20 +38,13 @@ export function buildEventIndex(events) {
   for (const ev of Array.isArray(events) ? events : []) {
     const seq = Number(ev?.seq);
     if (!Number.isFinite(seq)) continue;
-    const segments = [];
-    const walk = (v) => {
-      if (typeof v === 'string') { const t = normalizeText(v); if (t) segments.push(t); return; }
-      if (Array.isArray(v)) { for (const x of v) walk(x); return; }
-      if (v && typeof v === 'object') { for (const k of Object.keys(v)) walk(v[k]); }
-    };
-    walk(ev?.data ?? {});
-    if (!segments.length) continue;
+    // T256 口径：每段先 singleLine（多行错误原文归一），段间换行连接；另存空格连接版（stdout+stderr 拼接）
+    const parts = collectStrings(ev?.data ?? {}).map((x) => singleLine(x)).filter(Boolean);
+    if (!parts.length) continue;
     const prev = map.get(seq);
-    map.set(seq, {
-      seq,
-      type: String(ev?.type ?? prev?.type ?? 'unknown'),
-      text: prev ? `${prev.text}\n${segments.join('\n')}` : segments.join('\n'),
-    });
+    const text = parts.join(String.fromCharCode(10));
+    const joined = parts.join(' ');
+    map.set(seq, { seq, type: String(ev?.type ?? prev?.type ?? 'unknown'), text: prev ? `${prev.text}${String.fromCharCode(10)}${text}` : text, joined: prev ? `${prev.joined} ${joined}` : joined });
   }
   return map;
 }
@@ -62,25 +57,31 @@ export function buildEventIndex(events) {
 export function locateQuoteSeq({ quote, seq, eventIndex }) {
   // 存储层会把超长 quote 截断并补 `…`（U+2026）—— 那是**存储伪影**，不是正文。
   // 直接拿它当子串必然匹配不到（实测 c-39b8ac53 的 quote 以 `…` 结尾 ⇒ 0 命中）。
-  const needle = normalizeText(quote).replace(/[.…]+$/, '');
+  const needle = normalizeCardText(quote);
   if (needle === '') return { status: 'skipped', from: Number(seq) || null, to: null, candidates: [], eventType: null, distance: null, reason: 'quote-empty' };
   const from = Number(seq);
   const hit = Number.isFinite(from) ? eventIndex.get(from) : null;
-  if (hit && hit.text.includes(needle)) {
+  if (hit && (hit.text.includes(needle) || (hit.joined ?? '').includes(needle))) {
     return { status: 'ok', from, to: from, candidates: [from], eventType: hit.type, distance: 0, reason: null };
   }
   const candidates = [];
   for (const [s, ev] of eventIndex) {
-    if (ev.text.includes(needle)) candidates.push(s);
+    if (ev.text.includes(needle) || (ev.joined ?? '').includes(needle)) candidates.push(s);
   }
   candidates.sort((a, b) => a - b);
+  const hits = candidates.map((sq) => ({ seq: sq, type: String(eventIndex.get(sq)?.type ?? 'unknown') }));
   if (candidates.length === 1) {
     const to = candidates[0];
-    const ev = eventIndex.get(to);
-    return { status: 'repair', from: Number.isFinite(from) ? from : null, to, candidates, eventType: ev?.type ?? null, distance: Number.isFinite(from) ? to - from : null, reason: 'quote-not-at-seq' };
+    return { status: 'repair', from: Number.isFinite(from) ? from : null, to, candidates, hits, eventType: hits[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'quote-not-at-seq' };
   }
   if (candidates.length > 1) {
-    return { status: 'ambiguous', from: Number.isFinite(from) ? from : null, to: null, candidates, eventType: null, distance: null, reason: `multiple-candidates:${candidates.length}` };
+    // T257 消歧：原始出处（tool/result）优先于模型回显（assistant/message）
+    const tool = hits.filter((h) => /^tool(\/|$)/.test(h.type));
+    if (tool.length === 1) {
+      const to = tool[0].seq;
+      return { status: 'repair', from: Number.isFinite(from) ? from : null, to, candidates: tool.map((h) => h.seq), hits, eventType: tool[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'disambiguated-tool-result' };
+    }
+    return { status: 'ambiguous', from: Number.isFinite(from) ? from : null, to: null, candidates, hits, eventType: null, distance: null, reason: tool.length > 1 ? `multiple-tool-results:${tool.length}` : 'echo-only' };
   }
   return { status: 'unrepaired', from: Number.isFinite(from) ? from : null, to: null, candidates: [], eventType: null, distance: null, reason: 'quote-not-found' };
 }
@@ -117,7 +118,7 @@ export function makeLogLoader({ home = defaultHome() } = {}) {
 export function planRepairs({ claims, episodes, loadEvents }) {
   const epById = new Map((Array.isArray(episodes) ? episodes : []).map((e) => [String(e?.id ?? ''), e]));
   const indexCache = new Map();
-  const out = { scanned: 0, refs: 0, ok: 0, repair: [], ambiguous: [], unrepaired: [], skipped: [], unreadable: 0 };
+  const out = { scanned: 0, refs: 0, ok: 0, repair: [], ambiguous: [], unrepaired: [], skipped: [], unreadable: 0, buckets: { 'multiple-tool': 0, 'echo-only': 0 } };
   for (const claim of Array.isArray(claims) ? claims : []) {
     out.scanned += 1;
     const support = Array.isArray(claim?.support) ? claim.support : [];
@@ -137,9 +138,9 @@ export function planRepairs({ claims, episodes, loadEvents }) {
       if (!index) { out.unreadable += 1; continue; }
       const r = locateQuoteSeq({ quote: ref.quote, seq: ref.seq, eventIndex: index });
       if (r.status === 'ok') { out.ok += 1; continue; }
-      const row = { claimId: claim.id, episode: epId, index: i, quote: String(ref.quote ?? '').slice(0, 120), from: r.from, to: r.to, candidates: r.candidates.slice(0, 8), candidateCount: r.candidates.length, eventType: r.eventType, distance: r.distance, reason: r.reason };
+      const row = { claimId: claim.id, episode: epId, index: i, quote: String(ref.quote ?? '').slice(0, 120), from: r.from, to: r.to, candidates: r.candidates.slice(0, 8), candidateCount: r.candidates.length, eventType: r.eventType, distance: r.distance, reason: r.reason, hitTypes: (r.hits ?? []).map((h) => h.type) };
       if (r.status === 'repair') out.repair.push(row);
-      else if (r.status === 'ambiguous') out.ambiguous.push(row);
+      else if (r.status === 'ambiguous') { out.ambiguous.push(row); const b = String(r.reason).startsWith('multiple-tool-results') ? 'multiple-tool' : 'echo-only'; out.buckets[b] += 1; }
       else if (r.status === 'unrepaired') out.unrepaired.push(row);
       else out.skipped.push(row);
     }
@@ -225,6 +226,11 @@ export function runCli(argv = process.argv.slice(2)) {
   if (flags.help) return { code: 0, stdout: USAGE };
   const home = flags.home ? path.resolve(flags.home) : defaultHome();
   const storeRoot = flags.store ? path.resolve(flags.store) : path.join(home, 'memory-context');
+  // ⚠ T257 守卫：--apply 只许落在 tmp/ 下（真库只读）
+  if (flags.apply) {
+    const segs = path.resolve(storeRoot).split(path.sep).map((x) => x.toLowerCase());
+    if (!segs.includes('tmp')) return { code: 1, stdout: `✗ 拒绝 --apply：store 必须位于 tmp/ 下（实际 ${path.resolve(storeRoot)}）—— 真库只读` };
+  }
   if (!fs.existsSync(storeRoot)) return { code: 2, stdout: `库不存在：${storeRoot}` };
   const store = createStore({ root: storeRoot });
   const claims = store.list('claims').map((e) => e.record).filter(Boolean);
