@@ -17,6 +17,29 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.163.0（2026-11-05）
+
+### 安全闸的"自证豁免"被堵死（T198，audit-12 最严重一条）
+- `mergeRelationOf` 原来只比字符串：两条同文 claim 只要写同一个 `mergedInto`，闸 4 就不再报重复 —— **哪怕节点不存在、或根本不是合并节点**。
+- 改为**三条件自证**（任一不成立 ⇒ 照报 `gate4/unsuperseded-duplicate`）：① 被指节点存在 ② 它是合并节点（`merge.members` 非空）③ `members` 同时含这两条。
+- `checks.merged` 新增 `unverifiedRefs` 与 `unverifiedRefReasons{missing-node|not-merge-node|members-mismatch}`；`unresolved` 保留但**不再放行**。
+
+### 探针 workspace 口径统一（同一份数据 53 条结论不同 → 0）
+- `plugin.probeCardValidity` 原来传**会话 cwd**，`runValidityCheck` 传 **claim 自身 `scopeKey`** ⇒ 同一条 claim 复算 **53 条不同**（闸 3 在运行时会误红）。
+- 统一为 claim 自身 workspace（cwd 只兜底），缓存键同步 ⇒ **53 → 0**。
+
+### 复算
+`{"gate4":{"baseline":1,"fakeMergedInto":1}}`（改前 0）· `{"validityClaims":140,"diffNewVsOwn":0}`（改前 53）。
+
+### 工程纪律入册
+`AGENTS.md` §2.4 新增：**有未提交改动时禁止 `git reset --hard` / `checkout -- .` / `stash` 后不恢复** —— 今晚同一处连踩 **6 次**（T181/T187/T192/T194/T198 各一次，其中 T181/T198 需要重做）。
+
+### 仍然待办（audit-12 未解决项）
+闸 2 `merged-unverified` 同族静默放行 · 闸 4 `isMergeRelated` 缺 `representative` 可解析性 · 真库 29 条真 stale 待数据修复。
+
+### 验证
+700 条测试（695 pass / 0 fail / 5 skip）；`check PASS`。
+
 ## 0.162.0（2026-11-05）
 
 ### 合流验收**首次全过**：④b 丢行 31 → 3 → **0**（T193）
