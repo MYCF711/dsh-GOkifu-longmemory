@@ -1387,3 +1387,90 @@ test('T198 ④ 守卫: 节点存在 + 是合并节点 + members 同时含这两�
   assert.equal(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'), false);
   assert.equal(res.checks.merged.unverifiedRefs, 0, '自证通过就不该记 unverifiedRefs');
 });
+
+// ---------------------------------------------------------------- T199（audit-12 剩余两条同族静默放行）
+//
+// A · 闸 2：合并节点的**成员一条都解析不到**时，旧实现"按记录自身 state 放行"——那是把"没有证据"
+//          读成"证据支持"。现在 strict 下 FAIL，非 strict 下记 unverified（报告可见），且**仍走常规判据**。
+// B · 闸 4：合并契约自证（representative ∈ members、可解析、同 scopeKey、members 全部可解析）。
+//          这是**数据自相矛盾**，不是"证据缺失" ⇒ 直接报 gate4/merge-contract-invalid。
+
+/** 造一个"成员都不在库里"的合并节点卡（卡上只有它自己这一行）。 */
+function mergeNodeCard({ mergeOver = {}, recordOver = {} } = {}) {
+  const base = rec({
+    id: 'c-mrg9999',
+    text: '合并节点正文（成员都不在库里）',
+    state: 'observed',
+    ...recordOver,
+  });
+  const record = {
+    ...base,
+    merge: {
+      version: 1,
+      key: 'k199',
+      rule: 'text-similarity',
+      members: ['c-ghost1001', 'c-ghost1002'],
+      representative: { claimId: 'c-ghost1001', episode: 'ep-aaaaaaa1', seq: 30, quote: 'q' },
+      supportEpisodes: ['ep-aaaaaaa1'],
+      at: T(22),
+      ...mergeOver,
+    },
+  };
+  const { card } = cardFrom({ record });
+  return { card, records: { claims: { [record.id]: record } } };
+}
+
+test('T199 ①: 合并节点成员取不到 + strict ⇒ 闸 2 FAIL（gate2/merged-members-unresolved）', () => {
+  const { card, records } = mergeNodeCard();
+  const res = runWith({ card, records, strict: true });
+  assert.equal(res.ok, false, '成员解析不到不许通过');
+  const err = res.errors.find((e) => e.code === 'gate2/merged-members-unresolved');
+  assert.ok(err, `应当报 gate2/merged-members-unresolved，实际：${JSON.stringify(res.errors)}`);
+  assert.deepEqual(err.detail.members, ['c-ghost1001', 'c-ghost1002']);
+});
+
+test('T199 ②: 成员取不到 + 非 strict ⇒ checks.mergedUnverified 计数且报告可见，且仍走常规判据', () => {
+  const { card, records } = mergeNodeCard();
+  const res = runWith({ card, records });
+  assert.ok(res.checks.mergedUnverified >= 1, `要记 mergedUnverified，实际：${JSON.stringify(res.checks.mergedUnverified)}`);
+  const seen = res.checks.unverified.some((u) => u.code === 'gate2/merged-members-unresolved');
+  assert.equal(seen, true, `非 strict 下要在 checks.unverified 里可见，实际：${JSON.stringify(res.checks.unverified)}`);
+});
+
+test('T199 ③: representative.claimId ∉ members ⇒ gate4/merge-contract-invalid', () => {
+  const { card, records } = mergeNodeCard({
+    mergeOver: { representative: { claimId: 'c-outside001', episode: 'ep-aaaaaaa1', seq: 30, quote: 'q' } },
+  });
+  const res = runWith({ card, records });
+  const err = res.errors.find((e) => e.code === 'gate4/merge-contract-invalid');
+  assert.ok(err, `应当报 merge-contract-invalid，实际：${JSON.stringify(res.errors.map((e) => e.code))}`);
+  assert.ok(err.detail.issues.includes('representative-not-member'), JSON.stringify(err.detail.issues));
+});
+
+test('T199 ④: representative 解析不到 ⇒ gate4/merge-contract-invalid', () => {
+  const { card, records } = mergeNodeCard();
+  const res = runWith({ card, records });
+  const err = res.errors.find((e) => e.code === 'gate4/merge-contract-invalid');
+  assert.ok(err, `应当报 merge-contract-invalid，实际：${JSON.stringify(res.errors.map((e) => e.code))}`);
+  assert.ok(err.detail.issues.includes('representative-unresolved'), JSON.stringify(err.detail.issues));
+  assert.ok(err.detail.issues.includes('member-unresolved:c-ghost1001'), JSON.stringify(err.detail.issues));
+});
+
+test('T199 ⑤ 守卫: 契约完整的合并节点（代表∈成员、都可解析、同 scope）⇒ 不报 merge-contract-invalid', () => {
+  const memberA = rec({ id: 'c-mem0001', text: '成员甲', state: 'observed' });
+  const memberB = rec({ id: 'c-mem0002', text: '成员乙', state: 'observed' });
+  const mergeRecord = {
+    ...rec({ id: 'c-mrg0001', text: '合并节点正文', state: 'candidate' }),
+    merge: {
+      version: 1, key: 'k199', rule: 'text-similarity',
+      members: [memberA.id, memberB.id],
+      representative: { claimId: memberA.id, episode: 'ep-aaaaaaa1', seq: 30, quote: 'q' },
+      supportEpisodes: ['ep-aaaaaaa1'], at: T(22),
+    },
+  };
+  const { card, records } = cardFrom({ record: mergeRecord });
+  records.claims[memberA.id] = memberA;
+  records.claims[memberB.id] = memberB;
+  const res = runWith({ card, records });
+  assert.equal(res.errors.some((e) => e.code === 'gate4/merge-contract-invalid'), false, JSON.stringify(res.errors));
+});
