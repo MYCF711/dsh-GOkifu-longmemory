@@ -17,6 +17,34 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.169.0（2026-11-05）
+
+### 六轴最弱的一轴：**A1 从 2.91% → 0**（T205/T209/T210）
+- **T205 逐条归因**（`scripts/a1-stale-audit.mjs`，只读）：闸后 103 条里 3 条 stale **全部是 `probe-unverified`**（探针读不到），
+  没有一条是 `ok===false`。分类 `probe-gap 86 · legit 14 · probe-unverified 3 · probe-wrong 0`。
+- **口径错在两处**：
+  - **F1（T209）**：`runH1` 的 `staleRows` 谓词是 `res.ok === false` —— 把 `unverified`（核不了）算进"已失效"，
+    而**闸 3 与 `mark-stale` 的口径都是 `ok===false && unverified!==true`** ⇒ 同一个库里两套 stale 定义，A1 高估负迁移。
+    改：谓词对齐 + 单列 `unverifiedRows/Ids`（只计数、不进分子），**分母一个不动**。实测 `0.0303(3/99) → 0.0204(2/98) → 0`。
+  - **F2（T210）**：`probeValidity` 的 version 候选面缺 **`<workspace>/<name>/package.json`（兄弟仓库布局）** ⇒
+    `c-175d29e9`（声明 `magpie-chatbox-ai@0.1.0`，磁盘 `反代/magpie-chatbox-ai/package.json` 是 **0.1.3**）判成 `version-file-unreadable`（unverified）⇒ 闸 3 放行。
+    改：候选面顺序 ① 显式 `validity.file` ② `<ws>/node_modules/<name>` ③ **`<ws>/<name>`（新增）** ④ `<ws>/package.json` ⑤ `<DSH_HOME>/profiles/*`；**读不到就继续往下走**。
+- **结果**：`c-175d29e9` 判 `version-mismatch` ⇒ 闸 3 拦下；**A1 = 0/98 = 0**。剩 2 条是包在本机磁盘上确实不存在（`probe-gap`），不是候选面缺失。
+
+### 触发面实验：折叠触发 **P(≥2) → P(≥1)**（T207）
+- `collapseMergeNodes`：**命中任一成员**就冒泡到代表（**1 换 1，不增行**），≥2 成员的原有行为不变，0 成员仍不出现合并节点行。
+- 新增运行时计数 `mergeStats{candidatesHit, membersHit, collapsed, bubbled}`，同时写进 `card-samples.jsonl`。
+- **触发率量级变化**（影库 39 组）：**25/39 组（64%）真的折叠了行** · 22 组（56%）走 1 换 1 冒泡 · 共折叠 **58 行**；
+  旧口径 4 组可折（≈10%）⇒ **6 倍**。**④a 反增 0 · ④b 丢行 0**（硬闸门全过）。
+- **代价（如实）**：④c 在 P(≥1) 下**结构性失效**（成员永不同时成行 ⇒ 指标无定义，`n/a`），后续统计改用 `mergeStats.collapsed/bubbled`。
+
+### `mergedInto` 反向索引（T208）
+- `walkFromSignals` 暴露 `mergeRepresentativeOf: Map<memberId, representativeId>`：构建一次 O(总成员数)（39 节点 / 96 成员），查询 O(1)；
+  **构建 0.016ms · 查询 1000 次 0.025ms · 全表扫 4.7ms ⇒ 192×**。跨域成员不建索引并计入 `dropped.mergeCrossScopeMembers`。
+
+### 验证
+741 条测试（736 pass / 0 fail / 5 skip）；`check PASS`（47 篇）。
+
 ## 0.167.0（2026-11-05）
 
 ### 合流的「机制 vs 频率」分离报告（T202）—— 一句话：**机制成立但罕见**
