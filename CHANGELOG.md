@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.172.0（2026-11-05）
+
+### 工具面：**6 个 `kifu_*` 工具端到端真调用全通过**（T213）
+- 之前 `tools-registered.json` 一直是 `{"count":0,"via":"none"}` —— **写好了但从来没跑起来过**。现在有了第一次真注册 + 真调用的证据。
+- 新增 `test/tools-plugin.e2e.test.mjs`：假 `ctx`（按真实契约 `inject=['tools'] → apply(ctx) → ctx.tools.register(tool)`）加载插件，
+  对**每一个**工具用真库（只读）调一次，断言返回非空且结构正确：
+  `kifu_stats`(213B) · `kifu_search`(324B) · `kifu_card`(886B) · `kifu_recent_failures`(896B) · `kifu_view`(238924B) · `kifu_get`(851B)。
+- **6 个全部能用，`src/**` 一行未改**。任务书写"5 个"是错的（真实导出 6 个），测试按真实数量断言把这个偏差钉死。
+- 优雅失败：`dshHome` 指向不存在目录时 6 个工具**都不抛**（`kifu_stats` 走 `status:"missing"`，其余结构化错误）；`registerMemoryTools({})` 返回 `[]` 且不抛。
+- **重启后应看到**：`{"count":6,"via":"tools-plugin","ctxHasRegister":true,"names":[…]}`；`via:"tools-plugin-none"` 表示宿主没给 `ctx.tools`。
+- 当前真库仍是 `count:0 / via:"none"` —— **只差 T195 的 profile patch 生效**（一键脚本 + 重启）。
+
+### 知识库 48 篇：派生数据该不该存在（T214）
+- PostgreSQL：`REFRESH MATERIALIZED VIEW` "**completely replaces the contents**… old contents are discarded"；`CONCURRENTLY` 需 UNIQUE 索引、一次一个、视图须已填充；`WITH NO DATA` 留 unscannable state。
+- Azure：派生层合法前提是"**completely disposable**（能整体重建）"；最大风险是"**激活信号丢失 ⇒ 静默提供陈旧结果**"。
+- **代入本仓 ⇒ 合流退化成现算**：收益 5.5% 是真的、机制 12/12 正确 ⇒ 不删；但为 5.5% 上限养 3 模块 + 2 道闸是负账 ⇒ 不落库。
+  最低维护形态五条：只活在报告命令里、两道闸降为报告内断言、不建失效链路、写死重新落库触发线（**≥10% 且连续稳定**）、`mergedInto` 明确为可重建的派生映射。
+
+### 验证
+4 条 tools e2e + `check PASS`（48 篇）。
+
 ## 0.171.0（2026-11-05）
 
 ### 合流的价值主张：**四轴都撑不起上线**（T212）
