@@ -53,7 +53,7 @@ import {
   signalFromText,
   writeShadow,
 } from './rooms/inject.mjs';
-import { probeValidity, validityKeyOf, runGates } from './rooms/gates.mjs';
+import { probeValidity, validityKeyOf, workspaceOf, runGates } from './rooms/gates.mjs';
 import { classifyErrorClass } from './rooms/claim.mjs';
 import { errorClassKeyOf } from './rooms/topic.mjs';
 import { registerMemoryTools, recordToolRegistration } from './tools.mjs';
@@ -368,14 +368,18 @@ function probeCardValidity({ card, store, deps, fallbackWorkspace = null, now = 
     }
     if (!record || typeof record !== 'object') continue;
     const key = validityKeyOf(record) || `${kind}:${claimId}`;
+    // T198（audit-12 洞 2）：**以 claim 自己的 workspace 为准**（`scopeKey` 解出的路径），
+    // 会话 cwd 只作兜底 —— 与 `runValidityCheck`（gates-check）同口径。
+    // 之前直接传 cwd，同一批 claim 在两条口径下 53 条结论不同（cwd 有 package.json 时误判 version-mismatch ⇒ 闸 3 运行时误红）。
+    const recordWorkspace = workspaceOf(record, fallbackWorkspace);
     const bucket = Math.floor((Number.isFinite(now) ? now : Date.now()) / PROBE_TTL_MS);
-    const cacheKey = `${key}|${fallbackWorkspace ?? ''}|${bucket}`;
+    const cacheKey = `${key}|${recordWorkspace ?? ''}|${bucket}`;
     if (PROBE_CACHE.has(cacheKey)) {
       results[key] = PROBE_CACHE.get(cacheKey);
       continue;
     }
     try {
-      results[key] = deps.probeValidity(record, { workspace: fallbackWorkspace, now });
+      results[key] = deps.probeValidity(record, { workspace: recordWorkspace, now });
       PROBE_CACHE.set(cacheKey, results[key]);
     } catch (error) {
       results[key] = { ok: false, reason: `probe-error:${String(error?.message ?? error)}`, checkedAt: now };
