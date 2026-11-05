@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.9（2026-11-05）
+
+### 注入卡过滤：把"靠侥幸"变成机械保证（T245）
+T244 结论：**真 F5 = 0**（`isUserMessage` 只认 `source.kind==='user'`，628 个卡事件一个都没进抽取）。
+但 `collectRootUserTexts` **只判 `type`**，全库 730 局没出事**只是因为"卡不在首位"**；
+机制实测 `extractConstraints(卡片原文)` **返回 4 条**（卡里含"目标/一定要/不要/记住"）。
+
+**两道闸（互不依赖）**：
+- **来源闸** `topic.mjs#collectRootUserTexts`：`type==='user/message'` **且** `source.kind==='user'`（缺省退回 `role==='user'`）。
+- **内容闸** `extract.mjs#stripMemoryLedger`：剥 `<memory-ledger>…</memory-ledger>`（未闭合剥到末尾），约束段**先剥再抽**。
+- **不在 `logread`/`episode` 里剥** —— 过滤属于消费者，不属于读取器。
+
+**真实语料 golden**（ep-8cc34e32，36664 事件 / 17 卡 / 61 真用户）：
+卡在首位 ⇒ 旧判据取 `seq=0`（卡）、新判据取 `seq=8`（真用户）；约束抽取 **13 → 13 完全一致**，含卡标记 0 条。
+**整局只有卡 ⇒ 返回空数组（fail-closed，不拿卡顶替）。**
+
+### 验证
+814 条测试（809 pass / 0 fail / 5 skip）；`check PASS`（52 篇）。
+
 ## 0.2.8（2026-11-05）
 
 ### A6 判据改用 `support.quote`（T243）
