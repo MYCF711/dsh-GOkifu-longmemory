@@ -17,6 +17,32 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.17（2026-11-05）
+
+### 知识库 57：校验通过 ≠ 数据正确（T261）
+三层校验对照（PostgreSQL amcheck）：
+- **L1 完整性**（sha256/manifest）：发现文件被改坏；**查不出"内容自洽但语义错"**。
+- **L2 一致性**（结构不变量/引用存在性）：发现悬空引用；**查不出"两字段各自合法但互相矛盾"**。
+- **L3 正确性**（语义不变量）：发现时间错位/跨日等**语义矛盾**。
+
+amcheck 原文："correctly formatted, internally consistent, and correct relative to their own internal checksums
+**may still contain logical corruption**… **cannot be detected with checksums**"；
+且"`amcheck` can **only prove the presence of corruption**; it **cannot prove its absence**"。
+
+**本次事故落在 L3**：553 处 seq 重指后 `verify` 仍 OK，但 **651/1418 处 `occurredAt` 与新 seq 不一致**（最大 2.96 天、17 条跨日）。
+
+**该补的语义不变量**：SI-1 时间对齐 · SI-2 序号在窗 · SI-3 原文逐字 · SI-4 时间单调 · SI-5 重指留痕；
+挂 `verify --semantic` 三态输出 + tombstone（seq 改 +4 不同步 occurredAt 必须红）。
+
+### 修复版全量验证（副本）
+```
+日期一致性（1604 处重指）：ok 1604 · 不一致 0 · 不可读 0
+A5 跨作用域违规卡：0 · 正文完全一致 8/8
+```
+
+### 验证
+`check PASS`（57 篇）。
+
 ## 0.2.16（2026-11-05）
 
 ### 消歧规则：副本 P2 36.6% → 70.1%（T257）
