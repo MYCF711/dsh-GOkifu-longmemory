@@ -17,6 +17,15 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.158.1（2026-11-05）
+
+### 遗留分支甄别：**8 个分支没有真内容会被丢弃**（T186）
+- 逐分支做 blob 级比对（不是看 commit 标题）：**已并入 6 · 已被取代 1 · 丢弃 1 · 值得救 0**。
+  8 个分支改动的每个文件在 main 都存在（`main 缺失文件=0`），**13 个文件 blob 逐字节相同**，7 个版本段（0.14.0–0.86.0）全部已在 main 的 CHANGELOG。
+- 已按证据删除 **9 个远端分支**（8 个遗留 + `chore/plan-t38` 零差异）与 **5 个本地同名 ref**；远端现在只剩 `main`。
+- 证据：`evidence/T186-branch-triage.md`（583 行，含逐分支 `git diff --stat`、`git log --find-object` 溯源）。
+- 两处如实标注：① `feat/shadow-report` 的**本地** ref 是 rebase 前副本（不能当存档）；② `feat/config-gui` 是旧世系本地遗留，T186 只抽查未逐文件复核 ⇒ **保留待复核**。
+
 ## 0.158.0（2026-11-05）
 
 ### ④c 的统计功效：**现在没有证据**（T185）
