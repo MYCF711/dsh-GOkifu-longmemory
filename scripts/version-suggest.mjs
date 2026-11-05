@@ -157,19 +157,19 @@ function main(argv) {
   }
 
   if (!check) return 0;
-  // --check：当前版本是否已经落在建议档位之后（即至少到 next）
-  if (!current || !next) {
+  // --check 的唯一不变量：**package.json 已经 bump 过**（与最近 tag 不同）。
+  //
+  // 刻意不比较「版本大小」：版本序列可以被主人重置（例如 0.178.1 → 0.2.0 开启新里程碑），
+  // 此时 semver 的大小关系没有意义，但「有没有 bump」依然成立。
+  if (!current || !parseVersion(current)) {
     console.error('version-suggest: --check 需要 package.json 里有合法 semver');
     return 2;
   }
-  const cur = parseVersion(current);
-  const want = parseVersion(next);
-  const behind =
-    cur.major < want.major ||
-    (cur.major === want.major && cur.minor < want.minor) ||
-    (cur.major === want.major && cur.minor === want.minor && cur.patch < want.patch);
-  if (behind) {
-    console.error(`version-suggest: 当前 ${current} 落后于建议 ${next}（档位 ${level}）—— 发版前先 bump`);
+  const tagVersion = base.replace(/^v/, '');
+  if (current === tagVersion) {
+    console.error(
+      `version-suggest: 当前 ${current} 与最近 tag ${base} 相同 —— 本轮有 ${files.length} 个文件改动，发版前先 bump（建议档位 ${level}）`,
+    );
     return 1;
   }
   return 0;
