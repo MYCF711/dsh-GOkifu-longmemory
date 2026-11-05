@@ -193,7 +193,7 @@ export async function measureA1({ storeRoot, workspace, now, signals, crossScope
 //      看卡片是否真的指向**当年那条**（provenance 命中 prior episodes）。这是唯一衡量"记忆有没有用"的口径。
 // ---------------------------------------------------------------------------
 
-export function measureA2b({ store, report, splitAt, cache = null, limit = 30, frozen = null, walkOpts = {} } = {}) {
+export function measureA2b({ store, report, splitAt, cache = null, limit = 30, frozen = null, walkOpts = {}, holdoutExam = null } = {}) {
   const rows = Array.isArray(report?.primary?.rows) ? report.primary.rows : [];
   const priorEpisodes = new Map(); // signature -> Set(episode)
   const eligible = [];
@@ -216,13 +216,25 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
     const priorList = [...(priorEpisodes.get(item.sig) ?? [])];
     if (priorList.some((id) => scopeOf.get(id) === item.scopeKey)) sameScopeEligible += 1;
   }
-  if (eligible.length === 0) return { n: 0, hits: 0, recall: null, sameScopeEligible: 0, recallSameScope: null, sampled: [] };
+  if (eligible.length === 0) return { n: 0, hits: 0, recall: null, sameScopeEligible: 0, recallSameScope: null, sampled: [], sampleSource: 'report' };
   // 冻结集合（2026-11-02）：调用方给一份固定的评估集，分母不再随语料漂移。
   const frozenItems = Array.isArray(frozen?.items) && frozen.items.length > 0 ? frozen.items : null;
   if (frozenItems) {
     for (const item of frozenItems) priorEpisodes.set(item.sig, new Set(item.prior ?? []));
   }
-  const use = frozenItems ? frozenItems.slice(0, limit) : eligible.slice(0, limit);
+  // T236b：**A2b 的样本来源**（只换来源，判据一字不改）。优先级：
+  //   ① `--holdout <path>` 考卷 —— 由 `scripts/a2b-holdout.mjs`（T236a）产出；固定分母，跨版本可比；
+  //   ② `evidence/a2b-set.json` 冻结集（2026-11-02 起的老口径）；
+  //   ③ 退回 report 里"切点之后、且有当年先例"的失败签名（最老的口径）。
+  // TODO(T236a)：`a2b-holdout.mjs` 落地后，若考卷字段与本函数的 `{ sig, prior, scopeKey }` 不同，
+  //   在 examItems 这一层做一次映射 —— 当前只接受同形状 `items[]`（不同形状会被当作"没有考卷"而回落）。
+  const examItems = Array.isArray(holdoutExam?.items) && holdoutExam.items.length > 0 ? holdoutExam.items : null;
+  const sampleItems = examItems ?? frozenItems;
+  const sampleSource = examItems ? 'holdout' : (frozenItems ? 'frozen-set' : 'report');
+  if (examItems) {
+    for (const item of examItems) priorEpisodes.set(item.sig, new Set(item.prior ?? []));
+  }
+  const use = sampleItems ? sampleItems.slice(0, limit) : eligible.slice(0, limit);
   let hits = 0;
   let claimHits = 0;
   let readableHits = 0;
@@ -318,6 +330,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
   const sameScopeHits = sampled.filter((x) => x.sameScope && x.hit).length;
   return {
     n: use.length,
+    sampleSource,
     hits,
     claimHits,
     readableHits,
@@ -340,7 +353,7 @@ export function measureA2b({ store, report, splitAt, cache = null, limit = 30, f
   };
 }
 
-export async function measureA2({ dataRoot, storeRoot, now }) {
+export async function measureA2({ dataRoot, storeRoot, now, holdoutExam = null }) {
   if (!dataRoot || !fs.existsSync(dataRoot)) {
     return axis({
       value: null,
@@ -367,7 +380,7 @@ export async function measureA2({ dataRoot, storeRoot, now }) {
         const setFile = path.join(REPO_ROOT, 'evidence', 'a2b-set.json');
         if (fs.existsSync(setFile)) frozen = JSON.parse(fs.readFileSync(setFile, 'utf8'));
       } catch { frozen = null; }
-      injectionRecall = measureA2b({ store, report, splitAt: SPLIT_AT, cache, limit: 60, frozen });
+      injectionRecall = measureA2b({ store, report, splitAt: SPLIT_AT, cache, limit: 60, frozen, holdoutExam });
     } catch (error) {
       injectionRecall = { error: String(error?.message ?? error) };
     }
@@ -785,7 +798,7 @@ async function runM5Body(opts) {
       signals: h1Signals,
       crossScopeLeakRate: a5.value,
     }),
-    A2: await measureA2({ dataRoot, storeRoot, now }),
+    A2: await measureA2({ dataRoot, storeRoot, now, holdoutExam: opts.holdoutExam ?? null }),
     A3: measureA3({ repoRoot: opts.repoRoot ?? REPO_ROOT, liveAttempts: opts.liveAttempts ?? 0, liveStats: readLiveStats(storeRoot) }),
     A4: measureA4({ pipeline }),
     A5: a5,
@@ -957,6 +970,7 @@ export const USAGE = `棋院 m5-report（M5 六轴报告，零模型调用）
   --workspace <dir>  当前工作区（算 scopeKey；默认当前目录）
   --root <dir>       数据根（默认 $DSH_HOME）：A2 的 LOO 要用会话日志/棋谱
   --runs <n>         热路径次数（默认 50，A4）
+  --holdout <path>   A2b 用指定考卷（scripts/a2b-holdout.mjs 产出；固定分母，跨版本可比）
   --cards <n>        抽样卡片张数（默认 20，A5/A6）
   --json             输出 JSON（每轴 {value, unit, n, status, caveat}）
   --evidence <path>  写 markdown 证据（唯一写入口）
@@ -982,6 +996,8 @@ export function parseArgs(argv = []) {
     else if (a.startsWith('--runs=')) flags.runs = Number(a.slice('--runs='.length));
     else if (a === '--cards') flags.cards = Number(args.shift());
     else if (a.startsWith('--cards=')) flags.cards = Number(a.slice('--cards='.length));
+    else if (a === '--holdout') flags.holdout = args.shift();
+    else if (a.startsWith('--holdout=')) flags.holdout = a.slice('--holdout='.length);
     else if (a === '--evidence') flags.evidence = args.shift();
     else if (a.startsWith('--evidence=')) flags.evidence = a.slice('--evidence='.length);
     else if (a === '--now') flags.now = Number(args.shift());
@@ -997,7 +1013,18 @@ export async function runCli(argv = []) {
   const { flags } = parseArgs(argv);
   if (flags.help) return { code: 0, stdout: USAGE, stderr: '' };
   try {
+    // T236b：`--holdout <path>` 指向 T236a 的考卷；**给了就必须存在**（静默回退会让"样本换了"这条
+    // 重要事实消失，A2b 的数字就不可比了）。没给 ⇒ 保持既有回落链。
+    let holdoutExam = null;
+    if (typeof flags.holdout === 'string' && flags.holdout !== '') {
+      const examPath = path.resolve(flags.holdout);
+      if (!fs.existsSync(examPath)) {
+        throw new Error(`--holdout 指定的考卷不存在：${examPath}（先跑 node scripts/a2b-holdout.mjs 生成；T236a 未落地时不要传这个参数）`);
+      }
+      holdoutExam = JSON.parse(fs.readFileSync(examPath, 'utf8'));
+    }
     const report = await runM5({
+      holdoutExam,
       storeRoot: flags.store ? path.resolve(flags.store) : undefined,
       workspace: flags.workspace ? path.resolve(flags.workspace) : process.cwd(),
       dataRoot: flags.root ? path.resolve(flags.root) : (process.env.DSH_HOME ?? ''),

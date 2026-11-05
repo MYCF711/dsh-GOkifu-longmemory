@@ -63,3 +63,45 @@ test('metrics-guard: A2b 严格低于「冻结基线 − 10pp」要报（防慢�
   assert.equal(low.ok, false, '掉 14pp ⇒ FAIL');
   assert.ok(low.fails.some((f) => f.includes('掉了')), '失败理由要写明掉点');
 });
+
+// ---------------------------------------------------------------- T236b（主人改判 2026-11-05）
+//
+// 层级：主判据 = A2b（召回相关度）· 约束 = A1/A5/A6/A4 · 下游参考 = repeatFailureRate（不参与 exit code）。
+// 为什么：把下游结果当源头验收面 = 指标不可归因（源头做对可能被下游浪费，做错也可能被下游兜住）。
+
+test('T236b ①: A2b 掉到门槛下 ⇒ 红（且是主判据层的红）', () => {
+  const r = base();
+  r.axes.A2.detail.injectionRecall.recallSpecific = 0.5;
+  const v = judge(r);
+  assert.equal(v.ok, false, 'A2b 低于下限必须红');
+  assert.ok(v.layers.main.length >= 1, '要落在主判据层');
+  assert.ok(v.layers.main.some((f) => f.includes('A2b 严格')), JSON.stringify(v.layers));
+  assert.equal(v.layers.constraints.length, 0, '约束条件本身没越界');
+});
+
+test('T236b ②: repeatFailureRate 再差也不影响 exit code（下游参考）', () => {
+  // A2 轴的 value 就是 repeatFailureRate（LOO）；把它拉到 99% 也不许红
+  const bad = base();
+  bad.axes.A2.value = 0.99;
+  const v1 = judge(bad);
+  assert.equal(v1.ok, true, `repeatFailureRate 不该决定 exit code：${v1.fails.join(' · ')}`);
+  assert.equal(v1.values.repeatFailureRate, 0.99, '仍要打印出来');
+  // 缺失也一样（不许因为缺值而红）
+  const missing = base();
+  delete missing.axes.A2.value;
+  assert.equal(judge(missing).ok, true);
+  assert.equal(judge(missing).values.repeatFailureRate, null, '缺值给 null，不编造 0');
+});
+
+test('T236b ③: 输出层级 —— A2b 的失败排在 A1 之前', () => {
+  const r = base();
+  r.axes.A2.detail.injectionRecall.recallSpecific = 0.4; // A2b 红
+  r.axes.A1.value = 0.9; // A1 也红
+  const v = judge(r);
+  assert.equal(v.ok, false);
+  assert.ok(v.fails.length >= 2, JSON.stringify(v.fails));
+  const firstA2b = v.fails.findIndex((f) => f.startsWith('A2b'));
+  const firstA1 = v.fails.findIndex((f) => f.startsWith('A1'));
+  assert.ok(firstA2b >= 0 && firstA1 >= 0);
+  assert.ok(firstA2b < firstA1, `A2b 必须排在 A1 之前，实际：${JSON.stringify(v.fails)}`);
+});
