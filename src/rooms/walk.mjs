@@ -38,6 +38,8 @@
 //     claim 条目：antipattern ⇒ failure；preference ⇒ constraint；其余 ⇒ claim。
 //   权重只由机械量决定：直接命中 = 主题 idfNorm（缺失回落 0.5）；一跳命中 = link.weight；
 //     多路命中取 max。**没有模型评分参与**。
+//   T240：候选排序的**第一键** = 信号判别词在该行文本里的出现次数（overlap），其余键（档位/depth/repeat/weight/occurredAt）
+//   全部降为 tie-break；只改顺序、不改候选集。
 // 合并节点（T191/T193，合流消费侧）：**合并节点不冒充 claim 行** —— 命中合并节点时改落到它代表的成员上
 //   （同 scope、有 (episode, seq, quote) 出处、按与 R12 同一套 overlap 打分选最佳成员；
 //    一个成员都解析不出来才退回合并节点并计 dropped.mergeNodeNoMember）。
@@ -467,13 +469,23 @@ function hopKeyOf(hop) {
   return [hop.kind, hop.from, hop.to, Array.isArray(hop.why) ? hop.why.join(',') : ''].join(HOP_DEDUPE_SEP);
 }
 
-/** 排序：档位 → depth 升序 → **跨局重复次数降序** → weight 降序 → occurredAt 降序 → 标识升序。 */
+/**
+ * 排序：**信号判别词重合数降序（T240）** → 档位 → depth 升序 → **跨局重复次数降序** → weight 降序 →
+ * occurredAt 降序 → 标识升序。
+ */
 export function compareHits(a, b) {
   // T179：合并节点与它的成员是一个**块** —— 块内顺序 = 节点(0) → 成员(1..n，occurredAt 升序)。
   // 块标记只在"成员真的被展开进来"时才会挂上；T193 起不再有展开，这条分支保持零影响。
   const blockA = a?._mergeBlock ?? '';
   const blockB = b?._mergeBlock ?? '';
   if (blockA !== '' && blockA === blockB) return (a._mergeOrder ?? 0) - (b._mergeOrder ?? 0);
+  // T240：**第一排序键 = 信号判别词在该行文本里的出现次数**（与 `pickMergeMember` 同一套 overlap 口径）。
+  // 起因（evidence/T237-self-attribution.md）：self/root 未命中的 28 条 E 类，全是 top-5 被"同局通用错误"占满，
+  // 任务原话最重合的 claim（tokOverlap=5）被 depth/support 的档位压在外面。
+  // 只改**键的顺序**：depth / repeat / weight / occurredAt 的定义与候选集一字不改，全部降为 tie-break。
+  const overlapA = finiteNumber(a?._tokOverlap) ? a._tokOverlap : 0;
+  const overlapB = finiteNumber(b?._tokOverlap) ? b._tokOverlap : 0;
+  if (overlapA !== overlapB) return overlapB - overlapA;
   const classA = CLASS_RANK[a?._sortKind ?? a.kind] ?? 9;
   const classB = CLASS_RANK[b?._sortKind ?? b.kind] ?? 9;
   if (classA !== classB) return classA - classB;
@@ -1200,6 +1212,19 @@ export function walkFromSignals(opts = {}) {
   }
 
   // ---- T179：合并节点命中 ⇒ 成员 claim 同一跳展开（R12 折叠需要成员行）----
+
+  // ---- T240：候选排序第一键 = 信号判别词在行文本里的出现次数（只改**顺序**，不改候选集）----
+  // 口径与 `pickMergeMember` 相同（terms + 实体 key，小写包含）；命中行的 text 就是棋谱 l0 / claim 原文。
+  const rankingNeedles = mergeSignalNeedles(sig);
+  const overlapOf = (text) => {
+    const hay = String(text ?? '').toLowerCase();
+    if (!hay || !rankingNeedles.length) return 0;
+    let count = 0;
+    for (const needle of rankingNeedles) if (hay.includes(needle)) count += 1;
+    return count;
+  };
+  for (const hit of episodeHits.values()) hit._tokOverlap = overlapOf(hit.text);
+  for (const hit of claimHits.values()) hit._tokOverlap = overlapOf(hit.text);
 
   // ---- 排序 + 前缀式截断（limit / budget）----
   const candidates = [...episodeHits.values(), ...claimHits.values()].sort(compareHits);
