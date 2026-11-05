@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.16（2026-11-05）
+
+### 消歧规则：副本 P2 36.6% → 70.1%（T257）
+**核心假设被证伪**：多命中的主因**不是**"模型回显"，
+而是 **`job/registered` + `job/settled` 把同一份子代理 payload 逐字广播两次**，其次是工具输出重试。
+
+**规则**：唯一 `tool/result` 命中 ⇒ 选原始出处；多个 `tool/result` ⇒ 不修；只有 `assistant/message` ⇒ 不修（回显不是出处）。
+
+```
+桶分布（2579 引用）：ok 944 · 可修 865 · ambiguous 723 · unrepaired 47
+副本 dry-run：写入 674 条 claim · 865 处引用；第二次 0 变更（幂等）
+P2 同口径通过率：36.6% → 70.1%（+33.5pt）
+```
+**只增不改**：只改 `seq` + 追加 `provenanceRepair`，quote/text/state 逐字不变。
+
+**守卫**：`--apply` 且 store 不在 `tmp/` 下 ⇒ **exit 1**（实测真库路径被拒）。
+
+### 重要：真库**未动**
+这 865 条**只在副本上验证过**，真库等口令。
+（上一轮那 553 处是**旧尺子**写的，已用 `writeManifest` 扶正，`verify: OK`。）
+
+### 验证
+9 条 repair-support-seq 测试全绿；`check PASS`（56 篇）。
+
 ## 0.2.15（2026-11-05）
 
 ### 知识库 56：考卷污染与裁判失效（T258）
