@@ -310,3 +310,69 @@ test('T239 ③: 中位距离 + offset 占比（分母不含 unreadable）', asyn
   assert.equal(out.a6Denominator, 3);
   assert.equal(out.textOffsetRatio, 2 / 3);
 });
+
+// ---------------------------------------------------------------- T243（判据对象：support.quote，不是渲染正文）
+//
+// 根因（evidence/T241-offset-attribution.md）：卡片正文是跨局归纳的**类级断言**，本来就不是原文复制品；
+// 拿它去追原文恒失败（94 条 far 里 88 条"命中"发生在另一张被注入过的卡上）。同一批数据里 85 条的
+// `support.quote` 就在声明 seq ±4 内 ⇒ 指针没坏，是判据拿错了字段。
+import { QUOTE_WINDOW, normalizeForQuote, buildQuoteIndex } from '../scripts/audit-card-samples.mjs';
+
+test('T243 ①: 渲染正文是改写、但 support.quote 在 ±4 内 ⇒ ok（旧口径会误判 notFound）', async () => {
+  const eps = new Map([['ep-aaaa0001', { id: 'ep-aaaa0001', scopeKey: 'w:/a', closure: { seqFrom: 0, seqTo: 100 } }]]);
+  const evs = { 'ep-aaaa0001': [{ seq: 11, time: DAY(2026, 11, 4, 6), data: { text: 'Error: old_string was not found in /a/b.go' } }] };
+  const claims = [{
+    id: 'c-quote0001',
+    support: [{ episode: 'ep-aaaa0001', seq: 11, quote: 'Error: old_string was not found in /a/b.go' }],
+  }];
+  const out = await auditRows({
+    rows: [{
+      at: 1793749445009, digest: 'd', tokens: 10, scope: 'w:/a',
+      // 渲染行是"类级断言"（改写过的），原文里根本没有这句
+      section: '- [antipattern] 改文件前必须先读（教训归纳） (ep-aaaa0001, 2026-11-04, seq 11)',
+    }],
+    episodes: eps,
+    loadEvents: async (id) => evs[id] ?? [],
+    window: 10,
+    textCheck: true,
+    claims,
+  });
+  assert.equal(out.a6Mode, 'quote');
+  assert.equal(out.textOk, 1, `quote 命中 ⇒ ok，实际：${JSON.stringify({ ok: out.textOk, notFound: out.textNotFound })}`);
+  assert.equal(out.textNotFound, 0, '换判据对象后不该再判 notFound');
+  assert.equal(out.traceNotFound, 1, '信息项：渲染正文确实找不到（旧口径会报的正是这个）');
+});
+
+test('T243 ②: 反查不到 claimId ⇒ unresolved（单列、不进分子分母）', async () => {
+  const eps = new Map([['ep-aaaa0001', { id: 'ep-aaaa0001', scopeKey: 'w:/a', closure: { seqFrom: 0, seqTo: 100 } }]]);
+  const out = await auditRows({
+    rows: [{ at: 1, digest: 'd', tokens: 1, scope: 'w:/a', section: '- [antipattern] 某条断言 (ep-aaaa0001, 2026-11-04, seq 11)' }],
+    episodes: eps,
+    loadEvents: async () => [{ seq: 11, time: DAY(2026, 11, 4, 6), data: { text: '无关原文' } }],
+    window: 10,
+    textCheck: true,
+    claims: [], // 空库：谁也对不上
+  });
+  assert.equal(out.textUnresolved, 1);
+  assert.equal(out.a6Denominator, 0, 'unresolved 不进分母');
+  assert.equal(out.exitCode, 1, 'fail-closed：反查不到也算核不了');
+});
+
+test('T243 ③: quote 在别处（±4 之外）⇒ offset；归一化规则生效', async () => {
+  assert.equal(normalizeForQuote('a\u00a0b\r\nc'), 'a b c', 'NBSP/CRLF 归一');
+  assert.equal(QUOTE_WINDOW, 4);
+  const eps = new Map([['ep-aaaa0001', { id: 'ep-aaaa0001', scopeKey: 'w:/a', closure: { seqFrom: 0, seqTo: 100 } }]]);
+  const evs = { 'ep-aaaa0001': [{ seq: 40, time: DAY(2026, 11, 4, 6), data: { text: 'Error: boom happened' } }] };
+  const claims = [{ id: 'c-quote0002', support: [{ episode: 'ep-aaaa0001', seq: 11, quote: 'Error: boom happened' }] }];
+  const out = await auditRows({
+    rows: [{ at: 1, digest: 'd', tokens: 1, scope: 'w:/a', section: '- [antipattern] 断言 (ep-aaaa0001, 2026-11-04, seq 11)' }],
+    episodes: eps,
+    loadEvents: async (id) => evs[id] ?? [],
+    window: 10,
+    textCheck: true,
+    claims,
+  });
+  assert.equal(out.textOffset, 1, '同局别处找到 ⇒ offset');
+  assert.equal(out.exitCode, 0, 'offset 不红');
+  assert.equal(buildQuoteIndex(claims).get('ep-aaaa0001#11').length, 1);
+});

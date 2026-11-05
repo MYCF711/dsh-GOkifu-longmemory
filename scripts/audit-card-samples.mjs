@@ -85,6 +85,46 @@ export function collectStrings(value, out = []) {
 /** T239：`offset` 里"近偏移"的门槛（seq 距离）。≤ 这个值的算"指针偏了几个事件"，> 的算"远偏移"。 */
 export const OFFSET_NEAR_MAX = 20;
 
+/** T243：A6 的窗口 —— `support.quote` 必须落在声明 seq 的 ±4 内（T232 的 P2 口径）。 */
+export const QUOTE_WINDOW = 4;
+
+/**
+ * T243：原文归一化规则（**判据的一部分，必须可复现**）：
+ *   ① 全角空格/NBSP（U+00A0、U+3000）→ 普通空格；
+ *   ② CRLF / CR → LF；
+ *   ③ 连续空白折叠成一个空格；首尾去空白。
+ * 目的：卡片正文与事件原文的差异里，"空白被折叠"这一类（T238）不该算 notFound。
+ */
+export function normalizeForQuote(s) {
+  return String(s ?? '')
+    .replace(/[\u00a0\u3000]/g, ' ')
+    .replace(/\r\n?/g, '\n')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 把 claims 建成 `ep#seq → [{claimId, quote}]` 索引：A6 靠"卡片行的 (ep, seq)"反查它属于哪条 claim，
+ * 再用该 claim 的 `support.quote` 去核原文（而不是拿渲染正文）。
+ */
+export function buildQuoteIndex(claims = []) {
+  const index = new Map();
+  for (const claim of Array.isArray(claims) ? claims : []) {
+    const id = typeof claim?.id === 'string' ? claim.id : null;
+    if (!id) continue;
+    for (const sup of Array.isArray(claim.support) ? claim.support : []) {
+      const ep = typeof sup?.episode === 'string' ? sup.episode : null;
+      const seq = Number(sup?.seq);
+      if (!ep || !Number.isFinite(seq)) continue;
+      const key = `${ep}#${seq}`;
+      const list = index.get(key) ?? [];
+      list.push({ claimId: id, quote: typeof sup?.quote === 'string' ? sup.quote : '' });
+      index.set(key, list);
+    }
+  }
+  return index;
+}
+
 export function eventsToBlobs(events) {
   return (Array.isArray(events) ? events : [])
     .map((ev) => ({
@@ -159,7 +199,11 @@ export function checkDate({ refDate, event }) {
  * @param {number}   [p.window]      文字层 at-seq 的窗口（事件条数），默认 3
  * @param {boolean}  [p.textCheck]   默认 true；false ⇒ 只跑引用层（`--no-text`）
  */
-export async function auditRows({ rows, episodes, loadEvents = null, window = DEFAULT_WINDOW, textCheck = true } = {}) {
+export async function auditRows({ rows, episodes, loadEvents = null, window = DEFAULT_WINDOW, textCheck = true, claims = null, quoteWindow = QUOTE_WINDOW } = {}) {
+  // T243：给了 claims 就走**新口径**（support.quote 判定）；没给则退回旧口径（渲染正文），
+  // 只为兼容既有调用方/测试 —— CLI 永远传 claims。
+  const quoteIndex = claims ? buildQuoteIndex(claims) : null;
+  const mode = quoteIndex ? 'quote' : 'text';
   const cache = new Map();
   const eventsOf = async (id) => {
     if (!textCheck || typeof loadEvents !== 'function') return null;
@@ -191,12 +235,49 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
         // 为什么：missing 的语义是"该局任何 seq 都没有这段文字"（内容对不上），而这里是"根本没读到"——
         // 两者是完全不同的两类问题（docs/调研/46：未知 ≠ 已失效）。unreadable 不进 A6 分子/分母，
         // 但退出码仍 fail-closed（一次全 unreadable 的审计必须非 0，否则就是"没验过也报绿"）。
-        verdicts.push({ ...base, verdict: 'unreadable', nearestSeq: null, distance: null, dateVerdict: 'unreadable', eventDate: null });
+        verdicts.push({ ...base, verdict: 'unreadable', state: 'unreadable', nearestSeq: null, distance: null, dateVerdict: 'unreadable', eventDate: null });
         continue;
       }
-      const textVerdict = classifyTextByEvents({ text: ref.text, seq: ref.seq, events, window });
+      // 信息项（不参与 A6）：渲染正文的旧检查 —— 仍有用（能发现"命中处是另一张被注入过的卡"）。
+      const textTrace = ref.text ? classifyTextByEvents({ text: ref.text, seq: ref.seq, events, window }).verdict : 'skipped';
+      // T243 主判据：用 claim 的 support.quote 去核原文（窗口 ±4）
+      let textVerdict;
+      let resolvedClaimId = null;
+      if (quoteIndex) {
+        const candidates = quoteIndex.get(`${ref.episode}#${ref.seq}`) ?? [];
+        if (!candidates.length) {
+          // 反查不到 claimId ⇒ 单列 unresolved（不进分子分母，fail-closed 由汇总层决定）
+          textVerdict = { verdict: 'unresolved', state: 'unresolved', nearestSeq: null, distance: null, quote: null };
+        } else {
+          // 同一条 (ep, seq) 可能被多条 claim 引用：优先取"quote 在 ±window 内能命中"的那条
+          let picked = null;
+          for (const cand of candidates) {
+            const quote = normalizeForQuote(cand.quote);
+            if (!quote) continue;
+            const v = classifyTextByEvents({ text: quote, seq: ref.seq, events, window: quoteWindow });
+            if (v.verdict === 'at-seq') { picked = { cand, v, quote }; break; }
+            if (!picked) picked = { cand, v, quote };
+          }
+          if (!picked) {
+            textVerdict = { verdict: 'unresolved', state: 'unresolved', nearestSeq: null, distance: null, quote: null };
+          } else {
+            resolvedClaimId = picked.cand.claimId;
+            // at-seq → ok；elsewhere → offset；missing → notFound（四态）
+            const mapped = picked.v.verdict === 'at-seq' ? 'ok'
+              : (picked.v.verdict === 'elsewhere' ? 'offset'
+                : (picked.v.verdict === 'missing' ? 'notFound' : picked.v.verdict));
+            textVerdict = { verdict: mapped, state: mapped, nearestSeq: picked.v.nearestSeq, distance: picked.v.distance, quote: picked.quote };
+          }
+        }
+      } else {
+        const old = classifyTextByEvents({ text: ref.text, seq: ref.seq, events, window });
+        const mapped = old.verdict === 'at-seq' ? 'ok'
+          : (old.verdict === 'elsewhere' ? 'offset'
+            : (old.verdict === 'missing' ? 'notFound' : old.verdict));
+        textVerdict = { verdict: old.verdict, state: mapped, nearestSeq: old.nearestSeq, distance: old.distance, quote: null };
+      }
       const dateVerdict = checkDate({ refDate: ref.date, event: eventNearSeq(events, ref.seq) });
-      verdicts.push({ ...base, ...textVerdict, dateVerdict: dateVerdict.verdict, eventDate: dateVerdict.eventDate });
+      verdicts.push({ ...base, ...textVerdict, claimId: resolvedClaimId, textTrace, dateVerdict: dateVerdict.verdict, eventDate: dateVerdict.eventDate });
     }
     const count = (pred) => verdicts.filter(pred).length;
     details.push({
@@ -208,17 +289,22 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
       ok: count((v) => v.exists && v.inRange),
       sameScope: count((v) => v.sameScope),
       bad: verdicts.filter((v) => !v.exists || !v.inRange).slice(0, 3),
-      // T239 四态（旧键全部保留，兼容下游读法）
-      textOk: count((v) => v.verdict === 'at-seq'),
-      textAtSeq: count((v) => v.verdict === 'at-seq'),
-      textOffset: count((v) => v.verdict === 'elsewhere'),
-      textElsewhere: count((v) => v.verdict === 'elsewhere'),
-      textOffsetNear: count((v) => v.verdict === 'elsewhere' && Number.isFinite(v.distance) && v.distance <= OFFSET_NEAR_MAX),
-      textOffsetFar: count((v) => v.verdict === 'elsewhere' && Number.isFinite(v.distance) && v.distance > OFFSET_NEAR_MAX),
-      textNotFound: count((v) => v.verdict === 'missing'),
-      textMissing: count((v) => v.verdict === 'missing'), // 旧键 = notFound（true 坏引用）
-      textUnreadable: count((v) => v.verdict === 'unreadable'),
+      // T239/T243 四态（旧键全部保留，兼容下游读法）
+      textOk: count((v) => v.state === 'ok'),
+      textAtSeq: count((v) => v.state === 'ok'),
+      textOffset: count((v) => v.state === 'offset'),
+      textElsewhere: count((v) => v.state === 'offset'),
+      textOffsetNear: count((v) => v.state === 'offset' && Number.isFinite(v.distance) && v.distance <= OFFSET_NEAR_MAX),
+      textOffsetFar: count((v) => v.state === 'offset' && Number.isFinite(v.distance) && v.distance > OFFSET_NEAR_MAX),
+      textNotFound: count((v) => v.state === 'notFound'),
+      textMissing: count((v) => v.state === 'notFound'), // 旧键 = notFound（true 坏引用）
+      textUnreadable: count((v) => v.state === 'unreadable'),
+      textUnresolved: count((v) => v.state === 'unresolved'),
       textJoined: count((v) => v.verdict === 'joined'),
+      // 信息项（不参与 A6）：渲染正文的旧检查
+      traceOk: count((v) => v.textTrace === 'at-seq'),
+      traceOffset: count((v) => v.textTrace === 'elsewhere'),
+      traceNotFound: count((v) => v.textTrace === 'missing'),
       dateOk: count((v) => v.dateVerdict === 'ok'),
       dateBad: count((v) => v.dateVerdict === 'mismatch' || v.dateVerdict === 'no-event'),
       verdicts,
@@ -232,11 +318,13 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
   const textCheckFailed = textCheck;
   // T239：A6 的分母 = 引用数 − 读不到的（unreadable 不进分子也不进分母）。
   const textUnreadable = sum('textUnreadable');
-  const a6Denominator = totalRefs - textUnreadable;
+  const textUnresolved = sum('textUnresolved');
+  // T243：unverified 类（读不到 / 反查不到）都不进 A6 分子分母
+  const a6Denominator = totalRefs - textUnreadable - textUnresolved;
   // 中位距离：只统计"偏移命中"（offset）的那批；偶数个取中间两个的均值。
   const offsetDistances = details
     .flatMap((d) => d.verdicts)
-    .filter((v) => v.verdict === 'elsewhere' && Number.isFinite(v.distance))
+    .filter((v) => v.state === 'offset' && Number.isFinite(v.distance))
     .map((v) => Number(v.distance))
     .sort((a, b) => a - b);
   const medianOf = (arr) => {
@@ -261,7 +349,13 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
     textNotFound: sum('textNotFound'),
     textMissing: sum('textMissing'), // = textNotFound（真找不到）
     textUnreadable,
+    textUnresolved,
+    a6Mode: mode,
     textJoined: sum('textJoined'),
+    // 信息项：旧口径（渲染正文）在同一批样本上的读数，便于对照
+    traceOk: sum('traceOk'),
+    traceOffset: sum('traceOffset'),
+    traceNotFound: sum('traceNotFound'),
     a6Denominator,
     textOffsetRatio: a6Denominator ? sum('textOffset') / a6Denominator : null,
     textNotFoundRatio: a6Denominator ? sum('textNotFound') / a6Denominator : null,
@@ -277,7 +371,7 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
     //   · offset（指针偏了）**不红**，只在汇总里单列 + 给占比（待修项）；
     //   · 日期不一致 ⇒ 红；--no-text 退回旧口径。
     exitCode: textCheckFailed
-      ? ((sum('textNotFound') > 0 || textUnreadable > 0 || sum('dateBad') > 0) ? 1 : 0)
+      ? ((sum('textNotFound') > 0 || textUnreadable > 0 || textUnresolved > 0 || sum('dateBad') > 0) ? 1 : 0)
       : (okRefs === totalRefs ? 0 : 1),
   };
 }
@@ -330,6 +424,9 @@ async function main(argv = process.argv.slice(2)) {
   const textCheck = !argv.includes('--no-text');
   const window = Number(opt('window', String(DEFAULT_WINDOW)));
   const store = createStore({ root: storeRoot });
+  // T243：A6 需要 claim 的 support.quote 才能核原文（拿渲染正文去追原文恒失败）
+  let claimsForAudit = [];
+  try { claimsForAudit = store.list('claims').map((e) => e?.record).filter(Boolean); } catch { claimsForAudit = []; }
   const episodes = new Map(store.list('episodes').map((x) => [x.record.id, x.record]));
   let rows = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
     .map((l) => { try { return JSON.parse(l); } catch { return null; } })
@@ -359,7 +456,7 @@ async function main(argv = process.argv.slice(2)) {
     pidNote += ' · 该进程还没有带 pid 的样本（重启后新写的样本才会带）';
   }
 
-  const out = await auditRows({ rows, episodes, loadEvents: makeLogLoader({ home: HOME }), window, textCheck });
+  const out = await auditRows({ rows, episodes, loadEvents: makeLogLoader({ home: HOME }), window, textCheck, claims: claimsForAudit });
 
   if (argv.includes('--json')) {
     console.log(JSON.stringify(out, null, 2));
@@ -369,7 +466,9 @@ async function main(argv = process.argv.slice(2)) {
       // T239：四态分列（ok / offset / unreadable / notFound）+ 中位距离 + 占比
       const ratio = (n) => (out.a6Denominator ? `${((n / out.a6Denominator) * 100).toFixed(1)}%` : '-');
       console.log(`样本 ${out.samples} 张 · 引用 ${out.refs} 条 · A6 分母 ${out.a6Denominator}（= 引用 − unreadable ${out.textUnreadable}）`);
-      console.log(`  ok ${out.textOk} · offset ${out.textOffset}（近 ${out.textOffsetNear} / 远 ${out.textOffsetFar}，占比 ${ratio(out.textOffset)}，中位距离 ${out.offsetDistanceMedian ?? 'n/a'}）· unreadable ${out.textUnreadable} · notFound ${out.textNotFound}（真找不到，占比 ${ratio(out.textNotFound)}）· joined ${out.textJoined ?? 0} · 日期一致 ${out.dateOk}/${out.refs}${pidNote ? ' ' + pidNote : ''}`);
+      console.log(`  ok ${out.textOk} · offset ${out.textOffset}（近 ${out.textOffsetNear} / 远 ${out.textOffsetFar}，占比 ${ratio(out.textOffset)}，中位距离 ${out.offsetDistanceMedian ?? 'n/a'}）· unreadable ${out.textUnreadable} · notFound ${out.textNotFound}（真找不到，占比 ${ratio(out.textNotFound)}）· unresolved ${out.textUnresolved} · 日期一致 ${out.dateOk}/${out.refs}${pidNote ? ' ' + pidNote : ''}`);
+      console.log(`  A6 口径：${out.a6Mode === 'quote' ? `support.quote（±${QUOTE_WINDOW}，NBSP/CRLF 归一）` : '渲染正文（旧口径）'} · 分母 ${out.a6Denominator} = 引用 − unreadable ${out.textUnreadable} − unresolved ${out.textUnresolved}`);
+      console.log(`  对照（信息项，不参与 A6）：渲染正文口径 ok ${out.traceOk} · offset ${out.traceOffset} · notFound ${out.traceNotFound}`);
       console.log(`（引用层：可回溯 ${out.okRefs}/${out.refs}（${pct(out.okRefs)}，弱判据）· 同作用域 ${out.sameScopeRefs} · 跨作用域 ${out.crossScopeRefs} · window=±${out.window}）`);
       const gap = out.details.flatMap((d) => d.verdicts)
         .filter((v) => v.distance != null && v.distance > out.window && v.distance <= 10).length;
@@ -381,7 +480,7 @@ async function main(argv = process.argv.slice(2)) {
     }
     for (const d of out.details) {
       const extra = textCheck
-        ? ` ok=${d.textOk} offset=${d.textOffset} unreadable=${d.textUnreadable} notFound=${d.textNotFound} joined=${d.textJoined ?? 0} 日期ok=${d.dateOk}/${d.refs}`
+        ? ` ok=${d.textOk} offset=${d.textOffset} unreadable=${d.textUnreadable} notFound=${d.textNotFound} unresolved=${d.textUnresolved} 日期ok=${d.dateOk}/${d.refs}`
         : '';
       console.log(`- ${new Date(d.at).toLocaleString()} ${String(d.scope).slice(-24)} tokens=${d.tokens} refs=${d.refs} ok=${d.ok}${extra}`);
     }

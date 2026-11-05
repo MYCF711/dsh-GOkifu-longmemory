@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.8（2026-11-05）
+
+### A6 判据改用 `support.quote`（T243）
+T239 拿**卡片渲染正文**（`claim.text`，跨局归纳的**改写**）去追单个 `(ep,seq)` 的原文 ⇒ **恒失败**。
+T241 证明：94 条远偏移里 **88 条的"命中"发生在另一张被注入过的记忆卡上**（自指），
+而同一批 claim 的 `support.quote` 有 **85 条就在声明 seq 的 ±4 格内** —— **指针没坏，是判据拿错了字段。**
+
+**改法**：A6 判定改用 `support.quote`（±4，NBSP/全角/CRLF/空白归一）+ `buildQuoteIndex`；
+五态 `ok / offset / unreadable / notFound / unresolved`；渲染正文保留为信息项 `textTrace`。
+**exit code 语义不变**：`notFound > 0` 仍红。
+
+### 真库读数
+`ok 904 · offset 287（全近偏移，中位 6）· unreadable 0 · notFound 8（0.7%）· unresolved 2`
+**A6 真实通过率 = 904/1199 = 75.4%**（旧口径下 notFound 是 27）。
+
+**口径敏感性**：`offset` 窗口 ±4、渲染正文口径 ±10 —— 别把"ok 904 vs 1073"直接读成新判据更差。
+
+### 验证
+22 条 audit-card-samples 测试全绿；`check PASS`（52 篇）。
+
 ## 0.2.7（2026-11-05）
 
 ### 主判据改用 n=108 考卷（T242）
