@@ -17,6 +17,21 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.161.0（2026-11-05）
+
+### walk 挑 claim 时排除合并节点、改选成员（T191）
+- `src/rooms/walk.mjs` 新增 `isMergeNodeClaim` / `mergeSignalNeedles` / `mergeMemberProof` / `pickMergeMember`：
+  命中的是合并节点时，**改选它代表的最佳成员**（同 `scopeKey` 逐字节相同、`support` 有 `(episode, seq, quote)`、
+  invalidated / `validityOk=false` 不带；与 R12 `pickClaim` 同一套 overlap 打分，同分按 `occurredAt` 升序、id 升序）；
+  一个成员都解析不出来 ⇒ 退回合并节点本身并计入既有 `dropped.mergeNodeNoMember`。
+- 同组其它成员作为**同一跳**展开（cap 8，超出计 `dropped.mergeMembersCapped`）；**不改 depth**；无 `merge` 的 claim 一字不改。
+- **效果**：④b 丢行 **15 行 / 9 组 → 3 行 / 3 组（−80%）**；④a 反增**仍 0**；①②③ 全 0。
+- **剩余 3 行**（`c-94108d88` 19→16 · `c-abe785ae` 8→5 · `c-fb2c07af` 9→7）已定因：walk 侧 hit 集合**已逐条对齐**，
+  差异来自 R12 `pickClaim` 的**升级目标集不同口径**（影库同局多了合并组/成员）+ 预算截断 ⇒ 已派 T192。
+
+### 验证
+30 条 walk 测试全绿；`check PASS`。
+
 ## 0.160.0（2026-11-05）
 
 ### 合并节点不再冒充普通 claim 行（T187）
