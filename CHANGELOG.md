@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.20（2026-11-05）
+
+### 合法信号扩展：从最近 N 条消息抽硬实体（T267）
+**与 T264 的作弊划清界限**：本刀的信号来自 `payload.messages` 里**已经出现**的字面量
+（`pre-step` 这一刻就在上下文里，`availableAtSeq ≤ injectionSeq`），**不是**整局后的棋谱主题。
+
+`src/plugin.mjs` 新增 `signalFromMessages(messages, { lastN = 12 })`：
+取最近 N 条（**含 assistant 与 tool 角色**）用**同一套** `HARD_ENTITY_PATTERNS` 抽实体，
+**追加**进 `signal.entities`；`lastUserText` 的 `text` **逐字节不变**（golden）；**只抽实体不塞整段对话**。
+
+**收益：测不了，如实说。** 现有考卷只有 `signal`（根用户原话）、**没有 `messages`** ⇒
+B 的增量恒为 0 **不是"没收益"，是"语料里没有这个信号"**。
+闭环只差一份真实消息语料（`evidence/T267-messages.jsonl`）+ 同批 `negativeControl` 复算。
+
+### 验证
+40 条 plugin 测试全绿；`check PASS`（58 篇）。
+
 ## 0.2.19（2026-11-05）
 
 ### 知识库 58：信号可得性与信息泄漏（T266）
