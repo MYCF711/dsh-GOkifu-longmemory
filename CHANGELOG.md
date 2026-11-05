@@ -17,6 +17,29 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.7（2026-11-05）
+
+### 主判据改用 n=108 考卷（T242）
+T236b 只给 `m5-report` 加了 `--holdout` 参数，**`metrics-guard` 默认仍用 n=19 的 repeat-only 冻结集** ⇒
+`严格=100.0%（n=19）` 与 `a2b-holdout 34.26%（n=108）` 同指标两个数，**主判据仍只考"最容易的那一类"**。
+
+**改法**：默认样本来源 = `evidence/a2b-holdout.json`（n=108）；考卷不存在 ⇒ **fail-closed**（不许静默回退 n=19）；
+输出带 `sampleSource` 与 `n`；**门槛重定**为 `a2bStrictMin = 37/108`、`a2bCoverMin = 74/108`（**等于当前实测，是起点不是目标**），
+旧的 `0.8421 / 掉 10pp` **只对 `sampleSource='report'`（n=19 旧口径）生效**。
+
+**为什么不算放水**：旧基线 84.21% 来自 repeat-only 冻结集（最容易的一类）；新考卷混入 self 题，
+**门槛定在当前实测而非低于实测**，掉 1 条（36/108）立刻红 —— **扩大题型的同时一格没让**。
+
+### 实测
+```
+主判据 · A2b 召回相关度（sampleSource=holdout，n=108）：严格=34.3% 覆盖=68.5%
+约束条件 · A1=0 A5=0 A6=1 A4.p50=13.82ms
+下游参考 · repeatFailureRate=22.0%（不参与 exit code）
+```
+
+### 验证
+803 条测试（798 pass / 0 fail / 5 skip）；`check PASS`（52 篇）。
+
 ## 0.2.6（2026-11-05）
 
 ### patrol 读 A6 四态（修闸门静默失效）
