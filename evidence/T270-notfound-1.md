@@ -32,7 +32,7 @@ $ node scripts/audit-card-samples.mjs --current
 
 - **(episode, seq)**：`ep-226dbf4f` / **3670**
 - **claimId**：`c-39b8ac53`
-- **引文前 80 字**：`ok github.com/MYCF711/dsh-ui/cmd/app: go build github.com/MYCF711/dsh-ui/cmd/app: copying C:\Users\A…`
+- **引文前 80 字**：`ok github.com/MYCF711/dsh-ui/cmd/app: go build github.com/MYCF711/dsh-ui/cmd/app: copying <USER_HOME>…`
 - 日期对得上（2026-11-03），所以不是"日期错"。
 
 ## 2 · P2 复核（`scripts/provenance-p2.mjs`）
