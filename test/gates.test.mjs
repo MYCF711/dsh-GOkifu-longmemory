@@ -28,6 +28,7 @@ import {
   downgradeState,
   isScopeVisible,
   normalizeScope,
+  probeValidity,
   runGates,
   runValidityCheck,
 } from '../src/rooms/gates.mjs';
@@ -1473,4 +1474,71 @@ test('T199 ⑤ 守卫: 契约完整的合并节点（代表∈成员、都可解
   records.claims[memberB.id] = memberB;
   const res = runWith({ card, records });
   assert.equal(res.errors.some((e) => e.code === 'gate4/merge-contract-invalid'), false, JSON.stringify(res.errors));
+});
+
+// ---------------------------------------------------------------- T210（A1-F2）：version 候选面补兄弟仓库布局
+//
+// T205 归因：3 条 stale 里只有 1 条是真的（c-175d29e9）。它声明 magpie-chatbox-ai@0.1.0，
+// 真实包在 `反代/magpie-chatbox-ai/package.json`（0.1.3）—— 探针少了 <workspace>/<name>/package.json
+// 这一面，于是判 version-file-unreadable（unverified）⇒ 闸 3 放行。下面三条钉住"只加面、不改语义"。
+
+/** 造一个只含指定 package.json 的 workspace。 */
+function workspaceWith(files) {
+  const ws = mkdtempSync(path.join(tmpdir(), 'kifuin-t210-'));
+  for (const [rel, pkg] of Object.entries(files)) {
+    const file = path.join(ws, ...rel.split('/'));
+    mkdirSync(path.dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(pkg));
+  }
+  return ws;
+}
+
+const versionRecord = (value) => ({ id: 'c-t2100001', validity: { type: 'version', value, file: null } });
+
+test('T210 ①: 兄弟仓库布局 <workspace>/<name>/package.json 命中 ⇒ 判 version-mismatch（真 stale 不再放行）', () => {
+  const ws = workspaceWith({
+    'magpie-chatbox-ai/package.json': { name: 'magpie-chatbox-ai', version: '0.1.3' },
+  });
+  const home = mkdtempSync(path.join(tmpdir(), 'kifuin-t210-home-'));
+  try {
+    const res = probeValidity(versionRecord('magpie-chatbox-ai@0.1.0'), { workspace: ws, now: T(24), dshHome: home });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'version-mismatch', `应当判失效，实际：${JSON.stringify(res)}`);
+    assert.equal(res.expected, '0.1.0');
+    assert.equal(res.actual, '0.1.3');
+    assert.equal(res.unverified, undefined, '真读到了就不是 unverified');
+    assert.ok(String(res.path).endsWith(path.join('magpie-chatbox-ai', 'package.json')), String(res.path));
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('T210 ②: 兄弟仓库不存在 ⇒ 仍回落到既有候选面（<workspace>/package.json）', () => {
+  const ws = workspaceWith({
+    'package.json': { name: 'magpie-chatbox-ai', version: '0.1.3' },
+  });
+  const home = mkdtempSync(path.join(tmpdir(), 'kifuin-t210-home-'));
+  try {
+    const res = probeValidity(versionRecord('magpie-chatbox-ai@0.1.0'), { workspace: ws, now: T(24), dshHome: home });
+    assert.equal(res.reason, 'version-mismatch', `回落面仍要能判失效，实际：${JSON.stringify(res)}`);
+    assert.equal(res.path, path.join(ws, 'package.json'));
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('T210 ③: 全候选面都读不到 ⇒ 仍是 unverified（不许变成 ok 或 mismatch）', () => {
+  const ws = mkdtempSync(path.join(tmpdir(), 'kifuin-t210-empty-'));
+  const home = mkdtempSync(path.join(tmpdir(), 'kifuin-t210-home-'));
+  try {
+    const res = probeValidity(versionRecord('magpie-chatbox-ai@0.1.0'), { workspace: ws, now: T(24), dshHome: home });
+    assert.equal(res.ok, false);
+    assert.equal(res.unverified, true, `应当 unverified，实际：${JSON.stringify(res)}`);
+    assert.equal(res.reason, 'version-file-unreadable');
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
 });
