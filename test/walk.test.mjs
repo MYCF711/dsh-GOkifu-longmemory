@@ -1040,3 +1040,51 @@ test('R11 合并节点：同一 (episode, seq) 在"有合并节点的库"与"没
   assert.equal(a.dropped.mergeNodeNoMember, undefined, '有成员可解析 ⇒ 不计退回');
   assert.equal(b.dropped.mergeNodeNoMember, undefined, '没有合并节点的库更不会记退回');
 });
+
+
+test('R11 合并节点：反向索引 mergeRepresentativeOf —— 成员 → 代表（同域，O(总成员数) 构建一次）', () => {
+  const target = mergeStore({ memberCount: 3 });
+  // 同一份库连走两次：索引是**结果的一部分**（不是每次查询全表扫），两次内容一致
+  const first = mergeWalk(target);
+  const second = mergeWalk(target);
+  const index = first.mergeRepresentativeOf;
+
+  assert.ok(index instanceof Map, '索引是 Map<成员 id, 代表 id>');
+  for (const id of ['c-mem-01', 'c-mem-02', 'c-mem-03', 'c-mem-noproof']) {
+    assert.equal(index.get(id), 'c-merge01', `${id} 应能反查到代表`);
+  }
+  assert.equal(index.size, 4, '同域成员全部入索引（含缺 quote 的那条：索引不看出处，只看 scope）');
+  assert.equal(index.has('c-merge01'), false, '代表自己不是成员');
+  assert.deepEqual(second.mergeRepresentativeOf.toJSON(), index.toJSON(), '同输入同索引（可复现）');
+  assert.deepEqual(index.toJSON(), {
+    'c-mem-01': 'c-merge01',
+    'c-mem-02': 'c-merge01',
+    'c-mem-03': 'c-merge01',
+    'c-mem-noproof': 'c-merge01',
+  }, 'toJSON 是普通对象（可序列化）');
+  // 索引与 hits 解耦：成员没被渲染也照样查得到
+  assert.ok(first.hits.every((hit) => hit.claim !== 'c-mem-noproof'), '夹具里 c-mem-noproof 不是 hit');
+  assert.equal(index.get('c-mem-noproof'), 'c-merge01', '不在 hits 里的成员也能反查代表');
+});
+
+test('R11 合并节点：跨域成员不建索引，只计入 dropped.mergeCrossScopeMembers（A5）', () => {
+  const target = mergeStore({ memberCount: 2 }); // 夹具自带 c-mem-cross（OTHER_SCOPE）
+  const result = mergeWalk(target);
+  assert.equal(result.mergeRepresentativeOf.has('c-mem-cross'), false, '跨域成员不建索引');
+  assert.equal(result.dropped.mergeCrossScopeMembers, 1, '跳过的跨域成员计入既有 dropped');
+  assert.equal(result.mergeRepresentativeOf.get('c-mem-01'), 'c-merge01', '同域成员照常有索引');
+  assert.equal(result.mergeRepresentativeOf.size, 3, '2 个普通成员 + 缺 quote 成员（同域）');
+});
+
+test('R11 合并节点：没有 merge 的库 —— 反向索引为空、无新计数（golden 不变）', () => {
+  const target = mergeStore({ memberCount: 2, withMergeNode: false });
+  const result = mergeWalk(target);
+  assert.ok(result.mergeRepresentativeOf instanceof Map);
+  assert.equal(result.mergeRepresentativeOf.size, 0);
+  assert.deepEqual(result.mergeRepresentativeOf.toJSON(), {});
+  assert.equal(result.dropped.mergeCrossScopeMembers, undefined, '没有合并节点 ⇒ 无跨域跳过计数');
+  assert.equal(result.dropped.mergeNodeNoMember, undefined, '没有合并节点 ⇒ 无退回计数');
+  assert.equal(result.dropped.mergeMembersCapped, undefined, '没有合并节点 ⇒ 无截断计数');
+  // golden：hits 与"没有任何 merge 概念"时一模一样（成员靠自己的 support 命中）
+  assert.deepEqual(claimIds(result), ['c-mem-02', 'c-mem-01'], 'golden：按 occurredAt 降序（与没有 merge 概念的库一致）');
+});

@@ -19,7 +19,8 @@
 //            occurredAt, seq?, kind, depth, tokens, text?, scopeKey?}],
 //     path:[{from, to, why:[topicKey], kind, link?, new?}],
 //     omitted:{count, reason:"limit"|"budget"|null, byLimit, byBudget},
-//     tokens:number, maxDepth, depth, matched:{topics:[…], truncated}, dropped:{…}, signal:{…} }
+//     tokens:number, maxDepth, depth, matched:{topics:[…], truncated}, dropped:{…}, signal:{…},
+//     mergeRepresentativeOf:Map<memberId, representativeId>（T208 反向索引；带 toJSON） }
 //   hit.seq        = 回放行：claim 取 support.seq，棋谱取该主题的首个 mention seq（缺则省略）。
 //   hit.claim      = claim id（拿它去 claims/<id>.json 取原文）；claimKind/claimState 是它的
 //                    kind/state（antipattern/preference/fact… 与 observed/candidate/stale…）。
@@ -45,6 +46,9 @@
 //   上挑到的 claim 随"库里有没有合并节点"漂移（④b 最后 3 行的根因）；关掉后两库的
 //   claim 候选集只由 claim 自己的 support/文本决定。
 //   没有 `merge` 字段的 claim 行为**一字不改**（不加块标记、不碰排序）。
+// T208：walk 结果多一个**反向索引** `mergeRepresentativeOf`（`Map<成员 id, 代表 id>`，带非枚举 `toJSON`）——
+//   构建一次 O(总成员数)，查询 O(1)（不再全表扫 claim）。成员与代表必须**同 scopeKey**（A5）：
+//   跨域成员不建索引，只计入 `dropped.mergeCrossScopeMembers`。没有合并节点的库：空 Map、零计数。
 // 预算：每 hit 的 tokens = estimateTokens(episode + claim + kind + why + text)；
 //   CJK 1.5 字/token、ASCII 4 字/token（契约 §7.2「≤500 tokens」的估法）。
 //   截断是**前缀式**的：按排序结果依次收，碰到 limit 或 budget 就停，后面的全部计入 omitted。
@@ -698,6 +702,58 @@ function pickMergeMember(nodeClaim, claimById, signal) {
   return best ? best.member : null;
 }
 
+/**
+ * T208：合并节点的**反向索引**（成员 → 代表）。构建一次 O(总成员数)，之后查询 O(1) ——
+ * 不再需要"拿到一个成员 id 就全表扫 claim"。
+ *
+ * 结构与 `createWalkCache().topicsByKey` 同风格：`Map<memberId, representativeId>`；
+ * 另挂**非枚举** `toJSON()`，所以 `JSON.stringify(result)` 会把它序列化成
+ * `{ [memberId]: representativeId }`（普通对象），不需要调用方自己转换。
+ *
+ * 守卫（全部机械）：
+ *   · 只有 `merge.members` 非空的 claim 才是代表；没有 merge 的库 ⇒ **空 Map、零计数**；
+ *   · 成员的 claim 记录必须**在库里**（按 id 查得到），查不到的不建索引；
+ *   · 成员与代表必须**同 scopeKey**（逐字节相同，A5 硬约束）：跨域成员不建索引，
+ *     只把跳过个数计入 `dropped.mergeCrossScopeMembers`（既有 dropped 机制，不新造顶层字段）；
+ *   · 同一个成员被多个代表声明时**先到先得**（按 claims 顺序 ⇒ 结果确定、可复现）。
+ *
+ * @param {object[]} claims   store 里的 claim 记录（walkFromSignals 已经读过一次）
+ * @param {Map<string,object>} claimById  id → claim（复用调用方的索引，避免再扫一遍）
+ * @param {object} dropped    既有 dropped 计数器（跨域成员记在这里）
+ * @returns {Map<string,string>} 成员 id → 代表（合并节点）id
+ */
+function buildMergeRepresentativeIndex(claims, claimById, dropped) {
+  const index = new Map();
+  if (!Array.isArray(claims)) return index;
+  const byId = claimById instanceof Map ? claimById : new Map();
+  let crossScope = 0;
+  for (const claim of claims) {
+    if (!isMergeNodeClaim(claim) || typeof claim.id !== 'string' || claim.id === '') continue;
+    const scope = typeof claim.scopeKey === 'string' ? claim.scopeKey : '';
+    for (const memberId of claim.merge.members) {
+      if (typeof memberId !== 'string' || memberId === '' || memberId === claim.id) continue;
+      const member = byId.get(memberId);
+      if (!member) continue; // 成员记录不在库里：不建索引
+      if (typeof member.scopeKey !== 'string' || member.scopeKey !== scope) {
+        crossScope += 1; // A5：跨域成员不建索引
+        continue;
+      }
+      if (!index.has(memberId)) index.set(memberId, claim.id); // 先到先得
+    }
+  }
+  if (crossScope > 0 && dropped && typeof dropped === 'object') {
+    const prev = Number.isFinite(dropped.mergeCrossScopeMembers) ? dropped.mergeCrossScopeMembers : 0;
+    dropped.mergeCrossScopeMembers = prev + crossScope;
+  }
+  Object.defineProperty(index, 'toJSON', {
+    value: () => Object.fromEntries(index),
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+  return index;
+}
+
 // ---------------------------------------------------------------------------
 // walkFromSignals
 // ---------------------------------------------------------------------------
@@ -766,6 +822,15 @@ export function walkFromSignals(opts = {}) {
   dropped.topicsOverCap = Math.max(0, matches.length - maxTopics);
   const picked = matches.slice(0, maxTopics);
 
+  const claims = cache?.claims ?? readRecords(store, 'claims');
+  const claimById = new Map();
+  for (const rec of claims) {
+    if (!rec || typeof rec.id !== 'string' || rec.id === '') continue;
+    claimById.set(rec.id, rec);
+  }
+  // T208：成员 → 代表的反向索引（构建一次 O(总成员数)；查询 O(1)）
+  const mergeRepresentativeOf = buildMergeRepresentativeIndex(claims, claimById, dropped);
+
   const emptyResult = () => ({
     hits: [],
     path: [],
@@ -787,6 +852,7 @@ export function walkFromSignals(opts = {}) {
       truncated: dropped.topicsOverCap,
     },
     dropped,
+    mergeRepresentativeOf,
     signal: { kind: sig.kind, terms: [...sig.terms], entities: sig.entities.map((e) => ({ ...e })), at: sig.at },
   });
 
@@ -1010,14 +1076,9 @@ export function walkFromSignals(opts = {}) {
   }
 
   // ---- claim：依附命中棋谱（机械：support.episode 已在命中里）或文本命中主题 key ----
-  const claims = cache?.claims ?? readRecords(store, 'claims');
   // T191：合并节点不冒充 claim 行 —— 命中的是一条合并节点时，改用它代表的**成员**（同 scope、有出处、同套 overlap 打分）；
   // 一个成员都解析不出来才退回合并节点本身（并计入 dropped.mergeNodeNoMember）。
-  const claimById = new Map();
-  for (const rec of claims) {
-    if (!rec || typeof rec.id !== 'string' || rec.id === '') continue;
-    claimById.set(rec.id, rec);
-  }
+  // T208：`claims` / `claimById` 已在 emptyResult 之前读到，这里不再重复全量读。
   const targetClaims = claims.map((rec) => {
     if (!isMergeNodeClaim(rec)) return rec; // 没有 merge 字段：一字不改
     const member = pickMergeMember(rec, claimById, sig);
@@ -1283,6 +1344,7 @@ export function walkFromSignals(opts = {}) {
       truncated: dropped.topicsOverCap,
     },
     dropped,
+    mergeRepresentativeOf,
     signal: { kind: sig.kind, terms: [...sig.terms], entities: sig.entities.map((e) => ({ ...e })), at: sig.at },
   };
 }
