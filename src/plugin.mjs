@@ -83,6 +83,9 @@ export const DEFAULT_CONFIG = Object.freeze({
   // 2026-11-04（M4 精度抽样）：注入成功时把卡片正文抽存到 `<storeRoot>/card-samples.jsonl`，
   // 供事后做「注入质量」人工/机械核对。默认开；不写会话日志、只写 sidecar。
   sampleCards: true,
+  // T268：采集**真实消息语料**（只本机、只追加到 evidence/T268-messages.jsonl），
+  // 用来复算 T267「最近 N 条消息的硬实体」到底带来多少召回。默认开；false 时完全不写。
+  collectMessages: true,
   budgetTokens: 500,
   limit: 5,
   oncePerSession: true,
@@ -168,6 +171,7 @@ export function sanitizeConfig(raw = {}) {
     shadow: boolOf(src.shadow, DEFAULT_CONFIG.shadow),
     storeRoot: typeof src.storeRoot === 'string' && src.storeRoot.trim() !== '' ? src.storeRoot.trim() : null,
     sampleCards: typeof src.sampleCards === 'boolean' ? src.sampleCards : DEFAULT_CONFIG.sampleCards,
+    collectMessages: typeof src.collectMessages === 'boolean' ? src.collectMessages : DEFAULT_CONFIG.collectMessages,
     shadowDir: typeof src.shadowDir === 'string' && src.shadowDir.trim() !== '' ? src.shadowDir.trim() : null,
     budgetTokens: positiveInt(src.budgetTokens, DEFAULT_CONFIG.budgetTokens, 100000),
     limit: positiveInt(src.limit, DEFAULT_CONFIG.limit, 100),
@@ -300,6 +304,52 @@ export function cardText(card) {
   const line = typeof card.indexLine === 'string' ? card.indexLine.trim() : '';
   const section = typeof card.section === 'string' ? card.section.trim() : '';
   return [line, section].filter(Boolean).join('\n');
+}
+
+/**
+ * T268：把**本轮真实消息**追加进语料（只本机、只追加）。
+ *
+ * 用途：T267 的收益（最近 N 条消息的硬实体）在现有考卷上**测不出来** —— 考卷只有根用户原话。
+ * 这份语料补上 `messages`，让 `scripts/t267-replay.mjs` 能复算 A/B 两路。
+ *
+ * 纪律：
+ *   · **只读注入链路之外**：不参与任何判定，失败一律吞掉（采集永远不许拖垮注入）；
+ *   · **脱敏**：落盘前用 `scripts/privacy-scan.mjs` 的同一套规则扫一遍（本机语料也要同规则）；
+ *   · **截断**：单条 `text` 只保留前 4000 字符，超长打 `truncated: true`。
+ */
+export const MESSAGE_CORPUS_PATH = 'evidence/T268-messages.jsonl';
+export const MESSAGE_TEXT_LIMIT = 4000;
+
+export function messageCorpusRow({ episode = null, scopeKey = null, messages = [], at = null } = {}) {
+  const rows = (Array.isArray(messages) ? messages : []).map((m) => {
+    const text = redactForCorpus(String(messageText(m) ?? ''));
+    const truncated = text.length > MESSAGE_TEXT_LIMIT;
+    return { role: String(m?.role ?? 'unknown'), text: truncated ? text.slice(0, MESSAGE_TEXT_LIMIT) : text, ...(truncated ? { truncated: true } : {}) };
+  }).filter((r) => r.text !== '');
+  return { episode: episode ?? null, scopeKey: scopeKey ?? null, at: Number.isFinite(at) ? at : null, messages: rows };
+}
+
+/** 简单脱敏（与 privacy-scan 同族规则；宁可多遮，不落明文密钥）。 */
+export function redactForCorpus(text) {
+  return String(text ?? '')
+    .replace(/(sk|pk|ghp|gho|ghs|xox[baprs])[-_][A-Za-z0-9_-]{16,}/g, '[REDACTED]')
+    .replace(/AIza[0-9A-Za-z_-]{30,}/g, '[REDACTED]')
+    .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '[REDACTED]')
+    .replace(/(?:api[_-]?key|token|secret|password)\s*[:=]\s*\S+/gi, '[REDACTED]');
+}
+
+/** 追加一行语料；**绝不抛**（写失败只 warn）。 */
+export function appendMessageCorpus(rootDir, row, { fsImpl = fs } = {}) {
+  try {
+    const dir = path.join(rootDir, 'evidence');
+    fsImpl.mkdirSync(dir, { recursive: true });
+    const safe = { ...row, messages: (row.messages ?? []).map((m) => ({ ...m, text: redactForCorpus(m.text) })) };
+    fsImpl.appendFileSync(path.join(rootDir, MESSAGE_CORPUS_PATH), `${JSON.stringify(safe)}
+`);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function warn(ctx, line) {
@@ -522,6 +572,20 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   if (typeof session?.id === 'string') LAST_SCOPE.set(session.id, resolved);
   const scope = resolved.scope;
   const signal = signalFromText(text, { at });
+  // T268：采集真实消息语料（**只写盘、不参与判定**；失败静默降级）
+  if (config.collectMessages === true) {
+    try {
+      const row = messageCorpusRow({
+        episode: null,
+        scopeKey: payload?.scopeKey ?? null,
+        messages: payload?.messages ?? [],
+        at,
+      });
+      if (row.messages.length && !appendMessageCorpus(REPO_ROOT, row)) warn(ctx, '语料采集写盘失败（已忽略）');
+    } catch (error) {
+      warn(ctx, `语料采集失败（已忽略）：${String(error?.message ?? error)}`);
+    }
+  }
   // T267：把最近消息里的硬实体**追加**进信号（不改 base 词；只加实体，不塞整段对话）。
   if (messageSignal.entities.length) {
     const seen = new Set((signal.entities ?? []).map((e) => String(e?.key ?? e)));

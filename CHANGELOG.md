@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.21（2026-11-05）
+
+### 真实消息语料采集 + T267 收益复算器（T268）
+`src/plugin.mjs` 新增 `collectMessages`（默认 true）：在 `decidePreStep` 落 `evidence/T268-messages.jsonl`
+（4000 字符截断 + 脱敏；**写失败只 warn 不抛**，采集永远不许拖垮注入；`false` 时完全不写）。
+语料文件已加 `.gitignore`。
+
+`scripts/t267-replay.mjs`：用真实语料复算 T267 的 A/B 两路（合法判据 + `negativeControl`）。
+
+**复算结果（如实）**：n=207，A 严格 0/207 · B 严格 0/207 · 负控 0%。
+**A 路本来就是 0 ⇒ 0 对 0 没有意义，这不是"没有收益"的证据** ——
+现有语料只覆盖本会话（本仓库自身），消息与库内 claim 几乎无重合、卡面多为空。
+**要拿到真实收益需要**：语料覆盖 ≥20 个历史局且 A 路 > 0；采集已就绪，会持续累积。
+
+### 验证
+43 条 plugin 测试全绿；`check PASS`（58 篇）。
+
 ## 0.2.20（2026-11-05）
 
 ### 合法信号扩展：从最近 N 条消息抽硬实体（T267）
