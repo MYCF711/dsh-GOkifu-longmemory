@@ -670,12 +670,23 @@ function isMergeRelated(a, b) {
  * @returns {{related:boolean, unresolved:boolean}}
  */
 function mergeRelationOf(a, b, resolver) {
-  if (isMergeRelated(a, b)) return { related: true, unresolved: false };
+  if (isMergeRelated(a, b)) return { related: true, unresolved: false, unverified: null };
   const am = typeof a?.mergedInto === 'string' ? a.mergedInto.trim() : '';
   const bm = typeof b?.mergedInto === 'string' ? b.mergedInto.trim() : '';
-  if (!am || am !== bm) return { related: false, unresolved: false };
+  if (!am || am !== bm) return { related: false, unresolved: false, unverified: null };
+  // T198（audit-12 安全洞）：**自证豁免**。原来只比字符串相等就放行 —— 任何数据写同一个 id
+  // （哪怕节点不存在 / 不是合并节点 / members 不含双方）就能让闸 4 永不报重复。
+  // 现在必须三条同时成立：① 节点存在 ② 它确实是合并节点（members 非空）③ members 同时含这两条。
   const node = resolver && typeof resolver.get === 'function' ? resolver.get(recordKindOf(am), am) : null;
-  return { related: true, unresolved: !node };
+  if (!node) return { related: false, unresolved: true, unverified: 'missing-node' };
+  const members = Array.isArray(node?.merge?.members)
+    ? node.merge.members.filter((x) => typeof x === 'string' && x)
+    : [];
+  if (!members.length) return { related: false, unresolved: false, unverified: 'not-merge-node' };
+  const hasA = members.includes(String(a?.id ?? ''));
+  const hasB = members.includes(String(b?.id ?? ''));
+  if (!hasA || !hasB) return { related: false, unresolved: false, unverified: 'members-mismatch' };
+  return { related: true, unresolved: false, unverified: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -743,7 +754,15 @@ export function runGates({
     provenanceChecked: 0,
     downgradeChecked: 0,
     unverified: [],
-    merged: { total: 0, skippedGate4: 0, skippedGate2: 0, unverified: 0, unresolved: 0 },
+    merged: {
+      total: 0,
+      skippedGate4: 0,
+      skippedGate2: 0,
+      unverified: 0,
+      unresolved: 0,
+      unverifiedRefs: 0, // T198：mergedInto 自证不成立、被照报的对数
+      unverifiedRefReasons: {}, // T198：按原因分开（missing-node / not-merge-node / members-mismatch）
+    },
     byGate: { 0: 0, 1: 0, 2: 0, '2b': 0, 3: 0, 4: 0, 5: 0, 6: 0, '6b': 0, 7: 0, boundary: 0 },
   };
   /** 判不了的：非 strict 记 unverified（不假装合规），strict 直接失败。 */
@@ -1042,6 +1061,11 @@ export function runGates({
         // T162c：既认"合并节点 ↔ 成员"（T162b），也认**成员侧反指针** mergedInto（两条同组即豁免）。
         const relation = mergeRelationOf(group[a].record, group[b].record, resolver);
         if (relation.unresolved) checks.merged.unresolved += 1;
+        if (relation.unverified) {
+          // 自证不成立：**只计数、照样报重复**（不静默放行），按原因分开记，便于事后定位数据问题
+          checks.merged.unverifiedRefs += 1;
+          checks.merged.unverifiedRefReasons[relation.unverified] = (checks.merged.unverifiedRefReasons[relation.unverified] ?? 0) + 1;
+        }
         if (relation.related) {
           exempt.add(group[a].record.id);
           exempt.add(group[b].record.id);

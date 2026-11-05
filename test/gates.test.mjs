@@ -1286,17 +1286,6 @@ function sameTextCard({ aOver = {}, bOver = {} } = {}) {
   return { card: two, records, a, b };
 }
 
-test('R13 闸4 T162c: 两条同文成员的 mergedInto 相同 ⇒ 同一合并组，不判重复', () => {
-  const { card, records } = sameTextCard({
-    aOver: { mergedInto: 'c-merge0001' },
-    bOver: { mergedInto: 'c-merge0001' },
-  });
-  // 合并节点本身不在卡上（成员各自成行），records 里也没有它 ⇒ 这时不该判红
-  const res = runWith({ card, records });
-  assert.equal(res.ok, true, `同一合并组的成员同文不该判重复：${JSON.stringify(res.errors)}`);
-  assert.equal(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'), false);
-});
-
 test('R13 闸4 T162c 守卫: 两条同文成员的 mergedInto **不同** ⇒ 照报 gate4/unsuperseded-duplicate', () => {
   const { card, records } = sameTextCard({
     aOver: { mergedInto: 'c-merge0001' },
@@ -1316,31 +1305,85 @@ test('R13 闸4 T162c 守卫: 只有一条带 mergedInto / 空串 ⇒ 不算合�
   assert.equal(runWith({ card: empty.card, records: empty.records }).ok, false, '空串不是指针');
 });
 
-test('R13 闸4 T162c: mergedInto 指向不存在的节点 ⇒ 不判红，但计入 checks.merged.unresolved', () => {
-  const { card, records } = sameTextCard({
-    aOver: { mergedInto: 'c-ghost0001' },
-    bOver: { mergedInto: 'c-ghost0001' },
-  });
-  const res = runWith({ card, records });
-  assert.equal(res.ok, true, `组已由两条记录自己证明，不该判红：${JSON.stringify(res.errors)}`);
-  assert.ok(res.checks.merged.unresolved >= 1, `checks.merged.unresolved 应当计数，实际：${JSON.stringify(res.checks.merged)}`);
-});
-
-test('R13 闸4 T162c: mergedInto 指向**存在**的节点 ⇒ 不判红且不计 unresolved', () => {
-  const { card, records } = sameTextCard({
-    aOver: { mergedInto: 'c-merge0001' },
-    bOver: { mergedInto: 'c-merge0001' },
-  });
-  records.claims['c-merge0001'] = rec({ id: 'c-merge0001', text: '合并节点（不在卡上）', state: 'candidate' });
-  const res = runWith({ card, records });
-  assert.equal(res.ok, true, JSON.stringify(res.errors));
-  assert.equal(res.checks.merged.unresolved, 0, '节点取得到就不该记 unresolved');
-});
-
 test('R13 闸4 T162c 守卫: 无 mergedInto 的两条同文 claim ⇒ 行为一字不变（照报）', () => {
   const { card, records } = sameTextCard();
   const res = runWith({ card, records });
   assert.equal(res.ok, false);
   assert.ok(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'));
   assert.equal(res.checks.merged.unresolved, 0);
+});
+
+// ---------------------------------------------------------------- 闸 4 自证豁免（T198 / audit-12）
+//
+// 安全闸的信任边界：`mergeRelationOf` 原来只比 `mergedInto` 字符串相等就放行 ——
+// 任何数据写同一个 id（哪怕节点不存在 / 不是合并节点 / members 不含双方）都能让闸 4 永不报重复。
+// 修：豁免必须**自证**（节点存在 + 是合并节点 + members 同时含这两条），任何一条不成立 ⇒ 照报，
+// 并在 `checks.merged` 里记 `unverifiedRefs` / `unverifiedRefReasons`（按原因区分，不静默放行）。
+
+test('T198 ①: mergedInto 指向**不存在**的节点 ⇒ 照报 gate4/unsuperseded-duplicate', () => {
+  const { card, records } = sameTextCard({
+    aOver: { mergedInto: 'c-ghost9999' },
+    bOver: { mergedInto: 'c-ghost9999' },
+  });
+  const res = runWith({ card, records });
+  assert.equal(res.ok, false, '节点不存在不许放行');
+  assert.ok(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'), JSON.stringify(res.errors));
+  assert.ok(res.checks.merged.unverifiedRefs >= 1, `要记 unverifiedRefs，实际：${JSON.stringify(res.checks.merged)}`);
+  assert.equal(res.checks.merged.unverifiedRefReasons['missing-node'], 1, `原因要能区分，实际：${JSON.stringify(res.checks.merged.unverifiedRefReasons)}`);
+});
+
+test('T198 ②: mergedInto 指向**存在但无 merge 字段**的 claim ⇒ 照报', () => {
+  const { card, records } = sameTextCard({
+    aOver: { mergedInto: 'c-plain999' },
+    bOver: { mergedInto: 'c-plain999' },
+  });
+  records.claims['c-plain999'] = rec({ id: 'c-plain999', text: '一条普通 claim（没有 merge）', state: 'observed' });
+  const res = runWith({ card, records });
+  assert.equal(res.ok, false, '不是合并节点不许放行');
+  assert.ok(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'), JSON.stringify(res.errors));
+  assert.equal(res.checks.merged.unverifiedRefReasons['not-merge-node'], 1, JSON.stringify(res.checks.merged.unverifiedRefReasons));
+});
+
+test('T198 ③: 合并节点的 members **不含**这两条 ⇒ 照报', () => {
+  const { card, records } = sameTextCard({
+    aOver: { mergedInto: 'c-merge8888' },
+    bOver: { mergedInto: 'c-merge8888' },
+  });
+  records.claims['c-merge8888'] = rec({
+    id: 'c-merge8888',
+    text: '合并节点（成员是别人）',
+    state: 'candidate',
+    merge: {
+      version: 1, key: 'k', rule: 'text-similarity',
+      members: ['c-other0001', 'c-other0002'],
+      representative: { claimId: 'c-other0001', episode: 'ep-aaaaaaa1', seq: 30, quote: 'q' },
+      supportEpisodes: ['ep-aaaaaaa1'], at: T(22),
+    },
+  });
+  const res = runWith({ card, records });
+  assert.equal(res.ok, false, 'members 不含双方不许放行');
+  assert.ok(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'), JSON.stringify(res.errors));
+  assert.equal(res.checks.merged.unverifiedRefReasons['members-mismatch'], 1, JSON.stringify(res.checks.merged.unverifiedRefReasons));
+});
+
+test('T198 ④ 守卫: 节点存在 + 是合并节点 + members 同时含这两条 ⇒ 不报（合法豁免）', () => {
+  const { card, records, a, b } = sameTextCard({
+    aOver: { mergedInto: 'c-merge7777' },
+    bOver: { mergedInto: 'c-merge7777' },
+  });
+  records.claims['c-merge7777'] = rec({
+    id: 'c-merge7777',
+    text: '合并节点（成员就是这两条）',
+    state: 'candidate',
+    merge: {
+      version: 1, key: 'k', rule: 'text-similarity',
+      members: [a.id, b.id],
+      representative: { claimId: a.id, episode: 'ep-aaaaaaa1', seq: 30, quote: 'q' },
+      supportEpisodes: ['ep-aaaaaaa1'], at: T(22),
+    },
+  });
+  const res = runWith({ card, records });
+  assert.equal(res.ok, true, `合法合并组不该判重复：${JSON.stringify(res.errors)}`);
+  assert.equal(res.errors.some((e) => e.code === 'gate4/unsuperseded-duplicate'), false);
+  assert.equal(res.checks.merged.unverifiedRefs, 0, '自证通过就不该记 unverifiedRefs');
 });
