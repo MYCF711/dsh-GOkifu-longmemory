@@ -17,6 +17,20 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.6（2026-11-05）
+
+### patrol 读 A6 四态（修闸门静默失效）
+T239 把 `audit-card-samples` 改成四态（`ok / offset / unreadable / notFound`），但 `patrol` 还在找 `at-seq` 与 `missing`
+⇒ 两个字段都 null ⇒ **显示 `at-seq ?/49 · missing ?` 且判「通过」** —— **`notFound 3 > 0` 时巡检照样报绿**。
+
+修法：`parseAudit` 加回退（`atSeq`→`ok`、`elsewhere`→`offset`、`missing`→`notFound`）+ 新增 `unreadable`，A6 行改四态展示。
+修后实测：`| A6 文字层 | ok 47/50 · offset 0 · notFound 3 · unreadable 0 · 日期 50/50 | **要看** |`。
+
+**过程坑**：`` 经 Python heredoc 写入变成**字面 backspace（0x08）** ⇒ 正则永不命中；已改用 `(?:^|\s)ok`。
+
+### 验证
+800 条测试（795 pass / 0 fail / 5 skip）；`check PASS`（52 篇）。
+
 ## 0.2.5（2026-11-05）
 
 ### 召回相关度：**overlap 提为第一排序键**（T240）
