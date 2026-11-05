@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.173.0（2026-11-05）
+
+### profile 一键脚本：同一个"校验"缺陷被找出**三层**（T215 → T217 → T219）
+1. **T215 独立复核**：`--verify` 在仓库无 `node_modules` 时回落到"只查行结构"；**实测四种非法 YAML（未闭合 `[` / `{` / 非法锚点 / 重复键）全部判 PASS，并真的写进了目标**。
+2. **T217**：改用 `<DSH_HOME>/profiles/<profile>/node_modules/yaml`（本机 **2.9.1**）真解析 + base sha256 拒写 + 备份对拍 + PS1 退出码 —— 但 **CI 红了**：那只是本机的现实。
+3. **T219**：改成 **fail-closed** —— 找不到 YAML 引擎 ⇒ **拒绝执行、退出 6、目标一个字节不动**（除非显式 `--allow-structural` 自担风险）；并修掉 CLI 层的两个缺陷：`--verify` 失败时进程仍 exit 0、以及字段名漂移导致"引擎明明可用却说不可用"的**反向误导**文案。
+
+### 现在的契约（权威句）
+> **这条命令只有在本机能解析到 YAML 引擎（`<profile>/node_modules/yaml` 或仓库 `node_modules/yaml`）时才允许写；没有引擎就拒绝执行、退出 6，目标文件一个字节都不会动 —— 除非你显式加 `--allow-structural` 自担风险降级。**
+
+### 验收（两个环境）
+- 本机：`--verify` 合法 ⇒ exit 0 且文案 `yaml 模块 可用（yaml@2.9.1）`
+- `DSH_HOME=/nonexistent`：`--verify` ⇒ **exit 6**；`--apply` ⇒ **exit 6 且目标 sha256 不变**
+- 两个环境下 `kifu-profile-stage` 测试均 **8/8**（含新增的 CLI 级断言 —— 之前 7/7 全绿却仍有问题，因为测试只覆盖库层）
+
+### 真 profile
+一个字节未动（`339dcb32…` 前后一致）。
+
+### 验证
+757 条测试（752 pass / 0 fail / 5 skip）；`check PASS`（49 篇）。
+
 ## 0.172.0（2026-11-05）
 
 ### 工具面：**6 个 `kifu_*` 工具端到端真调用全通过**（T213）
