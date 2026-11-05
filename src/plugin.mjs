@@ -219,6 +219,58 @@ export function lastUserText(messages) {
   return '';
 }
 
+// T267：硬实体（与 scripts/a2b-holdout.mjs 的 HARD_ENTITY_PATTERNS 同一套正则）
+export const MESSAGE_ENTITY_PATTERNS = Object.freeze([
+  // 文件路径：Windows 盘符 / POSIX 绝对路径
+  /[A-Za-z]:[\\/][\w./\\-]{3,}/g,
+  /(?:^|[\s"'(=])\/(?:[\w.-]+\/)*[\w.-]{3,}/g,
+  // 错误码 / 错误类
+  /\bclass:[a-z0-9-]+\b/gi,
+  /\b(?:ENOENT|EACCES|EPERM|EEXIST|ECONNREFUSED|ETIMEDOUT|MODULE_NOT_FOUND|ERR_[A-Z_]+)\b/g,
+  // 包名（scoped 或无 scope）
+  /(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]+\/[a-z0-9][a-z0-9._-]+/gi,
+  // 命令（git/node/npm/go/python/bash… + 少量参数）
+  /\b(?:git|node|npm|pnpm|yarn|go|python|bash|pwsh|powershell|curl|gh)\b(?:\s+[-\w./=:]{1,40}){0,4}/gi,
+]);
+
+/** 从一段文本抽硬实体（小写、去重、≥3 字符；路径额外保留 basename）。 */
+export function messageEntities(text) {
+  const raw = String(text ?? '');
+  const out = new Set();
+  for (const re of MESSAGE_ENTITY_PATTERNS) {
+    re.lastIndex = 0;
+    for (const m of raw.matchAll(re)) {
+      const value = String(m[0] ?? '').trim().replace(/^[\s"'(=]+|[\s"'),.]+$/g, '');
+      if (value.length < 3) continue;
+      out.add(value.toLowerCase());
+      const base = value.split(/[\/]/).pop();
+      if (base && base.length >= 6 && /[._-]/.test(base)) out.add(base.toLowerCase());
+    }
+  }
+  return [...out];
+}
+
+/**
+ * T267：**合法信号扩展** —— 从 `payload.messages` **最近 N 条**（含 assistant / tool）抽硬实体。
+ *
+ * 为什么合法：这些实体在 `pre-step` 这一刻已经出现在上下文里，`availableAtSeq <= injectionSeq`；
+ * **不是**从整局棋谱主题反推的事后信息（T264 已证明那是作弊）。
+ *
+ * 返回 `{ text, entities }`：
+ *   · `text`     = 最后一条 user 消息（**行为与现状一致**，golden）；
+ *   · `entities` = 最近 N 条消息里的硬实体（追加，不替换）。整段对话**只抽实体、不塞正文**（避免噪声）。
+ */
+export function signalFromMessages(messages, { lastN = 12 } = {}) {
+  const list = Array.isArray(messages) ? messages : [];
+  const text = lastUserText(list);
+  const n = Number.isFinite(lastN) && lastN > 0 ? Math.floor(lastN) : 12;
+  const entities = new Set();
+  for (const message of list.slice(-n)) {
+    for (const entity of messageEntities(messageText(message))) entities.add(entity);
+  }
+  return { text, entities: [...entities] };
+}
+
 /** 卡片指纹：同 scope + 同文本 ⇒ 同 digest（可复算，不含时钟）。 */
 export function digestOf(scopeKey, text) {
   return createHash('sha256').update(`${String(scopeKey ?? '')}\u0000${String(text ?? '')}`).digest('hex').slice(0, 16);
@@ -447,6 +499,9 @@ export function gateClaimIdsFromGates(gates, limit = 5) {
 async function decidePreStep({ ctx, config, deps, payload, decision }) {
   const session = payload?.agent?.session ?? payload?.session ?? null;
   const text = lastUserText(payload?.messages);
+  // T267：**合法信号扩展** —— 最近 N 条消息（含 assistant / tool）里的硬实体（文件路径/错误码/包名/命令）。
+  // 它们此刻已经在 payload.messages 里（availableAtSeq <= injectionSeq），不是整局统计的事后信息。
+  const messageSignal = signalFromMessages(payload?.messages, { lastN: config.messageSignalLastN ?? 12 });
 
   // 既没开真注入也不是影子 ⇒ 什么都不做（默认配置走这条）
   if (!config.enabled && !config.shadow) return { decision, action: 'skip', reason: 'disabled' };
@@ -467,6 +522,15 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   if (typeof session?.id === 'string') LAST_SCOPE.set(session.id, resolved);
   const scope = resolved.scope;
   const signal = signalFromText(text, { at });
+  // T267：把最近消息里的硬实体**追加**进信号（不改 base 词；只加实体，不塞整段对话）。
+  if (messageSignal.entities.length) {
+    const seen = new Set((signal.entities ?? []).map((e) => String(e?.key ?? e)));
+    for (const key of messageSignal.entities) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+      signal.entities.push({ kind: 'entity', key });
+    }
+  }
   signal.scopeKey = scope;
   // 首条消息里若直接贴着报错原文（很常见："又报这个错"），把类级错误作为实体信号，
   // 让「同一类坑」的历史棋谱能被直接命中（D2 类主题的消费方，2026-11-02）。
