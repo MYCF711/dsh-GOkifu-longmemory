@@ -13,9 +13,13 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createStore } from '../src/rooms/persist.mjs';
 
 import {
-  sampleMergeGroups, checkMembersResolvable, wilsonInterval, selectMergeGroups,
+  runAcceptance, sampleMergeGroups, checkMembersResolvable, wilsonInterval, selectMergeGroups,
   parseArgs, normalizeText, countDuplicateRows,
 } from '../scripts/merge-acceptance.mjs';
 
@@ -301,4 +305,37 @@ test('T211 ③: 命中但没折叠 ⇒ 分子不加（如实）', () => {
   assert.equal(res.c.ratio, 1 / 3);
   assert.equal(res.c.bubbledGroups, 2);
   assert.equal(res.c.evidence.verdict, '证据不足', '命中组 3 < 10');
+});
+
+// ── T222：对照组必须真的存在 ────────────────────────────────────────────────
+test('T222 ①: 源库与影库 claim 集合相同 ⇒ 拒绝（exitCode 2，不给"通过"）', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 't222-same-'));
+  const root = path.join(dir, 'store');
+  const store = createStore({ root });
+  store.ensureDirs();
+  store.putMany('claims', [{ id: 'c-1', kind: 'fact', text: 'x', scopeKey: 'u:a', state: 'observed', support: [], counter: [], validity: { type: 'none', value: null }, preconditions: [], occurredAt: 1, recordedAt: 1, counters: { support: 0, counter: 0 } }], { at: 1 });
+  store.writeManifest(1);
+  const res = runAcceptance({ shadowRoot: root, sourceRoot: root, sample: 1 });
+  assert.equal(res.ok, false, '同集合必须拒绝');
+  assert.equal(res.refused, true);
+  assert.equal(res.exitCode, 2);
+  assert.match(res.error, /拒绝给出"通过"/);
+});
+
+test('T222 ②: 集合不同但重叠 ⇒ 只警告不阻断（overlap 计数可见）', () => {
+  // 用两库不同集合跑一次完整 runAcceptance（fixture 见 T213/T211 的 mergesOf）
+  const dir = mkdtempSync(path.join(tmpdir(), 't222-diff-'));
+  const mk = (name, ids) => {
+    const root = path.join(dir, name);
+    const st = createStore({ root });
+    st.ensureDirs();
+    st.putMany('claims', ids.map((id) => ({ id, kind: 'fact', text: 'x', scopeKey: 'u:a', state: 'observed', support: [], counter: [], validity: { type: 'none', value: null }, preconditions: [], occurredAt: 1, recordedAt: 1, counters: { support: 0, counter: 0 } })), { at: 1 });
+    st.writeManifest(1);
+    return root;
+  };
+  const shadowRoot = mk('shadow', ['c-1', 'c-2']);
+  const sourceRoot = mk('source', ['c-1', 'c-3']);
+  const res = runAcceptance({ shadowRoot, sourceRoot, sample: 1 });
+  assert.notEqual(res.refused, true, '不同集合不许拒绝');
+  assert.equal(res.overlap, 1, '重叠数必须可见');
 });
