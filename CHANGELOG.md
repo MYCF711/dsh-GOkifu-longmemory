@@ -17,6 +17,29 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.164.0（2026-11-05）
+
+### 闸 2：成员取不到 ⇒ 不再静默放行（T199-A）
+- 改前：合并节点的成员**一条都解析不到**时，`unverified += 1` 然后 `continue` —— 按记录自身 state 放行。
+- 改后：**两条路径都不 continue**，继续走常规 support-state 判据；`strict` 下直接 `gate2/merged-members-unresolved` **FAIL**，
+  非 strict 记 `checks.mergedUnverified` 与 `checks.unverified[]`（**可见**）。
+- 判据写进注释：合并节点的 state 上限 = **成员证据并集**；成员全取不到时"允许态"是空集，拿空集放行就是把"没有证据"读成"证据支持"。
+
+### 闸 4：合并契约必须自证（T199-B）
+- 新增 `gate4/merge-contract-invalid`：带 `merge` 的 claim 必须满足 ① `representative.claimId ∈ members` ② representative 可解析且**同 scopeKey** ③ `members` 非空且**全部可解析**。
+- 问题码：`representative-not-member` / `representative-unresolved` / `representative-scope-mismatch` / `representative-missing` / `members-empty` / `member-unresolved:<id>`。
+- **报错，不是 unverified** —— 数据自相矛盾 ≠ 证据缺失（两者不许混，见 `docs/调研/46`）。
+
+### 真库复算
+影库 39 个合并节点：`gate2 0 · gate4 0` 错（生产库本身 0 个合并节点）。
+
+### 关于真库 29 条真 stale（`file-appeared` 20 + `version-mismatch` 9）
+**不该由闸来变红**：闸 3 只管"**被渲染的**断言必须 validity 通过"，这 29 条只有进卡才红（那时行为正确）。
+正确做法是**数据修复**（R09 标 `state: "stale"`）—— 属可达性/数据问题，不是闸的漏洞。
+
+### 验证
+705 条测试（700 pass / 0 fail / 5 skip）；`check PASS`。
+
 ## 0.163.0（2026-11-05）
 
 ### 安全闸的"自证豁免"被堵死（T198，audit-12 最严重一条）

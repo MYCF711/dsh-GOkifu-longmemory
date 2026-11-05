@@ -601,6 +601,39 @@ export function auditGovernance(text) {
 // ---------------------------------------------------------------------------
 
 /** 合并节点（带 `merge.members`）的成员 id 列表；不是合并节点 ⇒ null。 */
+/**
+ * T199（audit-12）：**合并契约完整性**。
+ *
+ * 与"证据缺失"不同，这是**数据自相矛盾**：一个声称自己是合并节点的 claim，必须能自证它是怎么合出来的。
+ * 三条硬约束（任一不满足都报 `gate4/merge-contract-invalid`，不是 unverified）：
+ *   ① `merge.representative.claimId` ∈ `merge.members`（代表必须是成员之一）；
+ *   ② `representative` 能解析到，且**同 scopeKey**（跨库/跨作用域的代表不是代表）；
+ *   ③ `members` 非空且**全部可解析**（有成员悬空 ⇒ 合并组的证据不完整）。
+ *
+ * @returns {string[]|null} 问题代码列表；不是合并节点返回 null。
+ */
+function mergeContractIssues(record, resolver) {
+  if (!record || typeof record !== 'object' || !record.merge || typeof record.merge !== 'object') return null;
+  const issues = [];
+  const members = mergeMemberIds(record) ?? [];
+  if (!members.length) issues.push('members-empty');
+  const rep = record.merge.representative;
+  const repId = typeof rep?.claimId === 'string' ? rep.claimId.trim() : '';
+  const get = (id) => (resolver && typeof resolver.get === 'function' ? resolver.get(recordKindOf(id), id) : null);
+  if (!repId) {
+    issues.push('representative-missing');
+  } else {
+    if (!members.includes(repId)) issues.push('representative-not-member');
+    const repRecord = get(repId);
+    if (!repRecord) issues.push('representative-unresolved');
+    else if (String(repRecord.scopeKey ?? '') !== String(record.scopeKey ?? '')) issues.push('representative-scope-mismatch');
+  }
+  for (const id of members) {
+    if (!get(id)) issues.push(`member-unresolved:${id}`);
+  }
+  return issues;
+}
+
 function mergeMemberIds(record) {
   const members = Array.isArray(record?.merge?.members) ? record.merge.members : null;
   if (!members) return null;
@@ -763,6 +796,8 @@ export function runGates({
       unverifiedRefs: 0, // T198：mergedInto 自证不成立、被照报的对数
       unverifiedRefReasons: {}, // T198：按原因分开（missing-node / not-merge-node / members-mismatch）
     },
+    // T199：合并节点"成员解析不到"的次数（strict 下同时进 errors；非 strict 下进 checks.unverified，**报告可见**）
+    mergedUnverified: 0,
     byGate: { 0: 0, 1: 0, 2: 0, '2b': 0, 3: 0, 4: 0, 5: 0, 6: 0, '6b': 0, 7: 0, boundary: 0 },
   };
   /** 判不了的：非 strict 记 unverified（不假装合规），strict 直接失败。 */
@@ -889,9 +924,27 @@ export function runGates({
         checks.merged.total += 1;
       }
       if (mergedCap.resolved === 0) {
-        // 成员都取不到 ⇒ 判不了：按记录自身 state 放行，并如实记 merged-unverified（不假装核过）。
+        // T199（audit-12 剩余洞）：**成员取不到 ⇒ 不许静默放行**。
+        //
+        // 为什么"取不到"不能推定为"没问题"：合并节点的 state 上限完全由**成员证据的并集**决定；
+        // 成员一条都解析不到时，"允许态"是空集 —— 拿空集放行，等于把"没有证据"读成"证据支持"。
+        // 缺证据 ≠ 无问题（AGENTS §2.4「指标先有消费者」「不造假数」同源）。所以：
+        //   · strict ⇒ 直接 FAIL（gate2/merged-members-unresolved）；
+        //   · 非 strict ⇒ 记 unverified（checks.unverified + checks.mergedUnverified，报告可见）；
+        //   · **两条路径都不 continue** —— 继续落到下面的常规 support-state 判据，不许因此跳过更严的检查。
         checks.merged.unverified += 1;
-        continue;
+        checks.mergedUnverified += 1;
+        if (strict) {
+          push('2', 'gate2/merged-members-unresolved', {
+            index: i,
+            claimId: record.id,
+            members: mergeMemberIds(record) ?? [],
+            reason: 'members-unresolved',
+          });
+        } else {
+          // 非 strict：走既有的 unverified 通道（进 checks.unverified，报告里可见），不制造假红
+          unverified('2', 'gate2/merged-members-unresolved', 1, '合并节点的成员记录一条都解析不到（缺证据 ≠ 无问题）');
+        }
       }
       if (mergedCap.allowed.has(record.state)) {
         checks.merged.skippedGate2 += 1;
@@ -1017,6 +1070,11 @@ export function runGates({
       continue;
     }
     renderedRecords.push({ index: i, record });
+    // T199：合并契约自证（数据矛盾 ⇒ 报错；不是"证据缺失"）
+    const mergeIssues = mergeContractIssues(record, resolver);
+    if (mergeIssues && mergeIssues.length) {
+      push('4', 'gate4/merge-contract-invalid', { index: i, claimId, issues: mergeIssues });
+    }
     const supersededBy = record.supersededBy ?? (record.state === 'superseded' ? (record.supersedes ?? true) : null);
     if (supersededBy && !Number.isFinite(record.supersededAtSeq)) {
       push('4', 'gate4/missing-superseded-at', { index: i, claimId, supersededBy });
