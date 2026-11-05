@@ -128,9 +128,12 @@ test('auditRows: 读不到原件（loadEvents 抛错）⇒ fail-closed 记 missi
     loadEvents: async () => { throw new Error('log unreadable'); },
     textCheck: true,
   });
-  assert.equal(out.textMissing, 5);
-  assert.equal(out.dateBad, 5);
-  assert.equal(out.exitCode, 1);
+  // T239：读不到原件不再冒充 missing —— 单列成 unreadable（旧键 textMissing 归零）
+  assert.equal(out.textUnreadable, 5);
+  assert.equal(out.textMissing, 0, 'notFound 才是"真找不到"');
+  assert.equal(out.textNotFound, 0);
+  assert.equal(out.dateBad, 0, '读不到 ≠ 日期不一致（日期层也单列为 unreadable）');
+  assert.equal(out.exitCode, 1, 'fail-closed：核不了不能当绿');
 });
 
 test('auditRows: 全绿夹具 ⇒ 退出码 0', async () => {
@@ -212,4 +215,98 @@ test('classifyTextByEvents: 单段逐字命中仍是 at-seq（joined 不许抢�
 test('classifyTextByEvents: 哪都不存在 ⇒ missing（不做无根据的宽容）', () => {
   const events = eventsToBlobs([{ seq: 10, data: { text: 'Cannot find module yaml' } }]);
   assert.equal(classifyTextByEvents({ text: '完全不相干的一句话', seq: 10, events, window: 3 }).verdict, 'missing');
+});
+
+// ---------------------------------------------------------------- T239（docs/调研/46：未知 ≠ 已失效）
+//
+// A6 从三档改成四态：ok / offset（同一局别的 seq）/ unreadable（读不到）/ notFound（真找不到）。
+// 85% 的 not-substring 其实是"指针偏了几个 seq"或"空白被折叠"（T232/T238）—— 内容在，只是指针不对，
+// 与"内容真的对不上"是两类问题，必须分开说。
+
+test('T239 ①: 四态分列 —— ok / offset / unreadable / notFound 各归各位', async () => {
+  const mkRow = (lines) => [{ at: 1793749445009, digest: 'd239', tokens: 100, scope: 'w:/a', section: lines.join('\n') }];
+  // ep-aaaa0001 的事件：seq 11（原文 A）、seq 40（原文 B）
+  const eps = new Map([['ep-aaaa0001', { id: 'ep-aaaa0001', scopeKey: 'w:/a', closure: { seqFrom: 0, seqTo: 100 } }]]);
+  const evs = {
+    'ep-aaaa0001': [
+      { seq: 11, time: DAY(2026, 11, 4, 6), data: { text: 'AAA 原文一' } },
+      { seq: 40, time: DAY(2026, 11, 4, 6), data: { text: 'BBB 原文二' } },
+    ],
+  };
+  const out = await auditRows({
+    rows: mkRow([
+      '- [antipattern] AAA 原文一 (ep-aaaa0001, 2026-11-04, seq 11)',   // ok
+      '- [antipattern] BBB 原文二 (ep-aaaa0001, 2026-11-04, seq 13)',   // offset（距离 27 → 远）
+      '- [antipattern] 本局没有这句 (ep-aaaa0001, 2026-11-04, seq 11)',  // notFound
+    ]),
+    episodes: eps,
+    loadEvents: async (id) => evs[id] ?? [],
+    window: 3,
+    textCheck: true,
+  });
+  assert.equal(out.textOk, 1);
+  assert.equal(out.textOffset, 1);
+  assert.equal(out.textNotFound, 1);
+  assert.equal(out.textUnreadable, 0);
+  assert.equal(out.textMissing, out.textNotFound, '旧键 missing = notFound（兼容）');
+  assert.equal(out.textOffsetFar, 1, '距离 27 > 20 ⇒ 远偏移');
+  assert.equal(out.offsetDistanceMedian, 27);
+  assert.equal(out.a6Denominator, 3);
+});
+
+test('T239 ②: offset 不红、notFound 红、unreadable 红（fail-closed）', async () => {
+  const eps = new Map([['ep-aaaa0001', { id: 'ep-aaaa0001', scopeKey: 'w:/a', closure: { seqFrom: 0, seqTo: 100 } }]]);
+  const evs = { 'ep-aaaa0001': [{ seq: 11, time: DAY(2026, 11, 4, 6), data: { text: 'AAA 原文一' } }] };
+  const run = (line) => auditRows({
+    rows: [{ at: 1793749445009, digest: 'd', tokens: 10, scope: 'w:/a', section: line }],
+    episodes: eps,
+    loadEvents: async (id) => evs[id] ?? [],
+    window: 3,
+    textCheck: true,
+  });
+  const offsetOnly = await run('- [antipattern] AAA 原文一 (ep-aaaa0001, 2026-11-04, seq 20)');
+  assert.equal(offsetOnly.textOffset, 1);
+  assert.equal(offsetOnly.exitCode, 0, 'offset 是待修项，不判红');
+  const notFound = await run('- [antipattern] 本局没有这句 (ep-aaaa0001, 2026-11-04, seq 11)');
+  assert.equal(notFound.textNotFound, 1);
+  assert.equal(notFound.exitCode, 1, '真坏引用仍红');
+  const unreadable = await auditRows({
+    rows: [{ at: 1793749445009, digest: 'd', tokens: 10, scope: 'w:/a', section: '- [antipattern] AAA 原文一 (ep-aaaa0001, 2026-11-04, seq 11)' }],
+    episodes: eps,
+    loadEvents: async () => { throw new Error('log unreadable'); },
+    window: 3,
+    textCheck: true,
+  });
+  assert.equal(unreadable.textUnreadable, 1);
+  assert.equal(unreadable.a6Denominator, 0, 'unreadable 不进分母');
+  assert.equal(unreadable.exitCode, 1, 'fail-closed');
+});
+
+test('T239 ③: 中位距离 + offset 占比（分母不含 unreadable）', async () => {
+  const eps = new Map([['ep-aaaa0001', { id: 'ep-aaaa0001', scopeKey: 'w:/a', closure: { seqFrom: 0, seqTo: 100 } }]]);
+  const evs = {
+    'ep-aaaa0001': [
+      { seq: 11, time: DAY(2026, 11, 4, 6), data: { text: 'AAA 原文一' } },
+      { seq: 12, time: DAY(2026, 11, 4, 6), data: { text: 'BBB 原文二' } },
+    ],
+  };
+  const out = await auditRows({
+    rows: [{
+      at: 1793749445009, digest: 'd', tokens: 10, scope: 'w:/a',
+      section: [
+        '- [antipattern] AAA 原文一 (ep-aaaa0001, 2026-11-04, seq 18)', // offset 距离 7
+        '- [antipattern] BBB 原文二 (ep-aaaa0001, 2026-11-04, seq 25)', // offset 距离 13
+        '- [antipattern] AAA 原文一 (ep-aaaa0001, 2026-11-04, seq 11)', // ok
+      ].join('\n'),
+    }],
+    episodes: eps,
+    loadEvents: async (id) => evs[id] ?? [],
+    window: 3,
+    textCheck: true,
+  });
+  assert.equal(out.textOffset, 2);
+  assert.equal(out.textOffsetNear, 2, '7 与 13 都 ≤ 20');
+  assert.equal(out.offsetDistanceMedian, 10, '(7+13)/2');
+  assert.equal(out.a6Denominator, 3);
+  assert.equal(out.textOffsetRatio, 2 / 3);
 });

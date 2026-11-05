@@ -1053,3 +1053,92 @@ test('R11 合并节点：walk 结果**不再**带未消费的反向索引（T227
   assert.ok(!claimIds(result).includes('c-merge01'), '合并节点仍然不冒充 claim 行');
   assert.ok(!claimIds(result).includes('c-mem-cross'), '跨域成员仍然不带（A5，与索引无关）');
 });
+
+// ---------------------------------------------------------------------------
+// 10 · 相关度（T240）：信号判别词重合数（overlap）是第一排序键
+// ---------------------------------------------------------------------------
+
+const RANK_TOPIC = { id: 't:term:rank0001', kind: 'term', key: 'bash', df: 3, idfNorm: 0.7 };
+const RANK_SIGNAL = Object.freeze({ kind: 'root-message', terms: ['bash'], entities: [], at: T0 + 9_000 });
+
+/** ep-rank1 直接命中；ep-rank2 只能经一跳（depth=2）到达。 */
+function rankingStore() {
+  const target = createStore({ root: path.join(tmp, `rank-store-${(seq += 1)}`), now: T0 });
+  target.ensureDirs();
+  target.putMany('episodes', [
+    episodeRecord({ id: 'ep-rank1', topics: [epTopic(RANK_TOPIC)], failures: 1, at: T0 + 1_000, l0: 'bash 退出码被吞' }),
+    episodeRecord({ id: 'ep-rank2', topics: [], at: T0 + 3_000, l0: '一跳到的局' }),
+  ], { at: T0 });
+  target.putMany('topics', [topicRecord(RANK_TOPIC, { episodes: ['ep-rank1'] })], { at: T0 });
+  target.putMany('links', [
+    linkRecord({ id: 'link-rank1', a: 'ep-rank1', b: 'ep-rank2', topics: [RANK_TOPIC.id], why: RANK_TOPIC.key, weight: 1, occurredAt: T0 + 1_100 }),
+  ], { at: T0 });
+  target.putMany('claims', [
+    // overlap=1（含信号判别词 bash），但 occurredAt 更早
+    claimRecord({
+      id: 'c-rank-related', kind: 'antipattern', text: 'bash 退出码被吞（与信号重合）',
+      support: [{ episode: 'ep-rank1', seq: 31, quote: 'q31', occurredAt: T0 + 1_200 }], occurredAt: T0 + 1_200,
+    }),
+    // overlap=0 的"同局通用错误"，occurredAt 更新（旧排序会把它排前面）
+    claimRecord({
+      id: 'c-rank-generic', kind: 'antipattern', text: '通用错误：old_string was not found',
+      support: [{ episode: 'ep-rank1', seq: 32, quote: 'q32', occurredAt: T0 + 2_000 }], occurredAt: T0 + 2_000,
+    }),
+    // overlap=1，但只能经一跳到达（depth=2）
+    claimRecord({
+      id: 'c-rank-deep', kind: 'antipattern', text: 'bash 深一跳的相关教训',
+      support: [{ episode: 'ep-rank2', seq: 33, quote: 'q33', occurredAt: T0 + 1_500 }], occurredAt: T0 + 1_500,
+    }),
+  ], { at: T0 });
+  return target;
+}
+
+function rankWalk(target, opts = {}) {
+  return walkFromSignals({ signal: RANK_SIGNAL, store: target, scope: SCOPE, depth: 2, limit: 10, budgetTokens: 100_000, ...opts });
+}
+
+test('R11 相关度：overlap 是第一排序键 —— 高重合的 claim 排在更新的"同局通用错误"之前', () => {
+  const target = rankingStore();
+  const result = rankWalk(target);
+  const ids = claimIds(result);
+  assert.ok(ids.includes('c-rank-related') && ids.includes('c-rank-generic'), '两条都是候选');
+  assert.ok(
+    ids.indexOf('c-rank-related') < ids.indexOf('c-rank-generic'),
+    'overlap=1 的 c-rank-related 必须排在 overlap=0 的 c-rank-generic 前（旧排序按 occurredAt 会反过来）',
+  );
+});
+
+test('R11 相关度：同 overlap 时 tie-break 仍是 depth 升序 → occurredAt 降序（定义不变）', () => {
+  const target = rankingStore();
+  const result = rankWalk(target);
+  const ids = claimIds(result);
+  // c-rank-related 与 c-rank-deep 的 overlap 都是 1 ⇒ 先按 depth：1 跳在前
+  const related = result.hits.find((hit) => hit.claim === 'c-rank-related');
+  const deep = result.hits.find((hit) => hit.claim === 'c-rank-deep');
+  assert.equal(related.depth, 1);
+  assert.equal(deep.depth, 2);
+  assert.ok(ids.indexOf('c-rank-related') < ids.indexOf('c-rank-deep'), '同 overlap 时 depth 小的在前');
+  assert.ok(ids.indexOf('c-rank-deep') < ids.indexOf('c-rank-generic'), 'overlap 高的仍压过 overlap=0 的（即使它在 depth=2）');
+});
+
+test('R11 相关度：overlap 全 0 时顺序与改动前完全相同（golden）', () => {
+  const target = createStore({ root: path.join(tmp, `rank-plain-${(seq += 1)}`), now: T0 });
+  target.ensureDirs();
+  target.putMany('episodes', [
+    episodeRecord({ id: 'ep-plain2', topics: [epTopic(RANK_TOPIC)], failures: 1, at: T0 + 1_000, l0: 'bash 局' }),
+  ], { at: T0 });
+  target.putMany('topics', [topicRecord(RANK_TOPIC, { episodes: ['ep-plain2'] })], { at: T0 });
+  target.putMany('claims', [
+    claimRecord({
+      id: 'c-plain-a', kind: 'antipattern', text: '通用错误 A',
+      support: [{ episode: 'ep-plain2', seq: 41, quote: 'q41', occurredAt: T0 + 1_100 }], occurredAt: T0 + 1_100,
+    }),
+    claimRecord({
+      id: 'c-plain-b', kind: 'antipattern', text: '通用错误 B',
+      support: [{ episode: 'ep-plain2', seq: 42, quote: 'q42', occurredAt: T0 + 1_900 }], occurredAt: T0 + 1_900,
+    }),
+  ], { at: T0 });
+  const result = walkFromSignals({ signal: RANK_SIGNAL, store: target, scope: SCOPE, depth: 2, limit: 10, budgetTokens: 100_000 });
+  // 两条 claim 文本都不含信号判别词（overlap 全 0）⇒ 走原 tie-break：occurredAt 降序
+  assert.deepEqual(claimIds(result), ['c-plain-b', 'c-plain-a']);
+});
