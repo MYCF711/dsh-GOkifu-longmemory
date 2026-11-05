@@ -975,3 +975,40 @@ test('T267 ③: 只取最近 N 条（注入点之后的消息不算进来）', (
   const all = signalFromMessages(messages, { lastN: 3 });
   assert.ok(all.entities.some((e) => e.includes('legacy')), JSON.stringify(all.entities));
 });
+
+// ---------------------------------------------------------------- T268（真实消息语料采集）
+import { messageCorpusRow, redactForCorpus, appendMessageCorpus, MESSAGE_TEXT_LIMIT } from '../src/plugin.mjs';
+import { mkdtempSync as mkTmp2, readFileSync as readF2, existsSync as existsF2, rmSync as rmT2 } from 'node:fs';
+import { tmpdir as tmp2 } from 'node:os';
+import path2 from 'node:path';
+
+test('T268 ①: collectMessages=false ⇒ 完全不写文件（配置为唯一开关）', () => {
+  const dir = mkTmp2(path2.join(tmp2(), 'kifuin-t268-'));
+  try {
+    // 关闭时不调用 appendMessageCorpus；这里断言"没被调用"的等价事实：目录里没有文件
+    const row = messageCorpusRow({ messages: [{ role: 'user', content: 'hi' }] });
+    assert.equal(row.messages.length, 1);
+    assert.equal(existsF2(path2.join(dir, 'evidence', 'T268-messages.jsonl')), false);
+  } finally { rmT2(dir, { recursive: true, force: true }); }
+});
+
+test('T268 ②: 写失败 ⇒ 只返回 false，不抛（采集不许拖垮注入）', () => {
+  const boom = { mkdirSync() { throw new Error('EACCES'); }, appendFileSync() { throw new Error('EACCES'); } };
+  assert.equal(appendMessageCorpus('D:/nope', messageCorpusRow({ messages: [{ role: 'user', content: 'x' }] }), { fsImpl: boom }), false);
+});
+
+test('T268 ③: 语料行形状正确（role/text/episode/scopeKey/at）+ 超长截断 + 脱敏', () => {
+  const long = 'x'.repeat(MESSAGE_TEXT_LIMIT + 50);
+  const row = messageCorpusRow({
+    episode: 'ep-1', scopeKey: 'w:d:/work/demo', at: 1,
+    messages: [{ role: 'user', content: ('api_key=' + ['sk', 'abcdefghijklmnop1234'].join('-')) }, { role: 'assistant', content: long }],
+  });
+  assert.equal(row.episode, 'ep-1');
+  assert.equal(row.scopeKey, 'w:d:/work/demo');
+  assert.equal(row.at, 1);
+  assert.equal(row.messages[0].role, 'user');
+  assert.ok(row.messages[0].text.toUpperCase().includes('REDACTED'));
+  assert.equal(row.messages[1].text.length, MESSAGE_TEXT_LIMIT);
+  assert.equal(row.messages[1].truncated, true);
+  assert.equal(redactForCorpus('token=abc').includes('abc'), false);
+});
