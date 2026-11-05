@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { judge } from '../scripts/metrics-guard.mjs';
+import { HOLDOUT_BASELINE, judge, loadHoldout } from '../scripts/metrics-guard.mjs';
 
 const base = () => ({
   axes: {
@@ -104,4 +104,42 @@ test('T236b ③: 输出层级 —— A2b 的失败排在 A1 之前', () => {
   const firstA1 = v.fails.findIndex((f) => f.startsWith('A1'));
   assert.ok(firstA2b >= 0 && firstA1 >= 0);
   assert.ok(firstA2b < firstA1, `A2b 必须排在 A1 之前，实际：${JSON.stringify(v.fails)}`);
+});
+
+// ---------------------------------------------------------------- T242（选择偏差进闸）
+//
+// 主判据以前默认用 n=19 的 repeat-only 冻结集（100% 是选择偏差的产物）；
+// 现在默认用 T236a 的 n=108 考卷（repeat + self），实测严格 34.26%。
+// 门槛 = 当前实测（37/108、74/108）—— 起点不是目标，任何下降即红。
+
+const HOLDOUT = { n: 108, strict: 37 / 108, cover: 74 / 108, sampleSource: 'holdout' };
+
+test('T242 ①: 考卷不存在 ⇒ 抛错并说清"考卷不存在"（fail-closed，不静默回退）', () => {
+  const missingFs = { existsSync: () => false, readFileSync: () => { throw new Error('should not read'); } };
+  assert.throws(
+    () => loadHoldout('evidence/definitely-missing-a2b.json', { fsImpl: missingFs }),
+    /考卷不存在/,
+  );
+});
+
+test('T242 ②: 用 108 条考卷时 n=108，严格/覆盖取自考卷', () => {
+  const v = judge(base(), undefined, HOLDOUT);
+  assert.equal(v.values.a2bN, 108);
+  assert.equal(v.values.sampleSource, 'holdout');
+  assert.equal(v.values.a2bStrict, 37 / 108);
+  assert.equal(v.values.a2bCover, 74 / 108);
+});
+
+test('T242 ③: 门槛不因换考卷而误报（当前实测 = 门槛 ⇒ PASS）；下降即红', () => {
+  assert.equal(HOLDOUT_BASELINE.n, 108);
+  assert.equal(HOLDOUT_BASELINE.strictMin, 37 / 108);
+  assert.equal(HOLDOUT_BASELINE.coverMin, 74 / 108);
+  // 当前实测正好等于门槛 ⇒ PASS（不允许出现"基线被四舍五入卡在门外"的假红）
+  assert.equal(judge(base(), undefined, HOLDOUT).ok, true, '当前实测应当 PASS');
+  // 严格掉 1 条（36/108）⇒ 红
+  const dropped = judge(base(), undefined, { ...HOLDOUT, strict: 36 / 108 });
+  assert.equal(dropped.ok, false, '掉一条也要红（起点不是目标）');
+  assert.ok(dropped.layers.main.some((f) => f.includes('A2b 严格')), JSON.stringify(dropped.layers));
+  // 旧的 repeat-only 回归线不该套到新考卷上：34.26% < 84.21%-10pp，但新考卷口径下不因这条红
+  assert.equal(judge(base(), undefined, HOLDOUT).layers.main.some((f) => f.includes('掉了')), false);
 });

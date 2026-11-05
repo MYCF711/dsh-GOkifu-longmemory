@@ -375,12 +375,33 @@ export async function measureA2({ dataRoot, storeRoot, now, holdoutExam = null }
     try {
       const store = createStore({ root: storeRoot });
       const cache = createWalkCache(store);
+      // T242：`a2b-holdout --json` 的产物是**结果文件**（n / strictHits / relatedHits），
+      // 不是 `{items:[{sig,prior}]}` 那种"重跑用"的考卷 ⇒ 直接采信它的数，不重跑 walk。
+      const exam = opts.holdoutExam ?? null;
+      if (exam && Number.isFinite(exam.n) && exam.n > 0 && Number.isFinite(exam.strictHits)) {
+        const strictRate = Number.isFinite(exam.strictRate) ? exam.strictRate : exam.strictHits / exam.n;
+        const relatedRate = Number.isFinite(exam.relatedRate)
+          ? exam.relatedRate
+          : (Number.isFinite(exam.relatedHits) ? exam.relatedHits / exam.n : null);
+        injectionRecall = {
+          n: exam.n,
+          sampleSource: 'holdout',
+          hits: Number.isFinite(exam.relatedHits) ? exam.relatedHits : null,
+          specificHits: exam.strictHits,
+          recall: relatedRate,
+          recallSpecific: strictRate,
+          wilson: exam.wilson ?? null,
+          note: 'T242：来自 evidence/a2b-holdout.json（a2b-holdout --json 的结果），未重跑 walk',
+        };
+      }
       let frozen = null;
       try {
         const setFile = path.join(REPO_ROOT, 'evidence', 'a2b-set.json');
         if (fs.existsSync(setFile)) frozen = JSON.parse(fs.readFileSync(setFile, 'utf8'));
       } catch { frozen = null; }
-      injectionRecall = measureA2b({ store, report, splitAt: SPLIT_AT, cache, limit: 60, frozen, holdoutExam });
+      if (!injectionRecall) {
+        injectionRecall = measureA2b({ store, report, splitAt: SPLIT_AT, cache, limit: 60, frozen, holdoutExam });
+      }
     } catch (error) {
       injectionRecall = { error: String(error?.message ?? error) };
     }
@@ -1016,8 +1037,13 @@ export async function runCli(argv = []) {
     // T236b：`--holdout <path>` 指向 T236a 的考卷；**给了就必须存在**（静默回退会让"样本换了"这条
     // 重要事实消失，A2b 的数字就不可比了）。没给 ⇒ 保持既有回落链。
     let holdoutExam = null;
-    if (typeof flags.holdout === 'string' && flags.holdout !== '') {
-      const examPath = path.resolve(flags.holdout);
+    // T242：默认指向 T236a 的考卷（存在就用）；显式 --holdout 仍可覆盖。
+    const defaultExam = path.join(REPO_ROOT, 'evidence', 'a2b-holdout.json');
+    const examFlag = typeof flags.holdout === 'string' && flags.holdout !== ''
+      ? flags.holdout
+      : (process.env.KIFU_A2B_HOLDOUT || (fs.existsSync(defaultExam) ? defaultExam : ''));
+    if (examFlag) {
+      const examPath = path.resolve(examFlag);
       if (!fs.existsSync(examPath)) {
         throw new Error(`--holdout 指定的考卷不存在：${examPath}（先跑 node scripts/a2b-holdout.mjs 生成；T236a 未落地时不要传这个参数）`);
       }
