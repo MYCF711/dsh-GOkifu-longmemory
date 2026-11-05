@@ -17,6 +17,33 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.30（2026-11-06）
+
+### AGENTS §13 · DSH 0.2.2-rc.1 独立实例兼容
+**T282 · 消息语料收口到 sidecar**：`MESSAGE_CORPUS_PATH` 由 `resolveStoreRoot(config)` 推导 ⇒
+**`<storeRoot>/corpus/messages.jsonl`**，**不再写仓库 `evidence/`**。
+**tombstone**：写入后仓库 `evidence/` **零新增**（`deepEqual(added, [])`）。
+真实写入证明：落在 `<DSH_HOME>/memory-context/corpus/messages.jsonl`。
+
+**T283 · `kifu-loader` 自包含 + 惰性解析核心**：不再 `import '../../src/plugin.mjs'`
+（包实体化后该相对路径不存在 ⇒ 加载即炸）。
+`apply()` 里按 `KIFU_CORE_PATH` → 包名 `dsh-gokifu-longmemory/plugin` → 仓库内相对路径 解析；
+解析不到抛**带候选清单的明确错误**（不在模块加载期炸树）。
+**tombstone**：复制到**仓库外**仍能 `import`（旧实现必炸）。
+
+### T281 · produced-in 边**证伪**（净新增 0 条命中）
+`加边后变 A：0（下界）· 上界 1（那条其实已在卡上）`，**A5 违规 0**（202 条跨域 claim 全部不建边）。
+**B 类拆成两个真瓶颈**：
+- **B1 · 29 条**：其实**已经取到**，卡在**判据口径**（中文整段被当一个 token，`includes` 几乎不可能命中）；
+- **B2 · 27 条**：真没取到（walk 从未命中该局），但**补边也过不了 ≥2 门槛**（词面重合 0–1）。
+
+⇒ **第四次"提升召回"的方向被数据否决**（排序、Q18、消息实体、同局边）。
+**真正的瓶颈不在"边"这一层**：判据口径（中文二元组/硬实体桥）+ 主题入口（R04 召回面）。
+原型留在仓库（判据口径变了可复用），**未接生产**。
+
+### 验证
+46 条 plugin 测试 + 5 条 kifu-loader 测试 + 8 条 produced-in 测试全绿；`check PASS`（60 篇）。
+
 ## 0.2.29（2026-11-06）
 
 ### T267 收益复算：**净亏，改为默认关**（T279）
