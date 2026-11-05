@@ -978,7 +978,7 @@ test('T267 ③: 只取最近 N 条（注入点之后的消息不算进来）', (
 
 // ---------------------------------------------------------------- T268（真实消息语料采集）
 import { messageCorpusRow, redactForCorpus, appendMessageCorpus, MESSAGE_TEXT_LIMIT } from '../src/plugin.mjs';
-import { mkdtempSync as mkTmp2, readFileSync as readF2, existsSync as existsF2, rmSync as rmT2 } from 'node:fs';
+import { mkdtempSync as mkTmp2, readFileSync as readF2, existsSync as existsF2, rmSync as rmT2, readdirSync } from 'node:fs';
 import { tmpdir as tmp2 } from 'node:os';
 import path2 from 'node:path';
 
@@ -1011,4 +1011,34 @@ test('T268 ③: 语料行形状正确（role/text/episode/scopeKey/at）+ 超长
   assert.equal(row.messages[1].text.length, MESSAGE_TEXT_LIMIT);
   assert.equal(row.messages[1].truncated, true);
   assert.equal(redactForCorpus('token=abc').includes('abc'), false);
+});
+
+// ---------------------------------------------------------------- T282（写入根收口到 sidecar）
+import { messageCorpusPath } from '../src/plugin.mjs';
+
+test('T282 ①: 语料落在 <storeRoot>/corpus/messages.jsonl（由 store root 推导，不写死仓库路径）', () => {
+  const storeRoot = path2.join(tmp2(), 'kifuin-t282-store');
+  const target = messageCorpusPath(storeRoot);
+  assert.equal(target, path2.join(storeRoot, 'corpus', 'messages.jsonl'));
+  assert.ok(target.startsWith(storeRoot), '必须落在 store root 之下');
+  assert.equal(target.includes('长期记忆系统'), false, '不许拼进仓库路径');
+});
+
+test('T282 ② tombstone: 写入只落 store root，**仓库目录里不出现新文件**', () => {
+  const repoEvidence = path2.join(process.cwd(), 'evidence');
+  const before = new Set(existsF2(repoEvidence) ? readdirSync(repoEvidence) : []);
+  const storeRoot = mkTmp2(path2.join(tmp2(), 'kifuin-t282-write-'));
+  try {
+    const ok = appendMessageCorpus(storeRoot, messageCorpusRow({ episode: 'ep-t282', messages: [{ role: 'user', content: '你好' }] }));
+    assert.equal(ok, true, '写 store root 必须成功');
+    assert.equal(existsF2(messageCorpusPath(storeRoot)), true, '语料必须落在 sidecar');
+    const after = new Set(existsF2(repoEvidence) ? readdirSync(repoEvidence) : []);
+    const added = [...after].filter((f) => !before.has(f));
+    assert.deepEqual(added, [], `仓库 evidence/ 不许新增文件，实际新增：${added.join(',')}`);
+  } finally { rmT2(storeRoot, { recursive: true, force: true }); }
+});
+
+test('T282 ③: 写失败静默降级（返回 false，不抛）', () => {
+  const boom = { mkdirSync() { throw new Error('EACCES'); }, appendFileSync() { throw new Error('EACCES'); } };
+  assert.equal(appendMessageCorpus('D:/nope-t282', messageCorpusRow({ messages: [{ role: 'user', content: 'x' }] }), { fsImpl: boom }), false);
 });

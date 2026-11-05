@@ -22,7 +22,10 @@ import { lastUserText, signalFromMessages, messageText } from '../src/plugin.mjs
 import { hardEntities } from './a2b-holdout.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
-export const CORPUS = path.join(REPO, 'evidence', 'T268-messages.jsonl');
+// T282：语料写入根已收口到 sidecar（`<storeRoot>/corpus/messages.jsonl`），这里同步默认路径。
+// 优先 `<DSH_HOME>/memory-context`，可用 `--corpus` / `KIFU_STORE_ROOT` 覆盖。
+export const DEFAULT_STORE_ROOT = path.join(process.env.DSH_HOME || 'D:/DeepSeek Harness/home', 'memory-context');
+export const CORPUS = path.join(process.env.KIFU_STORE_ROOT || DEFAULT_STORE_ROOT, 'corpus', 'messages.jsonl');
 const NL = String.fromCharCode(10);
 
 export function wilson(hits, n, z = 1.96) {
