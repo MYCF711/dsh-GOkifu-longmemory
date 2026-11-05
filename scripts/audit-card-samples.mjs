@@ -3,10 +3,15 @@
 //
 // 读 <store>/card-samples.jsonl，逐条核对卡片里每个 (ep, seq)：
 //   1) 引用层（旧判据，保留）：ep 存在 + seq 落在该局 closure 内 + ep 属于卡片 scope；
-//   2) 文字层（新默认）：卡上那一段正文是否**真的出现在该局的事件文本里**，三档
-//        at-seq   —— 在该 seq ±window（默认 3）个事件内出现；
-//        elsewhere —— 只在该局别处出现（给出最近 seq 与距离）；
-//        missing  —— 该局完全没有这段文字；
+//   2) 文字层（新默认）：卡上那一段正文是否**真的出现在该局的事件文本里**，**四态**
+//      （T239，docs/调研/46 三值逻辑：**未知 ≠ 已失效**）：
+//        ok        —— 在该 seq ±window（默认 3）个事件内出现（旧键 textAtSeq / verdict 'at-seq'）；
+//        offset    —— 原文在**同一局其它 seq** 命中（附 distance；旧键 textElsewhere / verdict 'elsewhere'）。
+//                     distance ≤ 20 记 offsetNear（"指针偏了几个 seq"，T232/T238 实测占 not-substring 的 85%），
+//                     > 20 记 offsetFar。**两类都不判红**，但单列 + 给占比 —— 它们是"待修项"，不是"坏引用"。
+//        unreadable—— episode / 日志 / seq 读不到（旧实现混进 missing）。**单列：不进 A6 分子也不进分母**；
+//                     退出码仍 fail-closed（没验过的不能当绿）。
+//        notFound  —— 本局**任何 seq** 都找不到 ⇒ **真正的坏引用**（旧键 missing，保留兼容；文案改"真找不到"）。
 //   3) 日期层：卡片日期必须等于所引 seq 附近那条事件的 occurredAt 格式化后的日期（UTC，口径同
 //      `src/rooms/inject.mjs` 的 `formatCardDate`）。
 //
@@ -77,6 +82,9 @@ export function collectStrings(value, out = []) {
 }
 
 /** 事件数组 → `[{ seq, time, blob }]`（blob 用换行拼接，正文不会跨两个字符串，故不会假阳）。 */
+/** T239：`offset` 里"近偏移"的门槛（seq 距离）。≤ 这个值的算"指针偏了几个事件"，> 的算"远偏移"。 */
+export const OFFSET_NEAR_MAX = 20;
+
 export function eventsToBlobs(events) {
   return (Array.isArray(events) ? events : [])
     .map((ev) => ({
@@ -179,8 +187,11 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
       }
       const events = await eventsOf(ref.episode);
       if (events === null) {
-        // 读不到原件（日志缺失/解析失败）⇒ fail-closed：记 missing，不假装合规。
-        verdicts.push({ ...base, verdict: 'missing', nearestSeq: null, distance: null, dateVerdict: 'no-event', eventDate: null });
+        // T239：读不到原件（日志缺失/解析失败）⇒ **单列成 unreadable**，不再冒充 missing。
+        // 为什么：missing 的语义是"该局任何 seq 都没有这段文字"（内容对不上），而这里是"根本没读到"——
+        // 两者是完全不同的两类问题（docs/调研/46：未知 ≠ 已失效）。unreadable 不进 A6 分子/分母，
+        // 但退出码仍 fail-closed（一次全 unreadable 的审计必须非 0，否则就是"没验过也报绿"）。
+        verdicts.push({ ...base, verdict: 'unreadable', nearestSeq: null, distance: null, dateVerdict: 'unreadable', eventDate: null });
         continue;
       }
       const textVerdict = classifyTextByEvents({ text: ref.text, seq: ref.seq, events, window });
@@ -197,9 +208,16 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
       ok: count((v) => v.exists && v.inRange),
       sameScope: count((v) => v.sameScope),
       bad: verdicts.filter((v) => !v.exists || !v.inRange).slice(0, 3),
+      // T239 四态（旧键全部保留，兼容下游读法）
+      textOk: count((v) => v.verdict === 'at-seq'),
       textAtSeq: count((v) => v.verdict === 'at-seq'),
+      textOffset: count((v) => v.verdict === 'elsewhere'),
       textElsewhere: count((v) => v.verdict === 'elsewhere'),
-      textMissing: count((v) => v.verdict === 'missing'),
+      textOffsetNear: count((v) => v.verdict === 'elsewhere' && Number.isFinite(v.distance) && v.distance <= OFFSET_NEAR_MAX),
+      textOffsetFar: count((v) => v.verdict === 'elsewhere' && Number.isFinite(v.distance) && v.distance > OFFSET_NEAR_MAX),
+      textNotFound: count((v) => v.verdict === 'missing'),
+      textMissing: count((v) => v.verdict === 'missing'), // 旧键 = notFound（true 坏引用）
+      textUnreadable: count((v) => v.verdict === 'unreadable'),
       textJoined: count((v) => v.verdict === 'joined'),
       dateOk: count((v) => v.dateVerdict === 'ok'),
       dateBad: count((v) => v.dateVerdict === 'mismatch' || v.dateVerdict === 'no-event'),
@@ -212,6 +230,20 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
   const okRefs = sum('ok');
   const sameScopeRefs = sum('sameScope');
   const textCheckFailed = textCheck;
+  // T239：A6 的分母 = 引用数 − 读不到的（unreadable 不进分子也不进分母）。
+  const textUnreadable = sum('textUnreadable');
+  const a6Denominator = totalRefs - textUnreadable;
+  // 中位距离：只统计"偏移命中"（offset）的那批；偶数个取中间两个的均值。
+  const offsetDistances = details
+    .flatMap((d) => d.verdicts)
+    .filter((v) => v.verdict === 'elsewhere' && Number.isFinite(v.distance))
+    .map((v) => Number(v.distance))
+    .sort((a, b) => a - b);
+  const medianOf = (arr) => {
+    if (!arr.length) return null;
+    const mid = Math.floor(arr.length / 2);
+    return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+  };
   return {
     samples: details.length,
     refs: totalRefs,
@@ -219,18 +251,33 @@ export async function auditRows({ rows, episodes, loadEvents = null, window = DE
     traceableRate: totalRefs ? okRefs / totalRefs : null,
     sameScopeRefs,
     crossScopeRefs: totalRefs - sameScopeRefs,
+    // 四态（旧键保留）
+    textOk: sum('textOk'),
     textAtSeq: sum('textAtSeq'),
+    textOffset: sum('textOffset'),
     textElsewhere: sum('textElsewhere'),
-    textMissing: sum('textMissing'),
+    textOffsetNear: sum('textOffsetNear'),
+    textOffsetFar: sum('textOffsetFar'),
+    textNotFound: sum('textNotFound'),
+    textMissing: sum('textMissing'), // = textNotFound（真找不到）
+    textUnreadable,
     textJoined: sum('textJoined'),
+    a6Denominator,
+    textOffsetRatio: a6Denominator ? sum('textOffset') / a6Denominator : null,
+    textNotFoundRatio: a6Denominator ? sum('textNotFound') / a6Denominator : null,
+    offsetDistanceMedian: medianOf(offsetDistances),
     dateOk: sum('dateOk'),
     dateBad: sum('dateBad'),
     textCheck,
     window,
     details,
-    // 退出码判据：文字层 missing 或 日期不一致 ⇒ 1；--no-text 退回旧口径。
+    // 退出码判据（语义不变 + T239 明确）：
+    //   · notFound（真坏引用）> 0 ⇒ 红；
+    //   · unreadable（核不了）> 0 ⇒ 红 —— fail-closed：一次"全读不到"的审计必须是红的，否则就是没验过也报绿；
+    //   · offset（指针偏了）**不红**，只在汇总里单列 + 给占比（待修项）；
+    //   · 日期不一致 ⇒ 红；--no-text 退回旧口径。
     exitCode: textCheckFailed
-      ? ((sum('textMissing') > 0 || sum('dateBad') > 0) ? 1 : 0)
+      ? ((sum('textNotFound') > 0 || textUnreadable > 0 || sum('dateBad') > 0) ? 1 : 0)
       : (okRefs === totalRefs ? 0 : 1),
   };
 }
@@ -319,7 +366,10 @@ async function main(argv = process.argv.slice(2)) {
   } else {
     const pct = (n) => (out.refs ? `${((n / out.refs) * 100).toFixed(1)}%` : '-');
     if (textCheck) {
-      console.log(`样本 ${out.samples} 张 · 引用 ${out.refs} 条 · at-seq ${out.textAtSeq} · elsewhere ${out.textElsewhere} · missing ${out.textMissing} · joined ${out.textJoined ?? 0} · 日期一致 ${out.dateOk}/${out.refs}${pidNote ? ' ' + pidNote : ''}`);
+      // T239：四态分列（ok / offset / unreadable / notFound）+ 中位距离 + 占比
+      const ratio = (n) => (out.a6Denominator ? `${((n / out.a6Denominator) * 100).toFixed(1)}%` : '-');
+      console.log(`样本 ${out.samples} 张 · 引用 ${out.refs} 条 · A6 分母 ${out.a6Denominator}（= 引用 − unreadable ${out.textUnreadable}）`);
+      console.log(`  ok ${out.textOk} · offset ${out.textOffset}（近 ${out.textOffsetNear} / 远 ${out.textOffsetFar}，占比 ${ratio(out.textOffset)}，中位距离 ${out.offsetDistanceMedian ?? 'n/a'}）· unreadable ${out.textUnreadable} · notFound ${out.textNotFound}（真找不到，占比 ${ratio(out.textNotFound)}）· joined ${out.textJoined ?? 0} · 日期一致 ${out.dateOk}/${out.refs}${pidNote ? ' ' + pidNote : ''}`);
       console.log(`（引用层：可回溯 ${out.okRefs}/${out.refs}（${pct(out.okRefs)}，弱判据）· 同作用域 ${out.sameScopeRefs} · 跨作用域 ${out.crossScopeRefs} · window=±${out.window}）`);
       const gap = out.details.flatMap((d) => d.verdicts)
         .filter((v) => v.distance != null && v.distance > out.window && v.distance <= 10).length;
@@ -331,7 +381,7 @@ async function main(argv = process.argv.slice(2)) {
     }
     for (const d of out.details) {
       const extra = textCheck
-        ? ` at-seq=${d.textAtSeq} elsewhere=${d.textElsewhere} joined=${d.textJoined ?? 0} missing=${d.textMissing} 日期ok=${d.dateOk}/${d.refs}`
+        ? ` ok=${d.textOk} offset=${d.textOffset} unreadable=${d.textUnreadable} notFound=${d.textNotFound} joined=${d.textJoined ?? 0} 日期ok=${d.dateOk}/${d.refs}`
         : '';
       console.log(`- ${new Date(d.at).toLocaleString()} ${String(d.scope).slice(-24)} tokens=${d.tokens} refs=${d.refs} ok=${d.ok}${extra}`);
     }
