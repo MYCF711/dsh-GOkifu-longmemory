@@ -918,7 +918,7 @@ function mergeMember(id, text, seqNo, occurredAt, { scopeKey = SCOPE, episode = 
  */
 function mergeStore({
   memberCount = 3, memberEpisode = 'ep-merge1', membersWithoutProof = false,
-  crossScope = true, expansionOnly = false,
+  crossScope = true, expansionOnly = false, withMergeNode = true,
 } = {}) {
   const target = createStore({ root: path.join(tmp, `merge-store-${(seq += 1)}`), now: T0 });
   target.ensureDirs();
@@ -956,7 +956,7 @@ function mergeStore({
     members: [...members, ...extra].map((m) => m.id),
     representative: { claimId: members[0]?.id ?? 'c-mem-01', episode: 'ep-merge1', seq: 21, quote: '成员原文 21' },
   };
-  target.putMany('claims', [node, ...members, ...extra], { at: T0 });
+  target.putMany('claims', withMergeNode ? [node, ...members, ...extra] : [...members, ...extra], { at: T0 });
   return target;
 }
 
@@ -1024,13 +1024,19 @@ test('R11 合并节点：没有 merge 字段的 claim 行为不变（golden）',
   }
 });
 
-test('R11 合并节点：同组展开有上限（min(成员数, 8)），按 occurredAt 升序，砍掉的计入 dropped.mergeMembersCapped', () => {
-  const target = mergeStore({ memberCount: 10, expansionOnly: true, crossScope: false });
-  const result = mergeWalk(target);
-  const members = claimIds(result).filter((id) => id.startsWith('c-mem-') && id !== 'c-mem-cross' && id !== 'c-mem-noproof');
-  // 1 号成员被解析成命中，其余 9 个里最多再展开 8 个
-  assert.equal(members.length, 9, '1 个命中 + 最多 8 个展开');
-  assert.equal(result.dropped.mergeMembersCapped, 1, '多出来的 1 个如实计入 dropped');
-  assert.deepEqual(members, ['c-mem-01', 'c-mem-02', 'c-mem-03', 'c-mem-04', 'c-mem-05', 'c-mem-06', 'c-mem-07', 'c-mem-08', 'c-mem-09']);
-  assert.ok(result.path.some((hop) => hop.kind === 'merge'), 'path 里能查到「合并组 → 成员」这一跳');
+test('R11 合并节点：同一 (episode, seq) 在"有合并节点的库"与"没有合并节点的库"上挑到同一个 claim', () => {
+  // expansionOnly：只有 1 号成员的出处落在命中的局上（其余在 ep-foreign，只能靠"同组展开"带出）
+  const withNode = mergeStore({ memberCount: 3, expansionOnly: true, crossScope: false, withMergeNode: true });
+  const noNode = mergeStore({ memberCount: 3, expansionOnly: true, crossScope: false, withMergeNode: false });
+  const a = mergeWalk(withNode);
+  const b = mergeWalk(noNode);
+  const key = (result) => result.hits
+    .filter((hit) => typeof hit.claim === 'string' && hit.claim !== '')
+    .map((hit) => `${hit.episode}#${hit.seq ?? '-'}:${hit.claim}`)
+    .sort();
+  // T193：walk 不再做"同组成员展开" ⇒ 两库的 claim 候选集只由 claim 自己的 support/文本决定
+  assert.deepEqual(key(a), key(b), '同一 (episode, seq) 上必须挑到同一个 claim');
+  assert.ok(!key(a).some((entry) => entry.endsWith(':c-merge01')), '合并节点本身不冒充 claim 行');
+  assert.equal(a.dropped.mergeNodeNoMember, undefined, '有成员可解析 ⇒ 不计退回');
+  assert.equal(b.dropped.mergeNodeNoMember, undefined, '没有合并节点的库更不会记退回');
 });
