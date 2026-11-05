@@ -51,6 +51,61 @@ export function overlapCount(signalText, claimText) {
   return tokens.filter((t) => hay.includes(t)).length;
 }
 
+// ── T248：硬实体桥 ───────────────────────────────────────────────────────────
+// 为什么需要它：任务原话是**中文**、claim 是**英文报错**时，"≥2 判别词重合"天然拿不到分
+// （中文句切出来的 token 与英文报错没有词面交集），即使两者共享同一个文件/错误码/包名。
+// **实体是语言中立的标识符** —— 中文任务与英文报错可以指向同一个 `dsh-ui/internal/uiplugins`
+// 或同一个 `ENOENT`。所以判据改成 **并集**：`≥2 判别词重合 || ≥1 硬实体重合`。
+// 原门槛（≥2 判别词）**一字不动**；硬实体只是补一条"语言错位"的通道。
+export const HARD_ENTITY_PATTERNS = Object.freeze([
+  // 文件路径：Windows 盘符 / POSIX 绝对路径
+  /[A-Za-z]:[\\/][\w./\\-]{3,}/g,
+  /(?:^|[\s"'(=])\/(?:[\w.-]+\/)*[\w.-]{3,}/g,
+  // 错误码 / 错误类
+  /\bclass:[a-z0-9-]+\b/gi,
+  /\b(?:ENOENT|EACCES|EPERM|EEXIST|ECONNREFUSED|ETIMEDOUT|MODULE_NOT_FOUND|ERR_[A-Z_]+)\b/g,
+  // 包名（scoped 或无 scope）
+  /(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]+\/[a-z0-9][a-z0-9._-]+/gi,
+  // 命令（git/node/npm/go/python/bash… + 少量参数）
+  /\b(?:git|node|npm|pnpm|yarn|go|python|bash|pwsh|powershell|curl|gh)\b(?:\s+[-\w./=:]{1,40}){0,4}/gi,
+]);
+
+/** 从一段文本里抽硬实体（小写归一；路径同时保留 basename，便于不同根下的同一文件对齐）。 */
+export function hardEntities(text) {
+  const raw = String(text ?? '');
+  const out = new Set();
+  for (const re of HARD_ENTITY_PATTERNS) {
+    re.lastIndex = 0;
+    for (const m of raw.matchAll(re)) {
+      const value = String(m[0] ?? '').trim().replace(/^[\s"'(=]+|[\s"'),.]+$/g, '');
+      if (value.length < 3) continue;
+      out.add(value.toLowerCase());
+      const base = value.split(/[\\/]/).pop();
+      if (base && base.length >= 6 && /[._-]/.test(base)) out.add(base.toLowerCase());
+    }
+  }
+  return out;
+}
+
+/** 任务与 claim 共享的硬实体（用于"语言错位"桥）。 */
+export function sharedHardEntities(signalText, claimText) {
+  const a = hardEntities(signalText);
+  if (!a.size) return [];
+  const b = hardEntities(claimText);
+  if (!b.size) return [];
+  return [...a].filter((x) => b.has(x));
+}
+
+/**
+ * T248 判据（并集，不降低原门槛）：
+ *   strict ⇔ related **且**（≥minOverlap 个判别词重合 **或** ≥1 个硬实体重合）
+ * `related` 的定义（support.episode === 该局）**一字不动** —— 那是 ground truth。
+ */
+export function judgeStrict({ related, overlap, shared, minOverlap = 2 }) {
+  if (!related) return false;
+  return overlap >= minOverlap || (Array.isArray(shared) && shared.length >= 1);
+}
+
 /** Wilson 95% 区间（与 merge-acceptance 同公式，避免口径漂移）。 */
 export function wilsonInterval(successes, n, z = 1.96) {
   const s = Number(successes) || 0;
@@ -248,6 +303,44 @@ export function judgeCard({ card, store, item, minOverlap = 2 } = {}) {
   };
 }
 
+/**
+ * T248 反向证据：**不相关对照组**。
+ * 每个考卷随机（按 id 排序的等距抽样，确定性）取 perItem 条 **support 不含该局** 的 claim，
+ * 用同一判据（判别词 / 硬实体）判"是否相关"。误判率 = 被判相关的比例。
+ * 放水的判据会在这里暴露：如果硬实体桥把无关 claim 也判相关，误判率会显著上升。
+ */
+export function negativeControl({ store, exam, perItem = 3 } = {}) {
+  const claims = store.list('claims').map((e) => e.record).filter(Boolean).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  const byId = new Map(claims.map((c) => [String(c.id), c]));
+  let n = 0;
+  let bridged = 0;
+  let tokenHit = 0;
+  const examples = [];
+  for (const item of exam?.items ?? []) {
+    const expectedEps = new Set(item?.expected?.episodes ?? []);
+    const expectedIds = new Set(item?.expected?.claimIds ?? []);
+    const pool = claims.filter((c) => {
+      const eps = (Array.isArray(c.support) ? c.support : []).map((s) => String(s?.episode ?? ''));
+      return !eps.some((ep) => expectedEps.has(ep)) && !expectedIds.has(String(c.id));
+    });
+    if (!pool.length) continue;
+    const step = Math.max(1, Math.floor(pool.length / perItem));
+    for (let i = 0; i < perItem && i * step < pool.length; i += 1) {
+      const c = byId.get(String(pool[i * step].id));
+      if (!c) continue;
+      n += 1;
+      const shared = sharedHardEntities(item.signal, c.text ?? '');
+      const overlap = overlapCount(item.signal, c.text ?? '');
+      if (shared.length >= 1) {
+        bridged += 1;
+        if (examples.length < 3) examples.push({ item: item.id, claimId: c.id, shared: shared.slice(0, 3), text: String(c.text).slice(0, 60) });
+      }
+      if (overlap >= 2) tokenHit += 1;
+    }
+  }
+  return { n, bridged, tokenHit, bridgeRate: n ? bridged / n : null, tokenRate: n ? tokenHit / n : null, examples };
+}
+
 /** 跑全套考卷（只读）。 */
 export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = null, cache = null } = {}) {
   const walkCache = cache ?? createWalkCache(store);
@@ -281,8 +374,10 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
     if (r.hitStrict) byKind[k].strict += 1;
     if (r.hitRelated) byKind[k].related += 1;
   }
+  const control = negativeControl({ store, exam });
   return {
     version: HOLDOUT_VERSION,
+    control,
     generatedAt: Number.isFinite(now) ? now : Date.now(),
     n,
     errors: results.filter((r) => r.error).length,
@@ -309,6 +404,10 @@ export function formatReport(r) {
   lines.push(`宽松命中 ${r.relatedHits}/${r.n} = ${pct(r.relatedRate)} · Wilson 95% [${pct(r.wilson.related.lower)}, ${pct(r.wilson.related.upper)}]`);
   lines.push(`渲染行：related ${r.rows.related} · pending ${r.rows.pending} · unrelated ${r.rows.unrelated}`);
   lines.push(`分类型：${Object.entries(r.byKind).map(([k, v]) => `${k} n=${v.n} 严格 ${v.strict} 宽松 ${v.related}`).join(' · ')}`);
+  if (r.control) {
+    const c = r.control;
+    lines.push(`不相关对照组：n=${c.n} · 硬实体桥误判 ${c.bridged}（${pct(c.bridgeRate)}）· 仅判别词误判 ${c.tokenHit}（${pct(c.tokenRate)}）`);
+  }
   return lines.join('\n');
 }
 
