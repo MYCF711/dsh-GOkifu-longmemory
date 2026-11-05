@@ -257,3 +257,55 @@ test('error-class: 已知协议类归一为 class:<name>，一次性报错返回
   assert.equal(errorClassKeyOf('Error: team member limit 8 reached'), 'class:sandbox-limit');
   assert.equal(errorClassKeyOf('SyntaxError: missing ) after argument list'), null);
 });
+
+// T233/F1：失败边的 seq 必须取「结果事件」的 end，不是「调用事件」的 start。
+// 片段（errorSnippet）出现在结果回来的那个事件里；取 start 会系统性偏移一个窗口 ⇒ 审计周期性报 missing。
+function failureEpisode(evidence) {
+  return {
+    id: 'ep-f1t233aa',
+    scopeKey: 'w:d:/work/demo',
+    startedAt: 1_700_000_100_000,
+    events: [userMessage(1, '任务：复现失败边 seq 偏移。')],
+    graph: {
+      version: 1,
+      nodes: {},
+      edges: {
+        e1: {
+          id: 'e1',
+          from: 'n1',
+          to: 'n2',
+          action: 'bash(command=node scripts/cli.mjs stats)',
+          result: 'failure',
+          errorSnippet: "Error: Cannot find module 'yaml'",
+          ts: 1_700_000_100_500,
+          evidence,
+        },
+      },
+    },
+  };
+}
+
+const failureOcc = (ep) => {
+  const topics = topicsOf(ep);
+  const hit = topics.filter((t) => t.occurrences.some((o) => o.edgeId === 'e1' && o.source === 'graph:edge.failure'));
+  assert.equal(hit.length, 1, '失败边只产出一个 error 主题（带 edgeId 的 occurrence）');
+  return hit[0].occurrences.filter((o) => o.edgeId === 'e1' && o.source === 'graph:edge.failure');
+};
+
+test('T233/F1-①: 有 end ⇒ seq 取 end（片段所在的结果事件）', () => {
+  const occ = failureOcc(failureEpisode({ start: 3670, end: 3674 }));
+  assert.equal(occ.length, 1);
+  assert.equal(occ[0].seq, 3674, '取 end，不是 start');
+});
+
+test('T233/F1-②: 只有 start ⇒ fallback 到 start（不崩、不丢）', () => {
+  const occ = failureOcc(failureEpisode({ start: 5736 }));
+  assert.equal(occ.length, 1);
+  assert.equal(occ[0].seq, 5736, 'end 缺失时退回 start');
+});
+
+test('T233/F1-③: end 与 start 相同 ⇒ 不重复、不崩', () => {
+  const occ = failureOcc(failureEpisode({ start: 4400, end: 4400 }));
+  assert.equal(occ.length, 1, '同一 (edgeId, quote) 只记一次');
+  assert.equal(occ[0].seq, 4400);
+});
