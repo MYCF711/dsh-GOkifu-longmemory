@@ -35,18 +35,44 @@ const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || proces
 
 // 2026-11-03：除了"绝对下限 0.55"，再加**回归线**（相对冻结基线最多掉 10pp）。
 // 只卡下限的话，84.2% 掉到 56% 也算 PASS —— 那是"慢慢烂掉"的典型形态。
+// T242：主判据的**考卷基线**（新，n=108 = repeat + self，见 scripts/a2b-holdout.mjs）
+//
+// 为什么换：旧的 a2bStrictRef=0.8421 来自 **n=19 的 repeat-only 冻结集** —— 那批样本全是
+// "后缀局复发了前序局的同一个签名"，是最容易的一类；n=108 的考卷混入了 self（本局自证）题，
+// 实测严格命中 37/108 = 34.26%。同一个指标两个数，说明旧基线是**选择偏差**的产物。
+//
+// 门槛取值：**等于当前实测**（37/108 与 74/108）—— "新考卷的起点，不是目标"：
+// 用分数形式写死，避免 0.3426 与 0.342592… 这种四舍五入把真实基线卡在门外的假红。
+export const HOLDOUT_BASELINE = Object.freeze({
+  n: 108,
+  strictHits: 37,
+  relatedHits: 74,
+  strictMin: 37 / 108, // 34.26%（新考卷起点；任何下降即红）
+  coverMin: 74 / 108, // 68.52%（宽松命中 = 覆盖）
+  note: '新考卷（repeat + self，n=108）的起点，不是目标',
+});
+
 const LIMITS = {
   a1Max: 0.05,
   a5Max: 0,
   a6Min: 1,
   a4p50MaxMs: 50,
-  a2bStrictMin: 0.55,
-  a2bCoverMin: 1,
+  // 新考卷门槛（T242）：低于当前实测即红 —— 只允许持平或更好
+  a2bStrictMin: HOLDOUT_BASELINE.strictMin,
+  a2bCoverMin: HOLDOUT_BASELINE.coverMin,
+  // 旧口径（sampleSource='report'，n=19 repeat-only）才适用的回归线；新考卷不用它
   a2bStrictRef: 0.8421052631578947,
   a2bStrictDropMax: 0.1,
 };
 
-export function judge(report, limits = LIMITS) {
+/**
+ * @param {object} report         m5-report 的 JSON
+ * @param {object} [limits]       门槛
+ * @param {{n?:number, strict?:number, cover?:number, sampleSource?:string}|null} [a2bOverride]
+ *        T242：主判据的**样本来源**由调用方决定。给了 override 就用它（考卷口径），
+ *        否则退回 m5 报告里的 injectionRecall（旧口径，只作对照）。
+ */
+export function judge(report, limits = LIMITS, a2bOverride = null) {
   const axes = report?.axes ?? report ?? {};
   const fails = [];
   const a1 = axes.A1?.value;
@@ -61,18 +87,21 @@ export function judge(report, limits = LIMITS) {
   const a6 = axes.A6?.value;
   const a4 = axes.A4?.value;
   const recall = axes.A2?.detail?.injectionRecall ?? {};
-  const strict = recall.recallSpecific;
-  const cover = recall.recall;
+  // T242：默认来源仍是 m5（旧口径）；调用方给了考卷结果就以考卷为准。
+  const strict = a2bOverride && Number.isFinite(a2bOverride.strict) ? a2bOverride.strict : recall.recallSpecific;
+  const cover = a2bOverride && Number.isFinite(a2bOverride.cover) ? a2bOverride.cover : recall.recall;
+  const a2bN = a2bOverride && Number.isFinite(a2bOverride.n) ? a2bOverride.n : (recall.n ?? null);
+  const sampleSource = a2bOverride?.sampleSource ?? (recall.sampleSource ?? 'report');
   // A4.value 的单位就是 ms（m5-report 里 unit:'ms'）；不再乘 1000。
   const p50 = typeof a4 === 'number' ? a4 : null;
   // ── 主判据（第一门槛）：A2b 召回相关度 ──────────────────────────────────
   // 先判它、先记它的失败 —— `fails` 的顺序就是输出的层级（T236b）。
   const main = [];
-  if (!Number.isFinite(strict) || strict < limits.a2bStrictMin) main.push(`A2b 严格 ${strict} < ${limits.a2bStrictMin}`);
-  else if (Number.isFinite(limits.a2bStrictRef) && strict < limits.a2bStrictRef - (limits.a2bStrictDropMax ?? 0.1)) {
+  if (!Number.isFinite(strict) || strict < limits.a2bStrictMin) main.push(`A2b 严格 ${strict} < ${limits.a2bStrictMin}（sampleSource=${sampleSource} n=${a2bN}）`);
+  else if (sampleSource !== 'holdout' && Number.isFinite(limits.a2bStrictRef) && strict < limits.a2bStrictRef - (limits.a2bStrictDropMax ?? 0.1)) {
     main.push(`A2b 严格 ${strict.toFixed(4)} 比冻结基线 ${limits.a2bStrictRef.toFixed(4)} 掉了 ${((limits.a2bStrictRef - strict) * 100).toFixed(1)}pp（>${((limits.a2bStrictDropMax ?? 0.1) * 100).toFixed(0)}pp）`);
   }
-  if (!Number.isFinite(cover) || cover < limits.a2bCoverMin) main.push(`A2b 覆盖 ${cover} < ${limits.a2bCoverMin}`);
+  if (!Number.isFinite(cover) || cover < limits.a2bCoverMin) main.push(`A2b 覆盖 ${cover} < ${limits.a2bCoverMin}（sampleSource=${sampleSource} n=${a2bN}）`);
 
   // ── 约束条件：A1 / A5 / A6 / A4 ────────────────────────────────────────
   const constraints = [];
@@ -101,9 +130,39 @@ export function judge(report, limits = LIMITS) {
       p50,
       a2bStrict: strict,
       a2bCover: cover,
-      a2bN: recall.n ?? null,
+      a2bN,
+      sampleSource,
       repeatFailureRate,
     },
+  };
+}
+
+/** T242：默认考卷路径（`scripts/a2b-holdout.mjs --json > evidence/a2b-holdout.json` 的产物）。 */
+export const DEFAULT_HOLDOUT_PATH = 'evidence/a2b-holdout.json';
+
+/**
+ * 读考卷。**fail-closed**：文件不存在就抛错（绝不静默回退到 n=19 的冻结集 ——
+ * 那会让主判据继续只考"最容易的一类"，正是 T242 要修的病）。
+ * @returns {{n:number, strict:number, cover:number, sampleSource:'holdout', path:string}}
+ */
+export function loadHoldout(filePath = DEFAULT_HOLDOUT_PATH, { fsImpl = fs } = {}) {
+  const abs = path.isAbsolute(filePath) ? filePath : path.join(REPO, filePath);
+  if (!fsImpl.existsSync(abs)) {
+    throw new Error(`考卷不存在：${abs}（先跑 node scripts/a2b-holdout.mjs --json > ${DEFAULT_HOLDOUT_PATH}）`);
+  }
+  const exam = JSON.parse(fsImpl.readFileSync(abs, 'utf8'));
+  const n = Number(exam?.n);
+  const strictHits = Number(exam?.strictHits);
+  const relatedHits = Number(exam?.relatedHits);
+  if (!Number.isFinite(n) || n <= 0 || !Number.isFinite(strictHits)) {
+    throw new Error(`考卷格式不对（缺 n / strictHits）：${abs}`);
+  }
+  return {
+    n,
+    strict: Number.isFinite(exam?.strictRate) ? exam.strictRate : strictHits / n,
+    cover: Number.isFinite(exam?.relatedRate) ? exam.relatedRate : (Number.isFinite(relatedHits) ? relatedHits / n : null),
+    sampleSource: 'holdout',
+    path: abs,
   };
 }
 
@@ -115,6 +174,14 @@ if (invokedDirectly) {
   const limits = { ...LIMITS };
   if (strictIdx >= 0 && Number.isFinite(Number(argv[strictIdx + 1]))) limits.a2bStrictMin = Number(argv[strictIdx + 1]);
   const json = argv.includes('--json');
+  // T242：主判据默认考卷口径。`--source report` 才退回 m5 报告里的旧口径（对照用）。
+  const sourceIdx = argv.indexOf('--source');
+  const sourceFlag = sourceIdx >= 0 ? String(argv[sourceIdx + 1] ?? '') : '';
+  const useHoldout = sourceFlag !== 'report' && !argv.includes('--no-holdout');
+  const holdoutIdx = argv.indexOf('--holdout');
+  const holdoutPath = holdoutIdx >= 0 && argv[holdoutIdx + 1]
+    ? argv[holdoutIdx + 1]
+    : (process.env.KIFU_A2B_HOLDOUT || DEFAULT_HOLDOUT_PATH);
   // 2026-11-04：本机实测过 m5 --json **间歇性静默死亡**（一次 patrol 里报 "Command failed"，重跑又正常）。
   // 原实现把 m5 的 stderr 吞了、把 JSON.parse 失败和子进程失败混成一句 "采集失败"，等于把可诊断信息丢掉。
   // 现在：分别记 exitCode / stderr / stdout 尾部，落 tmp/m5-raw.json 供事后看；只对"exit≠0 且 stderr 为空"
@@ -135,6 +202,22 @@ if (invokedDirectly) {
     try { report = JSON.parse(r.stdout); } catch (error) { parseError = String(error?.message ?? error); }
     return { ...r, report, parseError, tail };
   };
+  // 考卷缺失 ⇒ 立刻红（fail-closed）：不去跑 m5、也不回退到 n=19 的冻结集。
+  let holdout = null;
+  if (useHoldout) {
+    try {
+      holdout = loadHoldout(holdoutPath);
+    } catch (error) {
+      const msg = String(error?.message ?? error);
+      console.error('metrics-guard FAIL');
+      console.error(`ERR ${msg}`);
+      try {
+        fs.mkdirSync(path.join(REPO, 'evidence'), { recursive: true });
+        fs.writeFileSync(path.join(REPO, 'evidence/metrics-guard.json'), JSON.stringify({ at: new Date().toISOString(), ok: false, fails: [msg], sampleSource: 'holdout-missing' }, null, 2) + '\n');
+      } catch { /* 证据写失败不影响判定 */ }
+      process.exit(1);
+    }
+  }
   let got = await collect();
   if (!got.report && got.exitCode !== 0 && !got.tail(got.stderr)) {
     console.error('metrics-guard: m5 静默死亡（exit≠0 且 stderr 为空），重试一次…');
@@ -153,7 +236,7 @@ if (invokedDirectly) {
     process.exit(2);
   }
   const report = got.report;
-  const verdict = judge(report, limits);
+  const verdict = judge(report, limits, holdout ? { n: holdout.n, strict: holdout.strict, cover: holdout.cover, sampleSource: holdout.sampleSource } : null);
   const out = { at: new Date().toISOString(), root: HOME, limits, ...verdict };
   try {
     fs.mkdirSync(path.join(REPO, 'evidence'), { recursive: true });
@@ -164,7 +247,7 @@ if (invokedDirectly) {
     // 输出顺序 = 层级（T236b）：主判据 → 约束条件 → 下游参考。
     const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
     console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'}`);
-    console.log(`  主判据 · A2b 召回相关度：严格=${pct(out.values.a2bStrict)}（n=${out.values.a2bN}） 覆盖=${pct(out.values.a2bCover)}`);
+    console.log(`  主判据 · A2b 召回相关度（sampleSource=${out.values.sampleSource}，n=${out.values.a2bN}）：严格=${pct(out.values.a2bStrict)} 覆盖=${pct(out.values.a2bCover)}`);
     console.log(`  约束条件 · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A4.p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
     console.log(`  下游参考 · repeatFailureRate=${pct(out.values.repeatFailureRate)}（V1 · 不参与 exit code）`);
     for (const f of verdict.fails) console.error(`ERR ${f}`);
