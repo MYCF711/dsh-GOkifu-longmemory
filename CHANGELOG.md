@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.25（2026-11-05）
+
+### occurredAt 取该事件自己的 time（T274）
+**根因**：`src/rooms/extract.mjs` 的失败 entry 写死 `occurredAt = edge.ts`，
+而 **`edge.ts` 是上游按 `seq+1`（`tool/call`）那一格写的时间** ⇒
+claim 的"出处"与"发生时间"**不属于同一个事件**（知识库 57 的 L3 语义不变量被违反）。
+
+**真库重放**：`受影响 123 条 | 旧 ts 恰等于 seq+1 时间：123 条 | 新逻辑取对：123 条`
+—— **123/123 的旧 `ts` 都恰好等于 `seq+1` 的时间**，系统性取错，不是巧合。
+
+**修法**：`occurredAtOf(seq, edge)` —— 取该 `seq` 事件**自己的 `time`**；
+兜底只许**向前**找并标 `timeSource: 'previous-event'`；
+完全离线的考古路径才退到 `edge.ts` 并标 `timeSource: 'edge-ts'`（来源可疑，可审计）；
+**前后都没有 ⇒ `null`（缺时间 = 假记忆，不许编）**。
+
+**存量那 9 条单独一刀**：本刀只影响**未来**抽取；不改 `seq`/`quote`，只修 `occurredAt` 一个字段。
+
+### 验证
+29 条 extract 测试（27 pass / 2 skip，skip 为既有真实样本缺失）；`check PASS`（59 篇）。
+
 ## 0.2.24（2026-11-05）
 
 ### SI-1 归因（T273）

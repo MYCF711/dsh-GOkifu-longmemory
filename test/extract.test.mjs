@@ -440,3 +440,57 @@ test('T251 回归：绿汇总与真失败混在一起 ⇒ 仍判失败（不误�
   assert.equal(r.failures.length, 1, '混着真失败的边必须保留');
   assert.equal(r.dropped.falsePositive, 0);
 });
+
+// ---------------------------------------------------------------------------
+// T274 · occurredAt 必须取**该 support 所指事件自己的 time**（不许借 seq+1 的时间）
+//   事故：旧实现 `occurredAt: edge.ts`，而上游写边时 ts 取的是 seq+1（tool/call）那一格，
+//   于是 claim 的"出处"与"发生时间"不属于同一个事件（知识库 57 的 L3 不变量）。
+// ---------------------------------------------------------------------------
+
+test('T274 occurredAt：assistant/message 无 time、下一条 tool/call 有 time ⇒ 不许取下一条的', () => {
+  const graph = graphOf({
+    e1: edgeOf('e1', 10, { result: 'failure', errorSnippet: 'Error: boom', ts: 999999 }),
+  });
+  const events = [
+    { seq: 10, type: 'assistant/message', data: {} },          // 自己没有 time
+    { seq: 11, type: 'tool/call', time: 999999, data: {} },     // 下一条有 time（旧实现会借它）
+  ];
+  const r = extractSignals({ graph, events });
+  assert.equal(r.failures[0].occurredAt, null, '不许借下一条事件的时间');
+  assert.equal(r.failures[0].timeSource, null);
+});
+
+test('T274 occurredAt：该事件自己有 time ⇒ 取自己的（不是 edge.ts）', () => {
+  const graph = graphOf({
+    e1: edgeOf('e1', 10, { result: 'failure', errorSnippet: 'Error: boom', ts: 999999 }),
+  });
+  const events = [
+    { seq: 10, time: 111111, data: {} },
+    { seq: 11, time: 999999, data: {} },
+  ];
+  const r = extractSignals({ graph, events });
+  assert.equal(r.failures[0].occurredAt, 111111, '取该 seq 自己的 time');
+  assert.equal(r.failures[0].timeSource, 'event');
+});
+
+test('T274 occurredAt：兜底向前找时必须标 timeSource="previous-event"', () => {
+  const graph = graphOf({
+    e1: edgeOf('e1', 10, { result: 'failure', errorSnippet: 'Error: boom', ts: 999999 }),
+  });
+  const events = [
+    { seq: 9, time: 555555, data: {} },
+    { seq: 10, type: 'assistant/message', data: {} }, // 没有 time，且 11 不存在
+  ];
+  const r = extractSignals({ graph, events });
+  assert.equal(r.failures[0].occurredAt, 555555, '向前找 seq-1');
+  assert.equal(r.failures[0].timeSource, 'previous-event', '兜底必须显式标注，不许静默借');
+});
+
+test('T274 occurredAt：前后都没有 time ⇒ null（缺时间 = 假记忆，不许编）', () => {
+  const graph = graphOf({
+    e1: edgeOf('e1', 10, { result: 'failure', errorSnippet: 'Error: boom', ts: 777 }),
+  });
+  const r = extractSignals({ graph, events: [{ seq: 10, data: {} }] });
+  assert.equal(r.failures[0].occurredAt, null);
+  assert.equal(r.failures[0].timeSource, null);
+});

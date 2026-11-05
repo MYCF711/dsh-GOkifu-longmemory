@@ -292,6 +292,30 @@ export function extractSignals({ graph = null, events = null, maxQuote = MAX_QUO
 
   const quote = (t) => clip(t, maxQuote);
 
+  // T274：`occurredAt` 必须取**该 support 所指事件自己的 `time`**。
+  // 旧实现用 `edge.ts` —— 上游写边时取的是 `seq+1`（tool/call）那一格的时间，
+  // 于是 claim 的"出处"（support.seq）与"发生时间"不属于同一个事件
+  // （知识库 57 的 L3 不变量：来源与时间是同一条事件的两个面）。
+  //   · 该事件有 time  ⇒ 用它（timeSource='event'）
+  //   · 没有 time      ⇒ **不许借用下一条事件的时间**；向前找 seq-1，并标 timeSource='previous-event'
+  //   · 前后都没有     ⇒ occurredAt=null（缺时间 = 假记忆，交给上游 ep.at 兜底，绝不编）
+  const timeBySeq = new Map();
+  for (const ev of list) {
+    const s = Number(ev?.seq);
+    const t = Number(ev?.time);
+    if (Number.isFinite(s) && Number.isFinite(t)) timeBySeq.set(s, t);
+  }
+  const occurredAtOf = (s, edge = null) => {
+    const own = timeBySeq.get(Number(s));
+    if (own !== undefined) return { occurredAt: own, timeSource: 'event' };
+    const prev = timeBySeq.get(Number(s) - 1);
+    if (prev !== undefined) return { occurredAt: prev, timeSource: 'previous-event' };
+    // 完全离线（没有事件可读，如只给棋谱的考古路径）⇒ 退到边自己的 ts，但**标明来源可疑**：
+    // 上游写边时 ts 取的是 seq+1 那一格，不能当"该事件的时间"。有事件时一律不用它。
+    if (list.length === 0 && Number.isFinite(edge?.ts)) return { occurredAt: Number(edge.ts), timeSource: 'edge-ts' };
+    return { occurredAt: null, timeSource: null };
+  };
+
   // ── 1. 边结果 ────────────────────────────────────────────────
   const edges = Object.values(graph?.edges ?? {});
   edges.sort((a, b) => {
@@ -332,7 +356,8 @@ export function extractSignals({ graph = null, events = null, maxQuote = MAX_QUO
       result: edge.result,
       verifyKind: edge.verify?.kind ?? null,
       transposition: edge.transposition === true,
-      occurredAt: Number.isFinite(edge.ts) ? edge.ts : null,
+      // T274：取**该 seq 事件自己的 time**（旧实现用 edge.ts = seq+1 的时间，属跨事件借时）
+      ...occurredAtOf(seq, edge),
       source: 'edge',
     };
     if (bucket === 'failures') failures.push(entry);
