@@ -13,11 +13,14 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 
 import { parsePatchEntries, analyzeEntries, collectIds } from '../scripts/kifu-profile-doctor.mjs';
-import { stagePatch, verifyPatch, buildApplyScripts, summarizeDiff } from '../scripts/kifu-profile-stage.mjs';
+import { stagePatch, verifyPatch, buildApplyScripts, summarizeDiff, yamlModulePath } from '../scripts/kifu-profile-stage.mjs';
 
+const REPO = fileURLToPath(new URL('..', import.meta.url));
 const FAKE_PATCH = `# fake profile patch
 - id: alpha
   name: "@x/alpha"
@@ -74,7 +77,8 @@ test('T195 ②: staging 后 kifu-tools 恰好一条，矛盾 disabled 换成一�
   assert.equal(memory.length, 1, '记忆插件条目只剩一条');
   assert.ok(!/id: kifu-longmemory/.test(staged.text), '旧的 kifu-longmemory 条目应被移除');
   assert.ok(!/disabled:\s*true/.test(staged.text), '残留的 disabled: true 会让下次重启行为不可预期');
-  assert.equal(verifyPatch(staged.text).ok, true, JSON.stringify(verifyPatch(staged.text).errors));
+  const vp = verifyPatch(staged.text, { allowStructural: true });
+  assert.equal(vp.ok, true, JSON.stringify(vp.errors));
   assert.ok(staged.changes.some((c) => c.kind === 'add'));
   assert.ok(staged.changes.some((c) => c.kind === 'remove-disabled'));
 });
@@ -110,14 +114,61 @@ test('T195 ④: YAML 校验失败 ⇒ apply 脚本退出 3，目标文件不被�
   } catch (error) {
     code = error.status ?? 1;
   }
-  assert.equal(code, 3, `校验失败必须退出 3，实际 ${code}`);
+  assert.ok([3, 6].includes(code), `校验失败必须退出 3（无引擎时 6），实际 ${code}`);
   assert.equal(readFileSync(target, 'utf8'), FAKE_PATCH, '目标文件必须原样未动');
 
-  // 好的 staged ⇒ 替换成功且留了备份
+  // 好的 staged ⇒ 替换成功且留了备份（无引擎时 fail-closed 会退 6，这半段只在有引擎时验）
+  if (!yamlModulePath()) return;
   const good = path.join(dir, 'good.yml');
   writeFileSync(good, stagePatch(FAKE_PATCH, { toolsBlock: TOOLS_BLOCK }).text);
   execFileSync('bash', [shPath, good], { encoding: 'utf8', stdio: 'pipe' });
   assert.match(readFileSync(target, 'utf8'), /kifu-tools/, '校验通过时才替换');
   mkdirSync(backupDir, { recursive: true });
   assert.ok(readFileSync(target, 'utf8').includes('dsh-gokifu-longmemory'));
+});
+
+// ── T219：无引擎 ⇒ fail-closed ──────────────────────────────────────────────
+test('T219: 无 YAML 引擎 ⇒ verifyPatch 拒绝（code 6），--allow-structural 才降级', () => {
+  const noEngine = { home: path.join(tmp, 'no-engine-home') };
+  const r = verifyPatch('- id: a\n', noEngine);
+  assert.equal(r.ok, false);
+  assert.equal(r.code, 6, '无引擎必须退出 6');
+  assert.match(r.errors[0], /没有 YAML 引擎/);
+  assert.equal(r.validation, 'none');
+
+  const st = verifyPatch('- id: a\n', { ...noEngine, allowStructural: true });
+  assert.equal(st.ok, true);
+  assert.equal(st.validation, 'structural-only');
+  assert.match(st.warning ?? '', /结构校验，不是 YAML 校验/);
+});
+
+test('T219: 无引擎 ⇒ apply 退出 6 且目标文件逐字节不变', () => {
+  const dir = mkdtempSync(path.join(tmp, 'no-engine-'));
+  const home = path.join(dir, 'home');
+  mkdirSync(path.join(home, 'profiles', 'desktop'), { recursive: true });
+  const target = path.join(home, 'profiles', 'desktop', 'cordis.patch.yml');
+  writeFileSync(target, FAKE_PATCH);
+  const staged = path.join(dir, 'staged.yml');
+  writeFileSync(staged, stagePatch(FAKE_PATCH, { toolsBlock: TOOLS_BLOCK }).text);
+  const baseSha = createHash('sha256').update(FAKE_PATCH).digest('hex');
+  const { sh } = buildApplyScripts({ stagedPath: staged, targetPath: target, backupDir: path.join(dir, 'backup'), baseSha });
+  const shPath = path.join(dir, 'apply.sh');
+  writeFileSync(shPath, sh);
+  const prev = process.env.DSH_HOME;
+  process.env.DSH_HOME = home;
+  let code = 0;
+  let out = '';
+  try { out = execFileSync('bash', [shPath, staged, target], { encoding: 'utf8', stdio: 'pipe' }); } catch (e) { code = e.status ?? 1; out = String(e.stdout ?? '') + String(e.stderr ?? ''); }
+  finally { if (prev === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prev; }
+  assert.equal(code, 6, `无引擎必须退出 6，实际 ${code}（${out.slice(0, 120)}）`);
+  assert.equal(createHash('sha256').update(readFileSync(target)).digest('hex'), baseSha, '目标必须原样');
+});
+
+test('T219 CLI: --verify 非法输入 ⇒ 进程退出码非 0（CLI 层，别只测库层）', () => {
+  const dir = mkdtempSync(path.join(tmp, 'cli-verify-'));
+  const bad = path.join(dir, 'bad.yml');
+  writeFileSync(bad, '- id: a\n  config: [1,2\n'); // 未闭合
+  let code = 0;
+  try { execFileSync(process.execPath, [path.join(REPO, 'scripts', 'kifu-profile-stage.mjs'), '--verify', bad], { encoding: 'utf8', stdio: 'pipe' }); } catch (e) { code = e.status ?? 1; }
+  assert.ok(code !== 0, `非法输入必须退出非 0，实际 ${code}`);
 });

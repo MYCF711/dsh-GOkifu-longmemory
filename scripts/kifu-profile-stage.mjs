@@ -13,10 +13,19 @@
 //   node scripts/kifu-profile-stage.mjs --verify <f>   # 只校验一个文件（apply 脚本内部用这个）
 //
 // 幂等：已存在 `- id: kifu-tools` ⇒ 不重复追加；已无矛盾的 disabled ⇒ 不再改那一段。跑两次结果相同。
+//
+// T217/T219（独立复核 T215 判定"不能直接跑"）：
+//   F1 真 YAML 解析（profile 里的 yaml@2.9.x）；**T219：找不到引擎 ⇒ fail-closed，退出 6**
+//   F2 staging 记录目标 sha256，apply 前比对，不一致 ⇒ 拒绝写（exit 5）
+//   F3 备份后 cmp + 打印 sha256；回滚走"cp 到临时文件再 mv"
+//   F4 顶部热重载提示；PS1 用 `Write-Host …; exit N`
+//   F5 备份文件名带毫秒；文件结尾补换行
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -50,37 +59,74 @@ export function toolsEntryBlock(repoRoot = REPO_ROOT) {
  *   · 若运行环境里真有 `yaml`，额外用它解析一次（有就顺带用，没有也不引入）
  * @returns {{ok:boolean, errors:string[], parsedEntries:number, yamlModule:boolean}}
  */
-export function verifyPatch(text) {
+
+/** 在 profile / 仓库里定位 `yaml` 模块（仓库本身没有 node_modules 是常态）。 */
+export function yamlModulePath({ home = defaultHome(), profile = 'desktop' } = {}) {
+  const bases = [path.join(home, 'profiles', profile, 'package.json'), path.join(REPO_ROOT, 'package.json')];
+  for (const base of bases) {
+    try { return createRequire(base).resolve('yaml'); } catch { /* 下一个 */ }
+  }
+  return null;
+}
+
+/**
+ * T217 F1 + T219 fail-closed · 真 YAML 校验。
+ * 查找顺序：<DSH_HOME>/profiles/<profile>/node_modules/yaml → 仓库 node_modules/yaml。
+ * **找不到**时：默认拒绝（`ok:false, code:6`）；只有显式 `allowStructural` 才降级为结构校验，
+ * 且结果里必须带 `validation: 'structural-only'` 与醒目 warning。
+ */
+export function verifyPatch(text, { home = defaultHome(), profile = 'desktop', allowStructural = false } = {}) {
+  const NL = String.fromCharCode(10);
+  const modPath = yamlModulePath({ home, profile });
+  if (modPath) {
+    try {
+      const yaml = createRequire(modPath)('yaml');
+      let ver = yaml.version;
+      if (!ver) {
+        try { ver = JSON.parse(fs.readFileSync(path.join(path.dirname(modPath), '..', 'package.json'), 'utf8')).version; } catch { /* 版本可选 */ }
+      }
+      const doc = yaml.parse(String(text ?? ''));
+      if (!Array.isArray(doc)) {
+        return { ok: false, errors: ['顶层不是数组（patch 必须是顶层数组）'], parsedEntries: 0, engine: `yaml@${ver ?? '?'}`, validation: 'yaml', path: modPath };
+      }
+      return { ok: true, errors: [], parsedEntries: doc.length, engine: `yaml@${ver ?? '?'}`, validation: 'yaml', path: modPath };
+    } catch (error) {
+      return { ok: false, errors: [String(error?.message ?? error).split(NL)[0].slice(0, 240)], parsedEntries: 0, engine: 'yaml', validation: 'yaml', path: modPath };
+    }
+  }
+  if (!allowStructural) {
+    return {
+      ok: false,
+      errors: ['✗ 没有 YAML 引擎（试过 <profile>/node_modules/yaml 与仓库 node_modules），拒绝在没有真校验的情况下修改 patch'],
+      parsedEntries: 0,
+      engine: 'none',
+      validation: 'none',
+      code: 6,
+    };
+  }
   const errors = [];
-  const lines = String(text ?? '').split('\n');
-  if (!lines.some((l) => /^- /.test(l))) errors.push('顶层没有任何 "- " 条目（patch 必须是顶层数组）');
-  let entries = 0;
-  let inBlock = false;
+  const text2 = String(text ?? '');
+  const lines = text2.split(NL);
+  if (!lines.some((l) => l.startsWith('- '))) errors.push('顶层没有 "- " 条目（patch 必须是顶层数组）');
+  if (text2.includes(String.fromCharCode(9))) errors.push('含 TAB（YAML 只允许空格缩进）');
   for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (line.includes('\t')) errors.push(`第 ${i + 1} 行含 TAB（YAML 只允许空格缩进）`);
-    if (/^\s*#/.test(line) || line.trim() === '') continue;
-    if (/^- /.test(line)) { entries += 1; inBlock = true; continue; }
-    if (/^\s+\S/.test(line)) { if (!inBlock) errors.push(`第 ${i + 1} 行是缩进行但没有所属条目`); continue; }
-    errors.push(`第 ${i + 1} 行既不是 "- " 条目也不是缩进行：${line.slice(0, 60)}`);
+    const m = /^\s*[A-Za-z0-9_$.-]+:\s*([[{])/.exec(lines[i]);
+    if (!m) continue;
+    const close = m[1] === '[' ? ']' : '}';
+    if (!lines[i].includes(close)) errors.push(`第 ${i + 1} 行 ${m[1]} 未闭合`);
   }
-  const quotes = (String(text ?? '').match(/(['"])/g) ?? []).length;
-  if (quotes % 2 !== 0) errors.push('引号数量为奇数（可能有未闭合的引号）');
-  // 项目没有 yaml 依赖；这里"有就顺带用，没有就走结构校验"，不引入任何新依赖。
-  let yamlModule = false;
-  let probeFile = null;
-  try {
-    probeFile = path.join(os.tmpdir(), `kifu-verify-${process.pid}-${Date.now()}.yml`);
-    fs.writeFileSync(probeFile, String(text ?? ''));
-    const out = execFileSync(process.execPath, ['-e', "const y=require('yaml');const fs=require('fs');const j=y.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(Array.isArray(j)?String(j.length):'not-array')", probeFile], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
-    yamlModule = true;
-    if (out.trim() === 'not-array') errors.push('yaml 解析结果不是顶层数组');
-  } catch {
-    yamlModule = false; // 没有 yaml 模块属预期：结构校验已覆盖
-  } finally {
-    if (probeFile) { try { fs.rmSync(probeFile, { force: true }); } catch { /* ignore */ } }
-  }
-  return { ok: errors.length === 0, errors, parsedEntries: entries, yamlModule };
+  return {
+    ok: errors.length === 0,
+    errors,
+    parsedEntries: lines.filter((l) => l.startsWith('- ')).length,
+    engine: 'fallback-structural',
+    validation: 'structural-only',
+    warning: '⚠ 结构校验，不是 YAML 校验（找不到 yaml 模块）—— 已显式 --allow-structural',
+  };
+}
+
+export function sha256(text) {
+  return createHash('sha256').update(String(text ?? ''), 'utf8').digest('hex');
 }
 
 /**
@@ -142,7 +188,7 @@ export function stagePatch(sourceText, { toolsBlock = null } = {}) {
 }
 
 /** 生成一键脚本（bash + PowerShell）：备份 → 校验 → 原子替换 → 打印回滚。 */
-export function buildApplyScripts({ stagedPath, targetPath, backupDir }) {
+export function buildApplyScripts({ stagedPath, targetPath, backupDir, baseSha = null, allowStructural = false }) {
   // bash 里反斜杠会转义引号：Windows 路径统一成正斜杠（Git Bash 认）
   const posix = (p) => String(p ?? '').split(String.fromCharCode(92)).join('/');
   const stagedSh = posix(stagedPath);
@@ -156,7 +202,10 @@ STAGED="\${1:-${stagedSh}}"
 TARGET="\${2:-${targetSh}}"
 BACKUP_DIR="\${3:-${backupSh}}"
 REPO="\${REPO_ROOT:-${repoSh}}"
-STAMP="$(date +%Y%m%d-%H%M%S)"
+ALLOW_FLAG=""
+if [ "\${KIFU_ALLOW_STRUCTURAL:-0}" = "1" ]; then ALLOW_FLAG="--allow-structural"; fi
+STAMP="$(date +%Y%m%d-%H%M%S-%3N)"
+BASE_SHA="\${KIFU_BASE_SHA:-${baseSha ?? ''}}"
 BACKUP="$BACKUP_DIR/cordis.patch.yml.bak-$STAMP"
 
 echo "staged : $STAGED"
@@ -165,15 +214,32 @@ echo "target : $TARGET"
 [ -f "$STAGED" ] || { echo "缺 staged 文件：$STAGED" >&2; exit 2; }
 [ -f "$TARGET" ] || { echo "缺目标文件：$TARGET" >&2; exit 2; }
 
-# 1) 校验（结构 + 有 yaml 模块时额外解析）；失败就**不替换**
-if ! node "$REPO/scripts/kifu-profile-stage.mjs" --verify "$STAGED"; then
-  echo "校验失败：目标文件未被修改" >&2
-  exit 3
+# 1) 校验（真 YAML；无引擎 ⇒ 退出 6，不替换）
+# 退出码**透传**：6 就是 6，3 就是 3（别在 shell 里归一）
+set +e
+node "$REPO/scripts/kifu-profile-stage.mjs" --verify "$STAGED" $ALLOW_FLAG
+RC=$?
+set -e
+if [ "$RC" -ne 0 ]; then
+  echo "✗ 写前校验失败（exit=$RC），目标未改动：$TARGET" >&2
+  exit "$RC"
+fi
+
+# F2 · 目标必须还是 staging 时那一份（防静默盖掉别人的改动）
+CUR_SHA=$(sha256sum "$TARGET" | awk '{print $1}' | sed 's/^[^0-9a-f]*//')
+if [ -n "$BASE_SHA" ] && [ "$CUR_SHA" != "$BASE_SHA" ]; then
+  echo "目标已被别人改过：期望 $BASE_SHA，实际 $CUR_SHA —— 拒绝写" >&2
+  exit 5
 fi
 
 # 2) 备份
 mkdir -p "$BACKUP_DIR"
 cp -p "$TARGET" "$BACKUP"
+BAK_SHA=$(sha256sum "$BACKUP" | awk '{print $1}' | sed 's/^[^0-9a-f]*//')
+echo "备份：$BACKUP"
+echo "  target sha256 = $CUR_SHA"
+echo "  backup sha256 = $BAK_SHA"
+if [ "$CUR_SHA" != "$BAK_SHA" ]; then echo "备份 sha256 与源不一致 —— 拒绝继续" >&2; exit 4; fi
 
 # 3) 原子替换（同目录临时文件 + rename）
 TMP="$TARGET.tmp.$STAMP"
@@ -203,6 +269,13 @@ if (-not (Test-Path $Target)) { Write-Error "缺目标文件：$Target"; exit 2 
 # 1) 校验失败就不替换
 & node (Join-Path $repo "scripts/kifu-profile-stage.mjs") --verify $Staged
 if ($LASTEXITCODE -ne 0) { Write-Error "校验失败：目标文件未被修改"; exit 3 }
+
+# F2 · 目标必须还是 staging 时那一份（防静默盖掉别人的改动）
+CUR_SHA=$(sha256sum "$TARGET" | awk '{print $1}' | sed 's/^[^0-9a-f]*//')
+if [ -n "$BASE_SHA" ] && [ "$CUR_SHA" != "$BASE_SHA" ]; then
+  echo "目标已被别人改过：期望 $BASE_SHA，实际 $CUR_SHA —— 拒绝写" >&2
+  exit 5
+fi
 
 # 2) 备份
 New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
@@ -294,7 +367,10 @@ export function formatReport(r) {
   for (const c of r.changes) lines.push(`  · [${c.kind}] ${c.detail}`);
   const d = r.diffSummary;
   lines.push(`diff：-${d.removedLines} / +${d.addedLines} 行（${d.beforeLines} → ${d.afterLines}）`);
-  lines.push(`校验：${r.verify.ok ? 'OK' : `失败（${r.verify.errors.join('; ')}）`} · 条目 ${r.verify.parsedEntries} 个 · yaml 模块 ${r.verify.yamlModule ? '可用' : '不可用（已用结构校验替代）'}`);
+  const engine = r.verify.engine ?? 'none';
+  lines.push(`校验：${r.verify.ok ? 'OK' : `失败（${r.verify.errors.join('; ')}）`} · 条目 ${r.verify.parsedEntries} 个 · yaml 模块 ${engine !== 'none' ? `可用（${engine}）` : '不可用'}`);
+  if (engine === 'none') lines.push('⚠ 结构校验，不是 YAML 校验（无引擎，已 fail-closed 拒绝写入）');
+  else if (r.verify.validation === 'structural-only') lines.push(r.verify.warning ?? '⚠ 结构校验，不是 YAML 校验（已显式 --allow-structural）');
   lines.push(`工具面条目：${r.added === 0 ? '已存在（跳过）' : '已追加 1 条'}`);
   if (r.applied) {
     lines.push('');
@@ -310,11 +386,11 @@ export function runCli(argv = process.argv.slice(2)) {
   if (vi >= 0) {
     const file = argv[vi + 1];
     if (!file || !fs.existsSync(file)) return { code: 2, stdout: `缺文件：${file}` };
-    const res = verifyPatch(fs.readFileSync(file, 'utf8'));
+    const res = verifyPatch(fs.readFileSync(file, 'utf8'), { allowStructural: argv.includes('--allow-structural') });
     return {
-      code: res.ok ? 0 : 3,
+      code: res.ok ? 0 : (res.code ?? 3),
       stdout: res.ok
-        ? `校验 OK（条目 ${res.parsedEntries} 个 · yaml 模块 ${res.yamlModule ? '可用' : '不可用，已用结构校验替代'}）`
+        ? `校验 OK（引擎 ${res.engine ?? 'none'} · 条目 ${res.parsedEntries} 个 · yaml 模块 可用）`
         : `校验失败：\n${res.errors.map((e) => `  - ${e}`).join('\n')}`,
     };
   }
