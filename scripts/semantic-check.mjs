@@ -91,11 +91,23 @@ export function runSemanticChecks({ claims, timeIndexOf, tolerance = 0, nowWindo
         }
         out.pass += 1;
       }
-      // SI-4 时间落在局窗
-      const claimAt = Number(claim?.occurredAt);
-      if (win && Number.isFinite(claimAt) && (claimAt < win.minTime - tolerance || claimAt > win.maxTime + tolerance)) {
-        bump('SI-4-claim-time-out-of-window', { claimId: claim.id, episode, occurredAt: claimAt, minTime: win.minTime, maxTime: win.maxTime });
+      // SI-4（T272 改正）· **support 级**：每条 support 的 occurredAt 必须落在**它自己那一局**的窗口内。
+      // claim 级的 occurredAt 是"首次发生时间"，跨局 claim 本来就不该落在每一局里（旧判据 284/409 全是误报）。
+      if (win) {
+        for (const ref of refs) {
+          const at = Number(ref?.occurredAt);
+          if (!Number.isFinite(at)) continue;
+          if (at < win.minTime - tolerance || at > win.maxTime + tolerance) {
+            bump('SI-4-support-time-out-of-window', { claimId: claim.id, episode, seq: Number(ref?.seq), occurredAt: at, minTime: win.minTime, maxTime: win.maxTime });
+          }
+        }
       }
+    }
+    // SI-4b（T272）· claim 级只剩一条：首次发生不可能**晚于**证据
+    const claimAt = Number(claim?.occurredAt);
+    const supportMax = support.reduce((m, r) => { const v = Number(r?.occurredAt); return Number.isFinite(v) && v > m ? v : m; }, -Infinity);
+    if (Number.isFinite(claimAt) && Number.isFinite(supportMax) && claimAt > supportMax + tolerance) {
+      bump('SI-4b-claim-after-support', { claimId: claim.id, occurredAt: claimAt, supportMax });
     }
     // SI-5 重指留痕
     const repairs = Array.isArray(claim?.provenanceRepair) ? claim.provenanceRepair : [];
