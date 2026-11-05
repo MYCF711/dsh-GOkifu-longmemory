@@ -17,6 +17,37 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.23（2026-11-05）
+
+### SI-4 改 support 级（T272）—— **我们自己刚装的闸，69% 是判据误报**
+```
+修前：pass 2620 · fail 409（SI-4 284 · SI-5 59 · SI-1 66）
+修后：pass 2620 · fail 125（SI-4 清零 · SI-5 59 · SI-1 66）
+```
+**反事实验证**（知识库 56 的判据救了这次）：`c-05ab0ff2` 首发生于 11-01、**6 条 support 分布在不同局**，
+旧 SI-4 检查"claim.occurredAt 落在**每一局**窗口内" ⇒ **跨局 claim 必然误报**。
+**这不是数据错，这是记忆的正常形态。**
+
+**判据改动**：SI-4 改为**每条 `support[].occurredAt` 落在它自己那一局**；
+claim 级只保留 `claim.occurredAt ≤ max(support.occurredAt)`（新桶 `SI-4b`）。SI-1/SI-2/SI-5 一字未改。
+**tombstone**：support 的时间**真**落在它自己局外 ⇒ **仍红**。
+**SI-4b = 0** ⇒ 减少的 284 条全是误报的全局证据。
+
+**修后真库还剩 125 条真违规**：SI-5 缺 `toOccurredAt` **59** + SI-1 时间不一致 **66**。
+
+### 知识库 59：不可改原件的纠错（T271）
+**核心分工**：**`supersededBy` 记进步，`invalidated` 记错误** ——
+混用会让"版本演进"与"数据坏了"在库里长得一样，**读侧无法决定信不信**。
+
+**决策树**：派生层可重算 ⇒ **重抽取/reprocess** → 指针错 ⇒ **correction 记录** →
+条目为假 ⇒ **`invalidated` + 读侧过滤（不降权）** → 真假不明 ⇒ `disputed` + 降权 → 来源不明 ⇒ `unverified` 进报告。
+
+**本仓代入**：553 处 seq 重指**更该走"重跑归档管线"**（`occurredAt` 可由 `seq` 重算，Fowler 的 reprocess）；
+7 条假阳性 ⇒ `invalidated` + 读侧过滤（占卡位、污染 overlap，是纯损耗）。
+
+### 验证
+10 条 semantic-check 测试全绿；`check PASS`（59 篇）。
+
 ## 0.2.22（2026-11-05）
 
 ### 巡检接入语义不变量（T269）
