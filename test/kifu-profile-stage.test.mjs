@@ -172,3 +172,31 @@ test('T219 CLI: --verify 非法输入 ⇒ 进程退出码非 0（CLI 层，别�
   try { execFileSync(process.execPath, [path.join(REPO, 'scripts', 'kifu-profile-stage.mjs'), '--verify', bad], { encoding: 'utf8', stdio: 'pipe' }); } catch (e) { code = e.status ?? 1; }
   assert.ok(code !== 0, `非法输入必须退出非 0，实际 ${code}`);
 });
+
+// ── T223：F2 武装 + 结构模式文案诚实 ────────────────────────────────────────
+test('T223 ①: 生成的 apply 脚本里 BASE_SHA 非空且等于 staging 时真 patch 的 sha256', () => {
+  const dir = mkdtempSync(path.join(tmp, 't223-base-'));
+  const target = path.join(dir, 'cordis.patch.yml');
+  writeFileSync(target, FAKE_PATCH);
+  const baseSha = createHash('sha256').update(FAKE_PATCH).digest('hex');
+  const { sh } = buildApplyScripts({ stagedPath: path.join(dir, 's.yml'), targetPath: target, backupDir: path.join(dir, 'b'), baseSha });
+  const m = /^BASE_SHA="\$\{KIFU_BASE_SHA:-([0-9a-f]{64})\}"$/m.exec(sh);
+  assert.ok(m, 'apply 脚本里必须有 BASE_SHA="<64 hex>"');
+  assert.equal(m[1], baseSha, 'BASE_SHA 必须等于 staging 时真 patch 的 sha256');
+  assert.ok(!/BASE_SHA="\$\{KIFU_BASE_SHA:-\}"/.test(sh), 'BASE_SHA 不许为空');
+});
+
+test('T223 ③: 结构模式输出不含「可用」、含 ⚠ 与已知缺口提示', () => {
+  const dir = mkdtempSync(path.join(tmp, 't223-struct-'));
+  const f = path.join(dir, 'staged.yml');
+  writeFileSync(f, FAKE_PATCH);
+  let out = '';
+  let code = 0;
+  try {
+    out = execFileSync(process.execPath, [path.join(REPO, 'scripts', 'kifu-profile-stage.mjs'), '--verify', f, '--allow-structural'], { encoding: 'utf8', stdio: 'pipe', env: { ...process.env, DSH_HOME: path.join(dir, 'no-engine-home') } });
+  } catch (e) { code = e.status ?? 1; out = String(e.stdout ?? ''); }
+  assert.equal(code, 0, `显式降级应退出 0，实际 ${code}`);
+  assert.ok(!/可用/.test(out), `结构模式输出不许出现「可用」：${out}`);
+  assert.match(out, /⚠ 结构校验，不是 YAML 校验/);
+  assert.match(out, /⚠ 结构模式不解析 YAML 流式语法/);
+});
