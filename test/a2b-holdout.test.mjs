@@ -14,9 +14,13 @@ import {
   buildExam,
   claimsByEpisode,
   discriminativeTokens,
+  hardEntities,
   judgeCard,
+  judgeStrict,
+  negativeControl,
   overlapCount,
   runHoldout,
+  sharedHardEntities,
   wilsonInterval,
 } from '../scripts/a2b-holdout.mjs';
 
@@ -130,4 +134,62 @@ test('T236a runHoldout：分子/分母与分桶（确定性）', () => {
   // 没给 walk/card 注入点时，runHoldout 用真 walk；这里只校验结构不炸
   assert.equal(r.n + r.errors, 1);
   assert.equal(typeof r.strictRate === 'number' || r.strictRate === null, true);
+});
+
+// ── T248：硬实体桥 ───────────────────────────────────────────────────────────
+
+test('T248 ① 中文任务 + 英文报错 + 同一路径 ⇒ 判相关（旧口径拿 0 分）', () => {
+  // 共享的是**路径实体**；路径组件都 <4 字符（tmp/log），所以判别词口径拿 0 分
+  const task = String.raw`看下 C:\tmp\a.log 为什么打不开，是不是被占了`;
+  const err = String.raw`Error: cannot open "C:\tmp\a.log": The process cannot access the file`;
+  const overlap = overlapCount(task, err);
+  const shared = sharedHardEntities(task, err);
+  assert.equal(overlap, 0, `旧口径应 0 分（实际 overlap=${overlap}）`);
+  assert.ok(shared.length >= 1, `应共享硬实体，实际 ${JSON.stringify(shared)}`);
+  assert.equal(judgeStrict({ related: true, overlap, shared }), true, '并集判据应判相关');
+});
+
+test('T248 ② 中文任务 + 英文报错 + 无共享实体 ⇒ 不判相关（不放水）', () => {
+  const task = '怎么号全崩了？是被封号了吗？';
+  const err = 'class:timeout · if err := json.Unmarshal(raw, &a)';
+  const overlap = overlapCount(task, err);
+  const shared = sharedHardEntities(task, err);
+  assert.equal(overlap, 0, `判别词应 0，实际 ${overlap}`);
+  assert.equal(shared.length, 0, `硬实体应 0，实际 ${JSON.stringify(shared)}`);
+  assert.equal(judgeStrict({ related: true, overlap, shared }), false, '无任何重合 ⇒ 不判相关');
+});
+
+test('T248 ③ 旧路径不变：related=false 时任何重合都不判相关；≥2 判别词仍判相关', () => {
+  assert.equal(judgeStrict({ related: false, overlap: 99, shared: ['x'] }), false);
+  assert.equal(judgeStrict({ related: true, overlap: 2, shared: [] }), true);
+  assert.equal(judgeStrict({ related: true, overlap: 1, shared: [] }), false, '1 个判别词仍不够');
+  assert.equal(judgeStrict({ related: true, overlap: 0, shared: ['enoent'] }), true);
+});
+
+test('T248 ④ 硬实体抽取：路径/错误码/包名/命令都能抽，纯中文不产生实体', () => {
+  const paths = hardEntities(String.raw`open "C:\tmp\a.log" failed`);
+  assert.ok([...paths].some((x) => x.includes('a.log')), `应抽到 a.log：${JSON.stringify([...paths])}`);
+  const codes = hardEntities('Error: ENOENT and class:fs-read-before-write');
+  assert.ok(codes.has('enoent') && codes.has('class:fs-read-before-write'), JSON.stringify([...codes]));
+  const pkg = hardEntities('github.com/MYCF711/dsh-ui/internal/uiplugins');
+  assert.ok([...pkg].some((x) => x.includes('dsh-ui/internal')), JSON.stringify([...pkg]));
+  const cmd = hardEntities('node scripts/check.mjs && git status');
+  assert.ok([...cmd].some((x) => x.includes('node scripts')), JSON.stringify([...cmd]));
+  assert.equal(hardEntities('怎么号全崩了').size, 0, '纯中文不该凭空产生实体');
+});
+
+test('T248 ⑤ 不相关对照组：误判率不高于原口径（放水的反证）', () => {
+  const unrelated = Array.from({ length: 30 }, (_, i) => claim(`c-x${i}`, ['ep-other'], `class:timeout · unrelated text ${i}`));
+  const store = fakeStore(unrelated, []);
+  const exam = {
+    items: [{
+      id: 'self:ep-1', kind: 'self', episode: 'ep-1', scopeKey: 'w:/demo',
+      signal: '看下 dsh-ui/internal/uiplugins 这个包的测试为什么挂了',
+      at: 1000, expected: { episodes: ['ep-1'], claimIds: ['c-none'] },
+    }],
+  };
+  const c = negativeControl({ store, exam, perItem: 10 });
+  assert.equal(c.n, 10, '每组取 10 条对照');
+  assert.equal(c.bridged, 0, `无关 claim 不应被硬实体桥判相关，实际 ${c.bridged}：${JSON.stringify(c.examples)}`);
+  assert.ok(c.bridgeRate <= c.tokenRate, `硬实体误判率(${c.bridgeRate}) 不应高于原口径(${c.tokenRate})`);
 });
