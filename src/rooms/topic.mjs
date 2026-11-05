@@ -722,11 +722,18 @@ export function extractTopics({ episode = null, events = [], graph = null, limit
       }
     }
     if (edge.result === 'failure') {
+      // 片段属于**结果**事件，不属于**调用**事件（T233/F1）：
+      // 失败边的 evidence 有 start（模型开始调用）与 end（结果回来），
+      // errorSnippet / 引文实际出现在 end 那个事件里；取 start 会让 seq 系统性偏移一个窗口，
+      // 审计按 at-seq 判定时就会周期性报 missing。故 end 优先，start 仅作 fallback。
+      const failureSeq = Number.isFinite(edge.evidence?.end)
+        ? edge.evidence.end
+        : (Number.isFinite(edge.seq) ? edge.seq : (Number.isFinite(edge.evidence?.start) ? edge.evidence.start : null));
       const err = extractErrorKey(edge.errorSnippet) ?? null;
       if (err) {
-        add('error', err, { seq, occurredAt: ts, edgeId: execId, quote: clip(edge.errorSnippet, lim.quoteChars), source: 'graph:edge.failure' });
+        add('error', err, { seq: failureSeq, occurredAt: ts, edgeId: execId, quote: clip(edge.errorSnippet, lim.quoteChars), source: 'graph:edge.failure' });
         const cls = errorClassKeyOf(err);
-        if (cls) add('error', cls, { seq, occurredAt: ts, edgeId: execId, quote: cls, source: 'error:class' });
+        if (cls) add('error', cls, { seq: failureSeq, occurredAt: ts, edgeId: execId, quote: cls, source: 'error:class' });
       }
     }
   }
