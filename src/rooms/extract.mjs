@@ -16,6 +16,8 @@
  *      `agent-instructions` / `runtime-context` / `skill-catalog` / `plugin:*` / `time-context` /
  *      `agent-message` / `subagent-settled` / `compact-checkpoint` / `chess-context` 这些同类型事件是
  *      系统或模型注入的，**一律不作源**（`compact-checkpoint` 是模型摘要 —— 从摘要再抽取 = 自证污染）。
+ *      另加**内容闸** `stripMemoryLedger`（T245）：即使来源标记被上游改写/透传，`<memory-ledger>…</memory-ledger>`
+ *      段也会先被剥掉再切句 —— 两道闸互不依赖。
  *   3. **工具**：`tool/call` 事件的 `data.name` 集合；没有事件时回退到棋谱边的 `action` 前缀（`bash(...)` → `bash`）。
  * - 源分层：给了 `events`（或 R01 的 `{header, events}` 整体）就用事件；没给才回退到棋谱本身
  *   （`kind:"user"` 节点的 `text` / `constraints`、边的 `action`）。同一批事件派生出的棋谱不重复计入约束。
@@ -105,6 +107,37 @@ export function messageText(value) {
   };
   push(value);
   return parts.join('\n').trim();
+}
+
+/** 注入卡的开/闭标记（与 `src/rooms/inject.mjs` 的 `renderLedger` 同形）。 */
+export const MEMORY_LEDGER_OPEN = '<memory-ledger>';
+export const MEMORY_LEDGER_CLOSE = '</memory-ledger>';
+
+/**
+ * 剥掉 `<memory-ledger>…</memory-ledger>` 段（连标记一起）。
+ *
+ * 为什么（AGENTS §2.3 自证污染）：注入卡是**本系统自己生成的文本**（R12 渲染），不是用户原话、
+ * 也不是原始工具输出。它比模型摘要更该被排除 —— 摘要至少还是"外部产物"，卡是"自己写的"。
+ *
+ * 当前语料里卡事件的 `data.source.kind` 全是 `dsh-gokifu-longmemory`，已被 `isUserMessage` 挡在门外；
+ * 本函数是**第二道闸**：按内容剥，不依赖来源标记（来源标记一旦被上游改写/透传就失效）。
+ *
+ * 未闭合（写盘撕裂/截断）按"从开标记到文本末尾"处理 —— 宁多剥，不让卡尾混进语料。
+ * @param {string} text
+ * @returns {string}
+ */
+export function stripMemoryLedger(text) {
+  const src = String(text ?? '');
+  let out = '';
+  let cursor = 0;
+  for (;;) {
+    const open = src.indexOf(MEMORY_LEDGER_OPEN, cursor);
+    if (open < 0) return out + src.slice(cursor);
+    out += src.slice(cursor, open);
+    const close = src.indexOf(MEMORY_LEDGER_CLOSE, open + MEMORY_LEDGER_OPEN.length);
+    if (close < 0) return out; // 未闭合：后面全算卡内
+    cursor = close + MEMORY_LEDGER_CLOSE.length;
+  }
 }
 
 /** 这句命中了哪些约束词（逐个去重，机械证据，不是评分）。 */
@@ -306,7 +339,9 @@ export function extractSignals({ graph = null, events = null, maxQuote = MAX_QUO
       if (!isUserMessage(ev)) continue;
       scanned.userMessages += 1;
       const seq = Number.isFinite(ev.seq) ? ev.seq : null;
-      const text = messageText(ev.data?.message ?? ev.data);
+      // 第二道闸（T245）：即使 source.kind 被上游改写/透传，注入卡文本也不得进入约束抽取。
+      // 第一道闸是上面的 isUserMessage（按来源），这道按**内容** —— 两道都不依赖对方。
+      const text = stripMemoryLedger(messageText(ev.data?.message ?? ev.data));
       if (!text) continue;
       if (seq === null) {
         dropped.noSource += 1;

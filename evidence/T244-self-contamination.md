@@ -100,10 +100,10 @@ direction=card-from-claim
 claim.recordedAt = 2026-11-02T19:42:53.368Z
 卡最早渲染       = 2026-11-05T05:52:36.666Z        ← 晚 2 天 10 小时
 引用 seq 33333 的类型 = assistant/message
-引文：Error: Cannot find module 'C:\Users\ADMINI~1\AppData\Local\Temp\engine-nomethod.mjs' at node:internal/modules/cjs/loader:1564:15
+引文：Error: Cannot find module '<USER_HOME>\AppData\Local\Temp\engine-nomethod.mjs' at node:internal/modules/cjs/loader:1564:15
 卡内出现：seq 48959（user/message|role=user）
 卡上那一行：
-- [antipattern] class:module-missing · Error: Cannot find module 'C:\Users\ADMINI~1\AppData\Local\Temp\engine-nomethod.mjs' at node:internal/modules/cjs/loader:1564:15 (ep-8a73e06b, 2026-11-03, seq 33333)
+- [antipattern] class:module-missing · Error: Cannot find module '<USER_HOME>\AppData\Local\Temp\engine-nomethod.mjs' at node:internal/modules/cjs/loader:1564:15 (ep-8a73e06b, 2026-11-03, seq 33333)
 ```
 
 ### 2.5 `c-4a7e6c4b`（`ep-8a73e06b`, seq 37006）

@@ -480,6 +480,24 @@ function userEventText(ev) {
   return typeof d.text === 'string' ? d.text : '';
 }
 
+/** 用户真的说过话的事件来源（与 `src/rooms/extract.mjs` 的 `USER_SOURCE_KIND` 同口径）。 */
+const USER_SOURCE_KIND = 'user';
+
+/**
+ * 事件是不是"用户真的说了话"的那一条。
+ *
+ * 为什么（T244/T245）：`<memory-ledger>` 注入卡也是 `type:"user/message"` + `role:"user"`，
+ * 唯一区别在 `data.source.kind`（卡是 `dsh-gokifu-longmemory`，真用户是 `user`）。
+ * 只看 `type` 会让"卡恰好排在第一"时被当成**根用户原话**（当前 730 局全都没出事，纯靠"卡不在首位"）。
+ * 这里与 R03 一样按来源判，把幸运变成规则；`kind` 缺省时退回 `role === "user"`（老事件兼容）。
+ */
+function isUserMessageEvent(ev) {
+  if (ev?.type !== 'user/message') return false;
+  const kind = ev.data?.source?.kind;
+  if (kind === undefined) return ev.data?.role === USER_SOURCE_KIND;
+  return kind === USER_SOURCE_KIND;
+}
+
 function parseArgs(json) {
   if (!json) return null;
   if (typeof json === 'object') return json;
@@ -781,8 +799,9 @@ export function extractTopics({ episode = null, events = [], graph = null, limit
 }
 
 /**
- * root user 消息：优先棋谱的 rootUserNodeIds（机械、权威）；否则取首条 user/message。
+ * root user 消息：优先棋谱的 rootUserNodeIds（机械、权威）；否则取首条**真用户**的 user/message。
  * 不读 session/title（模型生成，属摘要，不得作源）。
+ * 也不吃注入卡：判据与 R03 的 `isUserMessage` 同口径（`data.source.kind === "user"`），见 `isUserMessageEvent`。
  */
 export function collectRootUserTexts({ events = [], graph = null } = {}) {
   const out = [];
@@ -800,7 +819,7 @@ export function collectRootUserTexts({ events = [], graph = null } = {}) {
   }
   if (out.length) return out;
   const first = (Array.isArray(events) ? events : [])
-    .filter((e) => e && e.type === 'user/message')
+    .filter(isUserMessageEvent)
     .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))[0];
   if (first) {
     const text = userEventText(first);

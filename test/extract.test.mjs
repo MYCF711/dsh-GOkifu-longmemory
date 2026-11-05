@@ -23,6 +23,9 @@ import {
   extractConstraints,
   matchedConstraintWords,
   messageText,
+  stripMemoryLedger,
+  MEMORY_LEDGER_OPEN,
+  MEMORY_LEDGER_CLOSE,
   clip,
   MAX_QUOTE,
 } from '../src/rooms/extract.mjs';
@@ -325,4 +328,51 @@ test('S11：tool/result 以 [exit code: 0] 结尾 ⇒ commandSuccesses 可验证
   assert.equal(r.commandSuccesses[0].quote, 'node --test');
   assert.equal(r.commandSuccesses[0].verifyKind, 'exit-code');
   assert.equal(r.commandSuccesses[0].source, 'exit-code');
+});
+
+/* ── 自证污染：卡文本不得进入抽取（T245 · 第二道闸）──────────────
+ * 第一道闸是 `isUserMessage`（按 `data.source.kind`）；这道按**内容**剥 —— 两道互不依赖。
+ * 为什么需要第二道：卡也是 `user/message`+`role:"user"`，来源标记一旦被上游改写/透传就失效；
+ * 而 `extractConstraints(卡原文)` 实测会咬钩（卡里含"目标/一定要/不要/记住"，命中 CONSTRAINT_HARD_RE）。
+ */
+
+const CARD = `${MEMORY_LEDGER_OPEN}\n# markers: [observed]=1 局\n- [antipattern] 必须完成 R02。\n${MEMORY_LEDGER_CLOSE}`;
+
+test('R03: stripMemoryLedger 剥完整卡 / 未闭合卡 / 无卡 / 多卡', () => {
+  // 完整卡：标记本身也剥掉，卡外文本原样保留
+  assert.equal(stripMemoryLedger(`前文\n${CARD}\n后文`), '前文\n\n后文');
+  // 未闭合（写盘撕裂）：从开标记剥到末尾 —— 宁多剥，不让卡尾混进语料
+  assert.equal(stripMemoryLedger(`前文${MEMORY_LEDGER_OPEN}必须只读`), '前文');
+  // 没有卡：逐字返回
+  assert.equal(stripMemoryLedger('必须只读'), '必须只读');
+  // 多张卡
+  assert.equal(stripMemoryLedger(`${CARD}中间${CARD}尾`), '中间尾');
+  // 空值/非字符串
+  assert.equal(stripMemoryLedger(null), '');
+  assert.equal(stripMemoryLedger(undefined), '');
+  assert.equal(stripMemoryLedger(''), '');
+});
+
+test('R03: 真用户文本（无卡）⇒ 剥卡前后 extractConstraints 结果完全一致（golden）', () => {
+  const text = '第一句是废话。必须走只读模式！不要 push main；这条也别删\n最后一句。';
+  const before = extractConstraints(text);
+  const after = extractConstraints(stripMemoryLedger(text));
+  assert.deepEqual(before, ['必须走只读模式！', '不要 push main；', '这条也别删'], 'golden：原结果');
+  assert.deepEqual(after, before, '剥卡是恒等变换（无卡时）');
+});
+
+test('R03: 卡事件的 source.kind 被改成 "user" 时，卡里的行也不得进约束（内容闸兜底）', () => {
+  // 模拟"来源标记失效"：role=user 且 source.kind=user，但内容里带着卡
+  const text = `这三条是硬规则：不要救市；必须只读。\n${CARD}`;
+  const r = extractSignals({ graph: null, events: [userMessage(30, text)] });
+  assert.deepEqual(
+    r.constraints.map((c) => c.quote),
+    ['这三条是硬规则：不要救市；', '必须只读。'],
+    '只留卡外那两句',
+  );
+  assert.ok(
+    !r.constraints.some((c) => c.quote.includes('R02') || c.quote.includes('markers')),
+    '卡里的行一句都不许进',
+  );
+  assert.equal(r.scanned.userMessages, 1, '事件本身仍算用户消息（只是内容被剥）');
 });
