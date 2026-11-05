@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.160.0（2026-11-05）
+
+### 合并节点不再冒充普通 claim 行（T187）
+- `src/rooms/inject.mjs` 四处收紧：`isMergeNodeClaim` 判定后，**`pickClaimBase` 的锚定分支**、**`pickClaim` 的升级池**、
+  **`collectEntries`** 都不再让合并节点当普通 claim 行；`collapseMergeNodes` 回到"**只在替代 ≥2 个成员时**才出现"
+  （T177 的指针行/代表成员行全部移除）。
+- 效果：**④a 反增 10 组 → 0 组**；④b 丢行 **23 → 15 行（9 组）**；55 条 inject 测试全绿。
+
+### ④b 剩余 15 行的根因（如实）
+- 丢的 claimId **都不是合并组成员**，多数组里合并节点压根没渲染。
+- 真因：**`walkFromSignals` 在影库把某些 hit 的 `claim` 指向了合并节点**（同组源库/影库各 20 条 hit 但集合不同）。
+  R12 跳过这些 hit 后，本该由它们产生的普通 claim 行随之消失。
+- **④a 与 ④b 在 R12 里此消彼长**（三种取舍实测：保留成员行 ⇒ ④a +10；指针兜底 ⇒ ④a +3 且 ④b 27；当前 ⇒ ④a 0 且 ④b 15）。
+- 唯一干净解法在 walk 侧：`walkFromSignals` 挑 claim 时**排除合并节点**、改选成员 ⇒ 两库 hit 集合一致后 ④a/④b 同时归零。已派 T191。
+
+### 验证
+55 条 inject 测试全绿；`check PASS`。
+
 ## 0.159.0（2026-11-05）
 
 ### 合流验收口径**加硬**：独立审计的 4 个洞已堵（T189）
