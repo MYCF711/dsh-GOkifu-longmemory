@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.178.1（2026-11-05）
+
+### 版本号按改动大小走（主人纠正）
+今晚发了 **20 个 tag**（`v0.158.0 → v0.178.0`）几乎全是 minor —— 其中大部分只是补测试、补文档、修口径，
+按 semver 应该走 **patch**。最后一个 patch 是 `v0.158.1`。
+
+**判据入册**（`AGENTS.md` §10，机械可核，看 `git diff --name-only <上个 tag>..HEAD`）：
+| 改了什么 | 升哪一位 |
+|---|---|
+| 只动 `test/**` `docs/**` `evidence/**` `reports/**`，或 `CHANGELOG`/台账措辞 | **patch** `x.y.Z` |
+| 改 `src/**` 或 `scripts/**` 的**行为**（新增能力、收紧/放宽判据、改输出） | **minor** `x.Y.0` |
+| 破坏既有契约（字段改名/删除、错误语义变更） | **major**（1.0 前用 minor + 段首标「破坏性」） |
+
+**新增工具** `scripts/version-suggest.mjs`：
+```bash
+node scripts/version-suggest.mjs          # 相对最近 tag 给建议
+node scripts/version-suggest.mjs --check  # 当前版本落后于建议档位 ⇒ exit 1
+```
+
+本版自身走 **patch**（只加规则文档 + 工具 + 测试），按新规则不跳 minor。
+
+### 验证
+6 条 version-suggest 测试全绿；771 条测试（766 pass / 0 fail / 5 skip）；`check PASS`（51 篇）。
+
 ## 0.178.0（2026-11-05）
 
 ### `mergeStats.candidatesHit` 死值 → `groupsHit`（T226）
