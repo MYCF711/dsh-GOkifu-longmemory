@@ -28,7 +28,7 @@ const BUDGET_TOKENS = 500;
 const ms = (n) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} s`);
 
 export function parseArgs(argv = []) {
-  const flags = { store: null, source: null, sample: 40, mergeSample: 20, mergeGroups: null, json: false, help: false };
+  const flags = { store: null, source: null, sample: 40, mergeSample: null, mergeGroups: null, json: false, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--help' || arg === '-h') flags.help = true;
@@ -36,7 +36,7 @@ export function parseArgs(argv = []) {
     else if (arg === '--store') flags.store = argv[++i] ?? null;
     else if (arg === '--source') flags.source = argv[++i] ?? null;
     else if (arg === '--sample') flags.sample = Number(argv[++i] ?? 40);
-    else if (arg === '--merge-sample') flags.mergeSample = Number(argv[++i] ?? 20);
+    else if (arg === '--merge-sample') flags.mergeSample = Number(argv[++i] ?? 0) || null;
     else if (arg === '--merge-groups') flags.mergeGroups = Number(argv[++i] ?? 0) || null;
     else return { error: `未知参数：${arg}` };
   }
@@ -148,6 +148,37 @@ export function selectMergeGroups(merges = [], limit = null) {
 }
 
 /**
+ * T189 · ② 的硬判据：**合并契约不变量"成员只增不改"** —— `merge.members` 里的 id
+ * 必须都能在影库里解析到（成员记录仍在）。以前 ② 只数 gate4 错误，
+ * 成员记录消失时直接 `continue`，静默退化成"0 组被检查 = 通过"。
+ * @param {{merges?:Array, shadowClaimIds?:Set<string>|Array<string>|null}} p
+ */
+export function checkMembersResolvable({ merges = [], shadowClaimIds = null } = {}) {
+  const ids = shadowClaimIds instanceof Set ? shadowClaimIds : new Set(Array.isArray(shadowClaimIds) ? shadowClaimIds.map(String) : []);
+  const rows = [];
+  let unresolved = 0;
+  let total = 0;
+  for (const merged of Array.isArray(merges) ? merges : []) {
+    const members = Array.isArray(merged?.merge?.members) ? merged.merge.members.map(String) : [];
+    const missing = members.filter((id) => !ids.has(id));
+    total += members.length;
+    unresolved += missing.length;
+    rows.push({ id: merged?.id ?? null, members: members.length, unresolved: missing.length, missing: missing.slice(0, 5) });
+  }
+  return {
+    id: '②',
+    name: '合并成员可解析（只增不改）',
+    groups: rows.length,
+    members: total,
+    unresolvedMembers: unresolved,
+    // 没有任何合并组 ⇒ 无从证明"成员还在"，fail-closed
+    pass: rows.length > 0 && unresolved === 0,
+    criterion: 'merge.members 里不可解析的成员 = 0',
+    rows,
+  };
+}
+
+/**
  * T173 · 定点抽样：从**影库的合并节点**里抽组，用"该组的共享正文"作信号
  * （walkFromSignals 只吃 signal 文本，没有 episode/seq 直击入参；组正文 = 成员的 representativeText，
  *  所以命中的就是同一组文本），分别在源库/影库走**同一条真实链路**（walk → buildMemoryCard）。
@@ -165,7 +196,7 @@ export function selectMergeGroups(merges = [], limit = null) {
  * @param {{source:object, shadow:object, sourceCache:object, shadowCache:object,
  *          merges:Array, limit?:number, budgetTokens?:number, measure?:Function}} p
  */
-export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges = [], limit = 20, budgetTokens = 2000, measure = null } = {}) {
+export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges = [], limit = 20, budgetTokens = 2000, measure = null, shadowClaimIds = null } = {}) {
   const rows = [];
   for (const merged of merges) {
     const text = normalizeText(merged?.text);
@@ -204,41 +235,84 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
     // "成员行数" = 卡片渲染行里 claimId ∈ 本组 merge.members 的行数（机械数集合交集，不解析正文）
     const membersSourceRows = sourceClaims.filter((entry) => memberIds.has(String(entry?.claimId ?? ''))).length;
     const membersShadowRows = shadowClaims.filter((entry) => memberIds.has(String(entry?.claimId ?? ''))).length;
+
+    // T189 ④b：**内容身份**判据（不再只看行数）——
+    // 源卡里每一行，要么在影卡里**同 claimId** 出现，要么被某个**渲染中的合并节点**
+    // （影卡里出现了该合并节点的行）的 `merge.members` 覆盖；否则记 lostRows。
+    const shadowIds = new Set(shadowClaims.map((entry) => String(entry?.claimId ?? '')));
+    const mergeById = new Map((Array.isArray(merges) ? merges : []).map((m) => [String(m?.id ?? ''), m]));
+    const coveredByRenderedMerge = (id) => {
+      for (const [mid, m] of mergeById) {
+        if (!shadowIds.has(mid)) continue;
+        const members = Array.isArray(m?.merge?.members) ? m.merge.members.map(String) : [];
+        if (members.includes(String(id))) return true;
+      }
+      return false;
+    };
+    const lostRows = sourceClaims.filter((entry) => {
+      const id = String(entry?.claimId ?? '');
+      if (!id) return false;
+      if (shadowIds.has(id)) return false;
+      return !coveredByRenderedMerge(id);
+    }).length;
+    // T189 ④a 附加项：**载荷不缩水**（只展示）—— 同 claimId 对齐，影库正文短过源库 50% 记 shrunk
+    const shadowByClaimId = new Map(shadowClaims.map((entry) => [String(entry?.claimId ?? ''), entry]));
+    let shrunk = 0;
+    for (const srcEntry of sourceClaims) {
+      const shadowEntry = shadowByClaimId.get(String(srcEntry?.claimId ?? ''));
+      if (!shadowEntry) continue;
+      const a = String(srcEntry?.text ?? '').length;
+      const b = String(shadowEntry?.text ?? '').length;
+      if (a > 0 && b < a * 0.5) shrunk += 1;
+    }
+    // T189 ④c：可折的前提是**成员仍可解析**（记录被删时 foldable 不许成立）
+    const memberIdList = [...memberIds];
+    const membersResolvable = memberIdList.length > 0
+      && (!(shadowClaimIds instanceof Set) || memberIdList.every((id) => shadowClaimIds.has(id)));
     rows.push({
       id: merged.id,
       members: memberIds.size,
       sourceRows: sourceClaims.length,
       shadowRows: shadowClaims.length,
       saved: sourceClaims.length - shadowClaims.length,
-      // 可折组 = 源库卡片里**本组成员行 ≥2**（只有这样才能靠折叠省行）；
+      // 可折组 = 源库卡片里**本组成员行 ≥2**（只有这样才能靠折叠省行）**且成员仍可解析**；
       // `triggered` 保留旧含义（源库总行数 > 1）仅作对照，不再当分母。
-      foldable: membersSourceRows >= 2,
+      foldable: membersSourceRows >= 2 && membersResolvable,
       triggered: sourceClaims.length > 1,
       membersSourceRows,
       membersShadowRows,
+      membersResolvable,
+      lostRows,
+      shrunk,
       mergedRendered: shadowClaims.length >= 1,
     });
   }
 
   // ④a：**不许变差** —— 任何组影库行数都不得多于源库（反增 = 合流把卡片撑大了）
   const worse = rows.filter((r) => r.shadowRows > r.sourceRows);
-  // ④b：**不许丢内容** —— 源库能渲染出行的组，影库不能一行都不剩（曾经出现过 1 行 → 0 行）
-  const losses = rows.filter((r) => r.sourceRows >= 1 && r.shadowRows === 0);
+  // T189 附加项：**载荷不缩水**（只展示，先不判红）—— 同 claimId 对齐后正文短过 50% 的行数
+  const shrunkRows = rows.filter((r) => r.shrunk > 0);
   const a = {
     id: '④a',
     name: '不许变差',
     pass: rows.length > 0 && worse.length === 0,
     worse: worse.map((r) => ({ id: r.id, sourceRows: r.sourceRows, shadowRows: r.shadowRows })),
     groups: rows.length,
-    criterion: '反增组 = 0',
+    shrunk: shrunkRows.reduce((n, r) => n + r.shrunk, 0),
+    shrunkRows: shrunkRows.map((r) => ({ id: r.id, shrunk: r.shrunk })),
+    criterion: '反增组 = 0（附加项：载荷缩水只展示）',
   };
+  // ④b：**不许丢内容（内容身份）** —— 源卡的每一行都必须能在影卡里同 claimId 找到，
+  // 或被某个**渲染中的合并节点**覆盖；否则就是真丢行（T189：不再只看"影库 0 行"）
+  const losses = rows.filter((r) => r.lostRows > 0);
   const b = {
     id: '④b',
-    name: '不许丢内容',
+    name: '不许丢内容（按 claimId 对齐）',
     pass: rows.length > 0 && losses.length === 0,
-    losses: losses.map((r) => ({ id: r.id, sourceRows: r.sourceRows, shadowRows: r.shadowRows })),
+    losses: losses.map((r) => ({ id: r.id, sourceRows: r.sourceRows, shadowRows: r.shadowRows, lostRows: r.lostRows })),
     groups: rows.filter((r) => r.sourceRows >= 1).length,
-    criterion: '源库 ≥1 行的组里，影库 0 行 = 0 组',
+    lostRows: losses.reduce((n, r) => n + r.lostRows, 0),
+    criterion: '源卡每行都要在影卡同 claimId 出现或被渲染中的合并节点覆盖（lostRows = 0）',
   };
   // ④c：**参考指标**（只展示，不参与退出码）
   // T181：分母改成"**可折组**"（源库本组成员行 ≥2）。旧口径（`sourceRows > 1`）会把
@@ -249,7 +323,7 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
   // T185：④c 带 Wilson 95% 区间 + 样本量门槛，小样本的 100% 不许当结论用。
   const wilson = wilsonInterval(savedPositive.length, foldable.length);
   const MIN_FOLDABLE = 10;
-  const THRESHOLD = 0.5;
+  const THRESHOLD = 0.7; // T189：从"比抛硬币好"抬到"可靠"
   // 全校正下界：随机取一个合并组，既"可折"又"真省行"的概率下界
   // = 可折率（点估计）× 可折组里省行率的 Wilson 下界（保守：两个量都往下取）
   const foldableShare = rows.length ? foldable.length / rows.length : 0;
@@ -259,7 +333,7 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
   if (rows.length === 0) {
     evidence = { verdict: '证据不足', reason: '没有可评估的合并组（影库里没有 merge.members）' };
   } else if (foldable.length === 0) {
-    evidence = { verdict: '证据不足', reason: '没有可折组（成员从不同时出现在同一张卡里，④c 无定义）' };
+    evidence = { verdict: '证据不足', reason: '没有可折组（成员从不同时出现在同一张卡里，或成员记录已不可解析；④c 无定义）' };
   } else if (foldable.length < MIN_FOLDABLE) {
     evidence = {
       verdict: '证据不足',
@@ -329,7 +403,7 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
  * 三项验收。
  * @param {{shadowRoot:string, sourceRoot:string, sample?:number, mergeSample?:number}} p
  */
-export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample = 20, mergeGroups = null } = {}) {
+export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample = null, mergeGroups = null } = {}) {
   const started = Date.now();
   const shadow = createStore({ root: shadowRoot });
   const source = createStore({ root: sourceRoot });
@@ -364,19 +438,27 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
     cardsBuilt += 1;
     if (s.duplicates || d.duplicates) perCard.push({ claimId: claim.id, source: s.duplicates, shadow: d.duplicates });
   }
+  // T189：① 改成**逐组配对** —— 每个同文组各自比 `shadow_dup ≤ source_dup`，
+  // 不再用"合计"（合计会被 +1/−1 抵消，n=10 时几乎恒真）。
+  const violations = perCard.filter((x) => x.shadow > x.source);
   const dup = {
     cards: cardsBuilt,
     sourceDuplicates: srcDup,
     shadowDuplicates: shadowDup,
     delta: shadowDup - srcDup,
     reduction: srcDup === 0 ? null : (srcDup - shadowDup) / srcDup,
-    notWorse: shadowDup <= srcDup,
+    // 逐组配对判据：任何一张卡都不许"影库重复行 > 源库重复行"
+    pairwiseViolations: violations.length,
+    notWorse: cardsBuilt > 0 && violations.length === 0,
     examples: perCard.slice(0, 5),
+    violations: violations.slice(0, 5),
   };
 
   // ── ② 闸 4：合并节点与成员同文不得报错 ──────────────────────────────────
   const merges = shadowClaims.filter((c) => Array.isArray(c?.merge?.members) && c.merge.members.length > 0);
-  const mergePick = merges.slice(0, Math.max(1, mergeSample));
+  // T189：② 默认**全量**检查（原来只抽 20 个，且成员不可解析时静默 continue）
+  const mergePick = Number.isFinite(mergeSample) && mergeSample > 0 ? merges.slice(0, mergeSample) : merges;
+  const memberCheck = checkMembersResolvable({ merges: mergePick, shadowClaimIds: new Set(shadowClaims.map((c) => c.id)) });
   let gate4Errors = 0;
   let gate4GroupsChecked = 0;
   const gate4Details = [];
@@ -419,7 +501,9 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
     mergeRecords: merges.length,
     groupsChecked: gate4GroupsChecked,
     errors: gate4Errors,
-    pass: gate4Errors === 0,
+    // ② = 闸 4 无错误 **且** 合并成员全部可解析（后者是"只增不改"的硬不变量）
+    members: memberCheck,
+    pass: gate4Errors === 0 && memberCheck.pass,
     details: gate4Details.slice(0, 5),
   };
 
@@ -444,7 +528,7 @@ export function runAcceptance({ shadowRoot, sourceRoot, sample = 40, mergeSample
   // ── ④ T173 定点抽样：合流到底省了几行 ───────────────────────────────────
   // T185：默认**跑遍影库里所有合并组**（不再抽 20 组）——n 太小时 100% 没有统计意义。
   const groupPick = selectMergeGroups(merges, mergeGroups);
-  const groups = sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges: groupPick });
+  const groups = sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges: groupPick, shadowClaimIds: new Set(shadowClaims.map((c) => c.id)) });
 
   // ④ 只由 ④a/④b 决定（④c 是参考指标，不参与退出码）
   const ok = dup.notWorse && gate4.pass && crossScope.pass && groups.pass;
@@ -470,12 +554,12 @@ export function formatReport(r) {
   lines.push('');
   lines.push('| # | 验收项 | 读数 | 判据 |');
   lines.push('|---|---|---|---|');
-  lines.push(`| ① | 同文重复行 | 源库 ${r.dup.sourceDuplicates} → 影库 ${r.dup.shadowDuplicates}（降 ${pct(r.dup.reduction)}，${r.dup.cards} 张卡） | 影库 ≤ 源库 |`);
-  lines.push(`| ② | 闸 4（合并节点 vs 成员） | ${r.gate4.errors} 个错误（查 ${r.gate4.groupsChecked} 组 / 影库 ${r.gate4.mergeRecords} 个合并节点） | 必须 0 |`);
+  lines.push(`| ① | 同文重复行（**逐组配对**） | 反例 **${r.dup.pairwiseViolations}** 张卡（影库重复行 > 源库）· 合计 ${r.dup.sourceDuplicates} → ${r.dup.shadowDuplicates}（降 ${pct(r.dup.reduction)}，${r.dup.cards} 张卡） | 逐组配对反例 = 0 |`);
+  lines.push(`| ② | 合并契约（**成员可解析** + 闸 4） | 不可解析成员 **${r.gate4.members.unresolvedMembers}** / ${r.gate4.members.members} 个（${r.gate4.members.groups} 组）· 闸 4 错误 ${r.gate4.errors}（影库 ${r.gate4.mergeRecords} 个合并节点） | 两者都必须 0 |`);
   lines.push(`| ③ | 跨作用域 | ${r.crossScope.violations} 张卡非零（共 ${r.crossScope.cards} 张） | 必须 0 |`);
   const g = r.groups;
-  lines.push(`| ④a | 不许变差（定点抽样） | 反增 **${g.a.worse.length}** 组 / 共 ${g.a.groups} 组${g.a.worse.length ? `（${g.a.worse.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
-  lines.push(`| ④b | 不许丢内容 | 丢内容 **${g.b.losses.length}** 组 / 源库 ≥1 行的 ${g.b.groups} 组${g.b.losses.length ? `（${g.b.losses.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
+  lines.push(`| ④a | 不许变差（定点抽样） | 反增 **${g.a.worse.length}** 组 / 共 ${g.a.groups} 组 · 载荷缩水 ${g.a.shrunk} 行（只展示）${g.a.worse.length ? `（${g.a.worse.map((x) => `${x.id} ${x.sourceRows}→${x.shadowRows}`).join(' · ')}）` : ''} | 必须 0 |`);
+  lines.push(`| ④b | 不许丢内容（**按 claimId 对齐**） | 丢行 **${g.b.lostRows}** 行 / ${g.b.losses.length} 组${g.b.losses.length ? `（${g.b.losses.map((x) => `${x.id} 源${x.sourceRows}→影${x.shadowRows}·丢${x.lostRows}`).join(' · ')}）` : ''} | lostRows = 0 |`);
   const w = g.c.wilson;
   lines.push(`| ④c | 参考：可折组里"影库省行"的占比 | 总 **${g.c.total}** 组 · 可折 **${g.c.foldable}** · 不可折 ${g.c.notFoldable} · 省行 ${g.c.savedPositive}/${g.c.foldable} = **${g.c.ratio === null ? 'n/a' : `${(g.c.ratio * 100).toFixed(1)}%`}** · Wilson 95% **${w.lower === null ? 'n/a' : `[${(w.lower * 100).toFixed(1)}%, ${(w.upper * 100).toFixed(1)}%]`}** · 全校正下界 ${(g.c.layerLowerBound * 100).toFixed(1)}% · 平均省 ${g.c.avgSaved.toFixed(2)} 行 | 只展示 |`);
   lines.push(`| ④c′ | 统计结论 | **${g.c.evidence.verdict}** —— ${g.c.evidence.reason} | 只展示 |`);
