@@ -551,7 +551,13 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   const text = lastUserText(payload?.messages);
   // T267：**合法信号扩展** —— 最近 N 条消息（含 assistant / tool）里的硬实体（文件路径/错误码/包名/命令）。
   // 它们此刻已经在 payload.messages 里（availableAtSeq <= injectionSeq），不是整局统计的事后信息。
-  const messageSignal = signalFromMessages(payload?.messages, { lastN: config.messageSignalLastN ?? 12 });
+  // T279 实测**净亏**：A（只用原话）97.53% vs B（+消息内实体）93.83%，**净 −3 条**，
+  // 且 B 新增的 2 条命中**全部落在"A 路完全无重合"的样本上**（negativeControl 2/2 = 100% ⇒ 造命中不是召回）。
+  // 处置（知识库 55「默认关」）：**代码保留、默认关**，`messageSignals: true` 才启用。
+  // 重开条件：用有命中的历史局语料复算，B 的 delta > 0 **且** negativeControl 率显著低于 A 基线。
+  const messageSignal = config.messageSignals === true
+    ? signalFromMessages(payload?.messages, { lastN: config.messageSignalLastN ?? 12 })
+    : { text, entities: [] };
 
   // 既没开真注入也不是影子 ⇒ 什么都不做（默认配置走这条）
   if (!config.enabled && !config.shadow) return { decision, action: 'skip', reason: 'disabled' };
