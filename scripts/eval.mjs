@@ -896,6 +896,9 @@ export async function runH1(opts = {}) {
   // 闸门后的口径：只看 gates.ok 的卡片 —— 用来看"闸 3 有没有把这些 stale 兜住"
   const postGateIds = new Set();
   const postGateStaleIds = new Set();
+  // T209：核不了（probe-unverified）单独一组 —— 它不是 stale，但必须能数出来
+  const unverifiedIds = new Set();
+  const postGateUnverifiedIds = new Set();
   const renderedIds = new Set(); // 所有被渲染过的 claimId（用来看"带 validity 的条目有没有被覆盖到"）
   // 2026-11-03：**被闸拦下**也算"锻炼到了"。过期条目被 walk 丢弃（dropped.stale）说明防护真的在起作用，
   // 若只统计"渲染出来的"，A1 会永远空转（0/26）——那是口径缺陷，不是没风险。
@@ -936,17 +939,31 @@ export async function runH1(opts = {}) {
     const card = buildMemoryCard({ signal, walkResult: walk, store, scope: spec.scopeKey, now, limit, budgetTokens, ...cacheOpt });
     const gates = runGates({ card, walkResult: walk, store, scope: spec.scopeKey, validityResults: validityByKey, ...cacheOpt });
     const rows = (card.claims ?? []).filter((c) => typeof c.claimId === 'string');
+    // 口径对齐（T209 / F1）：stale = **探针核过且判失效**，即 `ok === false && unverified !== true`。
+    // 依据是闸 3 与 `scripts/mark-stale.mjs` 里已经写死的定义：**核不了（unverified）≠ 已失效** ——
+    // 闸 3 对 unverified 只记 `gate3/validity-unverified`、不判红；mark-stale 也不把 unverified 标成 stale。
+    // 改前这里只判 `res.ok === false`，于是把"探针读不到"也算进了分子 ⇒ A1 高估负迁移
+    // （T205 归因：`evidence/T205-a1-stale-audit.md`，3/3 全是 probe-unverified）。
+    // 这是**口径对齐**，不是把"不该算的分"去掉 —— 分母（注入条目）一个不动。
+    const validityOf = (c) => validityByKey[`claims:${c.claimId}`] ?? validityByKey[c.claimId] ?? null;
     const staleRows = rows.filter((c) => {
-      const res = validityByKey[`claims:${c.claimId}`] ?? validityByKey[c.claimId] ?? null;
-      return Boolean(res && res.ok === false);
+      const res = validityOf(c);
+      return Boolean(res && res.ok === false && res.unverified !== true);
+    });
+    // 核不了（probe-unverified）：只计数、**不进 stale 分子**，让人看得出"分子为什么变小了"
+    const unverifiedRows = rows.filter((c) => {
+      const res = validityOf(c);
+      return Boolean(res && res.ok === false && res.unverified === true);
     });
     for (const row of rows) renderedIds.add(row.claimId);
     for (const row of rows) injectedIds.add(row.claimId);
     if (spec.kind === 'validity' && Number(walk?.dropped?.stale ?? 0) > 0) exercisedIds.add(String(spec.label));
     for (const row of staleRows) staleIds.add(row.claimId);
+    for (const row of unverifiedRows) unverifiedIds.add(row.claimId);
     if (gates.ok) {
       for (const row of rows) postGateIds.add(row.claimId);
       for (const row of staleRows) postGateStaleIds.add(row.claimId);
+      for (const row of unverifiedRows) postGateUnverifiedIds.add(row.claimId);
     }
     tokensTotal += card.tokens ?? 0;
     if (!gates.ok) gateFailures += 1;
@@ -958,6 +975,9 @@ export async function runH1(opts = {}) {
       claims: rows.length,
       stale: staleRows.length,
       staleIds: staleRows.map((c) => c.claimId),
+      // 只增字段（T209）：核不了（unverified）的条数/清单 —— 不计入 stale
+      unverified: unverifiedRows.length,
+      unverifiedIds: unverifiedRows.map((c) => c.claimId),
       tokens: card.tokens ?? 0,
       gatesOk: gates.ok,
       zeroInjection: card.section === null,
@@ -969,6 +989,8 @@ export async function runH1(opts = {}) {
   const staleInjected = staleIds.size;
   const postGateInjected = postGateIds.size;
   const postGateStale = postGateStaleIds.size;
+  const unverifiedInjected = unverifiedIds.size;
+  const postGateUnverified = postGateUnverifiedIds.size;
   const validityIds = [...claims, ...joseki]
     .filter((r) => typeof r?.validity?.type === 'string' && r.validity.type !== 'none' && typeof r.id === 'string')
     .map((r) => r.id);
@@ -1004,6 +1026,11 @@ export async function runH1(opts = {}) {
     postGateInjected,
     postGateStale,
     postGateStaleRate,
+    // T209（F1 口径对齐）：stale 的谓词 = `ok===false && unverified!==true`；核不了的单列计数，分母不变。
+    // 只增字段、不改既有键名（ledger-check / metrics-guard 仍按老字段读）。
+    staleDefinition: 'ok===false && unverified!==true',
+    unverifiedInjected,
+    postGateUnverified,
     signalsByKind: {
       topic: signalSpecs.filter((x) => x.kind === 'topic').length,
       validity: signalSpecs.filter((x) => x.kind === 'validity').length,
@@ -1023,13 +1050,13 @@ export function formatH1Report(report) {
   lines.push(`记忆库（只读）：${report.storeRoot}`);
   lines.push(`工作区（只读）：${report.workspace}（scope=${report.scope}）`);
   lines.push('');
-  lines.push('口径：注入条目 = 卡片里带 claimId 的渲染行；stale = 这些条目 validity 核不过（ok:false）；rate = stale / 注入条目；分母 0 记 null');
+  lines.push('口径：注入条目 = 卡片里带 claimId 的渲染行；stale = 这些条目 validity **核过且判失效**（ok:false 且 unverified≠true；核不了不算，口径同闸 3 / mark-stale）；rate = stale / 注入条目；分母 0 记 null');
   lines.push('');
   lines.push(`信号：${report.signals} 条（主题库 df 降序前 N）· 有内容卡片 ${report.cardsWithContent} · 零注入 ${report.zeroInjection} · 闸不过 ${report.gateFailures}`);
   lines.push(`validity 面：带 validity ${report.validity.total} 条（通过 ${report.validity.ok} · 不过 ${report.validity.failed}）`);
-  lines.push(`注入条目：${report.injected} · 其中 stale：${report.staleInjected}`);
+  lines.push(`注入条目：${report.injected} · 其中 stale：${report.staleInjected} · 核不了（不算 stale）：${report.unverifiedInjected ?? 0}`);
   lines.push(`staleTransferRate = ${pct(report.staleTransferRate)}（${report.staleInjected} / ${report.injected}）`);
-  lines.push(`闸门后：注入 ${report.postGateInjected} · stale ${report.postGateStale} · postGateStaleRate = ${pct(report.postGateStaleRate)}`);
+  lines.push(`闸门后：注入 ${report.postGateInjected} · stale ${report.postGateStale} · 核不了 ${report.postGateUnverified ?? 0} · postGateStaleRate = ${pct(report.postGateStaleRate)}`);
   lines.push(`覆盖率：带 validity 的条目 ${report.validityCoverage.withValidity} 条，其中被渲染过 ${report.validityCoverage.rendered} 条、被闸拦下 ${report.validityCoverage.exercised - report.validityCoverage.rendered} 条（两者合计为覆盖率；合计 0 才叫没锻炼到）`);
   lines.push('');
   lines.push(`耗时 ${report.elapsedMs} ms · 写入 0（唯一写入口是 --evidence）`);
