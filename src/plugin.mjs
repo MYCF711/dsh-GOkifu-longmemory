@@ -317,7 +317,15 @@ export function cardText(card) {
  *   · **脱敏**：落盘前用 `scripts/privacy-scan.mjs` 的同一套规则扫一遍（本机语料也要同规则）；
  *   · **截断**：单条 `text` 只保留前 4000 字符，超长打 `truncated: true`。
  */
-export const MESSAGE_CORPUS_PATH = 'evidence/T268-messages.jsonl';
+// T282：**写入根收口到 sidecar** —— 相对 `<storeRoot>` 的路径，绝不写仓库。
+// 独立实例（DSH 0.2.2-rc.1）link 本源码时，数据必须落在**它自己的** store root 下，
+// 当前源码仓库保持只读（tombstone：仓库目录里不许出现新文件）。
+export const MESSAGE_CORPUS_PATH = 'corpus/messages.jsonl';
+
+/** 语料绝对路径：**由 store root 推导**（不写死任何仓库路径）。 */
+export function messageCorpusPath(storeRoot) {
+  return path.join(String(storeRoot ?? ''), MESSAGE_CORPUS_PATH);
+}
 export const MESSAGE_TEXT_LIMIT = 4000;
 
 export function messageCorpusRow({ episode = null, scopeKey = null, messages = [], at = null } = {}) {
@@ -341,10 +349,10 @@ export function redactForCorpus(text) {
 /** 追加一行语料；**绝不抛**（写失败只 warn）。 */
 export function appendMessageCorpus(rootDir, row, { fsImpl = fs } = {}) {
   try {
-    const dir = path.join(rootDir, 'evidence');
+    const dir = path.dirname(messageCorpusPath(rootDir));
     fsImpl.mkdirSync(dir, { recursive: true });
     const safe = { ...row, messages: (row.messages ?? []).map((m) => ({ ...m, text: redactForCorpus(m.text) })) };
-    fsImpl.appendFileSync(path.join(rootDir, MESSAGE_CORPUS_PATH), `${JSON.stringify(safe)}
+    fsImpl.appendFileSync(messageCorpusPath(rootDir), `${JSON.stringify(safe)}
 `);
     return true;
   } catch {
@@ -587,7 +595,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
         messages: payload?.messages ?? [],
         at,
       });
-      if (row.messages.length && !appendMessageCorpus(REPO_ROOT, row)) warn(ctx, '语料采集写盘失败（已忽略）');
+      if (row.messages.length && !appendMessageCorpus(storeRoot, row)) warn(ctx, '语料采集写盘失败（已忽略）');
     } catch (error) {
       warn(ctx, `语料采集失败（已忽略）：${String(error?.message ?? error)}`);
     }
