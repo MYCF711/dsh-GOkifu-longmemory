@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.0（2026-11-05）
+
+> **版本序列重置（主人 2026-11-05 决定）**：`0.1xx` 系列到此为止，下一个里程碑从 **0.2.0** 开始。
+> 说明：按 semver 大小 `0.2.0 < 0.178.1`，这个 tag 在**数值上**是回退 —— 这是刻意的：
+> `0.1xx` 那一段是"每轮 +1 minor"发虚的产物（一天 20 个 tag），不是真实的功能跨度。
+> **历史不改写**（旧 tag 全部保留），只在 CHANGELOG 里记这次重置的边界；GitHub Release 按时间排序，不受影响。
+> `scripts/version-suggest.mjs --check` 因此**只校验"有没有 bump"，不比较版本大小** —— 版本序列可以被重置，但"有没有 bump"永远成立。
+
+### 版本号规则（semver，入册 `AGENTS.md` §10）
+| 改了什么 | 升哪一位 |
+|---|---|
+| 只动 `test/**` `docs/**` `evidence/**` `reports/**`，或 `CHANGELOG`/台账措辞 | **patch** |
+| 改 `src/**` 或 `scripts/**` 的**行为**（新增能力、收紧/放宽判据、改输出） | **minor** |
+| 破坏既有契约（字段改名/删除、错误语义变更） | **major**（1.0 前用 minor + 段首标「破坏性」） |
+
+### 新工具 `scripts/version-suggest.mjs`
+```bash
+node scripts/version-suggest.mjs          # 相对最近 tag 给建议档位
+node scripts/version-suggest.mjs --check  # package.json 有没有 bump（未 bump ⇒ exit 1）
+```
+
+### 验证
+6 条 version-suggest 测试全绿；771 条测试（766 pass / 0 fail / 5 skip）；`check PASS`（51 篇）。
+
 ## 0.178.1（2026-11-05）
 
 ### 版本号按改动大小走（主人纠正）
