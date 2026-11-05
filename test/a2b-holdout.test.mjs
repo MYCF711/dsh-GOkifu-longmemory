@@ -12,6 +12,8 @@ import path from 'node:path';
 
 import {
   bigramOverlapCount,
+  buildBigramDf,
+  isDiscriminative,
   buildExam,
   chineseBigrams,
   compareSignalModes,
@@ -325,4 +327,38 @@ test('T284 ④ chineseBigrams：中文 2 字滑窗 + 英文/数字保原样', ()
   assert.ok(b.has('反代') && b.has('代插') && b.has('插件'), JSON.stringify([...b]));
   assert.ok(b.has('abc.ts'), '英文/路径保持原样');
   assert.equal(b.has('反代插'), false, '不是 3 字窗');
+});
+
+// ── T286：bigram 的 IDF 过滤 ────────────────────────────────────────────────
+
+const mkClaims = (texts) => texts.map((t, i) => ({ id: `c-${i}`, text: t }));
+
+test('T286 ① 泛词 bigram（df 高）不算判别性 ⇒ 不计入重合', () => {
+  // 「看看」出现在 50/100 条 claim 里（df=0.5）；「反代」出现 1 次
+  const claims = mkClaims([...Array.from({ length: 49 }, () => '你再看看这个'), '反代插件的路由', ...Array.from({ length: 50 }, () => '随便什么')]);
+  const filter = buildBigramDf(claims);
+  assert.equal(isDiscriminative('看看', filter, 0.02), false, '「看看」是泛词');
+  assert.equal(isDiscriminative('反代', filter, 0.02), true, '「反代」是判别性 bigram');
+  // 「你再看看」对同一段文本：泛词 bigram 被剔，过滤后必须**严格小于**不过滤
+  const raw = bigramOverlapCount('你再看看', '你再看看这个');
+  const filtered = bigramOverlapCount('你再看看', '你再看看这个', { filter, maxRatio: 0.02 });
+  assert.ok(raw >= 2, `不过滤时应 ≥2，实际 ${raw}`);
+  assert.ok(filtered < raw, `过滤后 ${filtered} 应小于 ${raw}（泛词被剔）`);
+  assert.equal(isDiscriminative('看看', filter, 0.02), false, '「看看」仍是泛词');
+});
+
+test('T286 ② 罕见 bigram 仍计入 ⇒ 真命中不被误杀', () => {
+  const claims = mkClaims(['反代插件卷的路由', ...Array.from({ length: 99 }, () => '别的内容')]);
+  const filter = buildBigramDf(claims);
+  assert.ok(bigramOverlapCount('反代插件卷', '反代插件的路由', { filter, maxRatio: 0.02 }) >= 2, '判别性 bigram 应照常命中');
+});
+
+test('T286 ③ 阈值 0.02 下误判率不高于不过滤（泛词被剔）', () => {
+  const claims = mkClaims([...Array.from({ length: 50 }, () => '你看看文件'), ...Array.from({ length: 50 }, (_, i) => `独特词${i}号`)]);
+  const filter = buildBigramDf(claims);
+  const unrelated = '我要求的是代码，不是占用高额内存的东西';
+  const raw = bigramOverlapCount('你看看文件', unrelated, {});
+  const filtered = bigramOverlapCount('你看看文件', unrelated, { filter, maxRatio: 0.02 });
+  assert.ok(filtered <= raw, `过滤后 ${filtered} 不应高于 ${raw}`);
+  assert.equal(filtered, 0, '全泛词 ⇒ 0');
 });

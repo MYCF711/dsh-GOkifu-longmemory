@@ -63,11 +63,40 @@ export function chineseBigrams(text) {
   return out;
 }
 
+/**
+ * T286：bigram 的**判别性过滤**（IDF 的离散版）。
+ * 泛词 bigram（「你看」「看看」「文件」）出现在大量 claim 里，撞上就判中 ⇒ 伪命中。
+ * 判据：`df / N > maxRatio` ⇒ **不算判别性**，不计入门槛。
+ * 只读：df 从**全库 claim** 统计，不改任何记录。
+ */
+export function buildBigramDf(claims = []) {
+  const df = new Map();
+  let n = 0;
+  for (const claim of Array.isArray(claims) ? claims : []) {
+    const text = String(claim?.text ?? '');
+    if (!text) continue;
+    n += 1;
+    for (const bg of chineseBigrams(text)) df.set(bg, (df.get(bg) ?? 0) + 1);
+  }
+  return { df, total: n };
+}
+
+/** 该 bigram 是否**判别性**（df/N ≤ maxRatio）。缺省不过滤。 */
+export function isDiscriminative(bigram, filter, maxRatio = 0.02) {
+  if (!filter || !Number.isFinite(filter.total) || filter.total <= 0) return true;
+  const d = filter.df.get(bigram) ?? 0;
+  return d / filter.total <= maxRatio;
+}
+
 /** 判别性 bigram 重合数：信号的 bigram 在 claim 文本里出现了几个。 */
-export function bigramOverlapCount(signalText, claimText) {
+export function bigramOverlapCount(signalText, claimText, { filter = null, maxRatio = 0.02 } = {}) {
   const hay = String(claimText ?? '').toLowerCase();
   let n = 0;
-  for (const bg of chineseBigrams(signalText)) if (hay.includes(bg)) n += 1;
+  for (const bg of chineseBigrams(signalText)) {
+    if (!hay.includes(bg)) continue;
+    if (!isDiscriminative(bg, filter, maxRatio)) continue; // T286：泛词 bigram 不计
+    n += 1;
+  }
   return n;
 }
 
@@ -335,7 +364,7 @@ export function buildExam({ store, home = defaultHome(), minSignalChars = 12, in
 /**
  * 单条考卷的机械判分：把卡片渲染行分成 related / strict / pending / unrelated。
  */
-export function judgeCard({ card, store, item, minOverlap = 2 } = {}) {
+export function judgeCard({ card, store, item, minOverlap = 2, bigramFilter = null, maxDfRatio = 0.02 } = {}) {
   const expectedEpisodes = new Set(item?.expected?.episodes ?? []);
   const expectedIds = new Set(item?.expected?.claimIds ?? []);
   const rows = [];
@@ -352,7 +381,8 @@ export function judgeCard({ card, store, item, minOverlap = 2 } = {}) {
     const supportEps = (Array.isArray(record?.support) ? record.support : []).map((s) => String(s?.episode ?? ''));
     const isRelated = supportEps.some((ep) => expectedEpisodes.has(ep)) || expectedIds.has(claimId);
     const overlap = overlapCount(item?.signal ?? '', record?.text ?? '');
-    const bigram = bigramOverlapCount(item?.signal ?? '', record?.text ?? '');
+    const bigram = bigramOverlapCount(item?.signal ?? '', record?.text ?? '', { filter: bigramFilter, maxRatio: maxDfRatio });
+    const bigramRaw = bigramOverlapCount(item?.signal ?? '', record?.text ?? '');
     const shared = sharedHardEntities(item?.signal ?? '', record?.text ?? '');
     // T284：并集 —— 判别词 ≥2（英文/路径）或 **bigram ≥2（中文）** 或 硬实体 ≥1
     const isStrict = isRelated && (overlap >= minOverlap || bigram >= minOverlap || shared.length >= 1);
@@ -365,7 +395,7 @@ export function judgeCard({ card, store, item, minOverlap = 2 } = {}) {
     if (isStrictBigram) bigramOnly += 1;
     if (isPending) pending += 1;
     if (!isRelated && !isPending) unrelated += 1;
-    rows.push({ claimId, related: isRelated, strict: isStrict, strictTokens: isStrictTokens, strictByBigramOnly: isStrictBigram, pending: isPending, overlap, bigram, shared, episode: supportEps[0] ?? null });
+    rows.push({ claimId, related: isRelated, strict: isStrict, strictTokens: isStrictTokens, strictByBigramOnly: isStrictBigram, pending: isPending, overlap, bigram, bigramRaw, shared, episode: supportEps[0] ?? null });
   }
   return {
     itemId: item?.id ?? null,
