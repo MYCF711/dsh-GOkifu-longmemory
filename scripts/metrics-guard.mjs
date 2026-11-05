@@ -4,13 +4,24 @@
 // 用法：node scripts/metrics-guard.mjs [--strict 0.65] [--json]
 // 依赖：本机 $DSH_HOME 的语料与 memory-context（CI 上不跑，入 PR 时用 check.mjs 的结构检查兜底）。
 //
+// **层级（T236b，2026-11-05 主人改判）**：
+//   主判据   = **A2b（召回相关度）** —— 第一门槛：失败立刻红，**排在 A1 之前**（输出顺序也按这层）。
+//   约束条件 = A1 负迁移 / A5 越界 / A6 溯源 / A4 p50 —— 任一越界即红。
+//   下游参考 = **repeatFailureRate（V1）** —— 仍打印，**不参与 exit code**。
+//
+// 为什么这样分层：主人 2026-11-05 裁定「应该要保证召回相关度，下沉是 GOkifu 上下文压缩插件的事，
+// 不踩坑是上下文压缩该保证的事情」。把**下游结果**当源头验收面就是**指标不可归因**：
+// 源头做对也可能被下游浪费，做错也可能被下游兜住 —— 那样的红/绿说明不了源头的好坏。
+// 所以 repeatFailureRate 只作参考打印；它是"记忆有没有被用起来"的下游证据，不是本仓的验收面。
+//
 // 门槛（2026-11-02 基线，改动需在 PR 里说明并更新本文件）：
+//   A2b 严格  ≥ 0.55（样本仅 18 条，1 条 = 5.6pp；2026-11-02 观察到同 store 下 0.611–0.667 的跳动）
+//   A2b 覆盖  = 1.00（上限参考）
 //   A1 负迁移 ≤ 5%（硬上限）
 //   A5 越界   = 0
 //   A6 溯源   = 100%
 //   A4 p50    ≤ 50ms
-//   A2b 严格  ≥ 0.55（样本仅 18 条，1 条 = 5.6pp；2026-11-02 观察到同 store 下 0.611–0.667 的跳动）
-//   A2b 覆盖  = 1.00（上限参考）
+//   repeatFailureRate（V1）—— 只打印，无门槛
 
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -54,17 +65,46 @@ export function judge(report, limits = LIMITS) {
   const cover = recall.recall;
   // A4.value 的单位就是 ms（m5-report 里 unit:'ms'）；不再乘 1000。
   const p50 = typeof a4 === 'number' ? a4 : null;
-  if (!Number.isFinite(a1) || a1 > limits.a1Max) fails.push(`A1 负迁移 ${a1} > ${limits.a1Max}`);
-  // A1=0 但覆盖率 0 ⇒ 空转：不判失败，但必须显式标注（2026-11-02 审计 P1-5）
-  if (!Number.isFinite(a5) || a5 > limits.a5Max) fails.push(`A5 越界 ${a5} != 0`);
-  if (!Number.isFinite(a6) || a6 < limits.a6Min) fails.push(`A6 溯源 ${a6} < ${limits.a6Min}`);
-  if (Number.isFinite(p50) && p50 > limits.a4p50MaxMs) fails.push(`A4 p50 ${p50.toFixed(2)}ms > ${limits.a4p50MaxMs}ms`);
-  if (!Number.isFinite(strict) || strict < limits.a2bStrictMin) fails.push(`A2b 严格 ${strict} < ${limits.a2bStrictMin}`);
+  // ── 主判据（第一门槛）：A2b 召回相关度 ──────────────────────────────────
+  // 先判它、先记它的失败 —— `fails` 的顺序就是输出的层级（T236b）。
+  const main = [];
+  if (!Number.isFinite(strict) || strict < limits.a2bStrictMin) main.push(`A2b 严格 ${strict} < ${limits.a2bStrictMin}`);
   else if (Number.isFinite(limits.a2bStrictRef) && strict < limits.a2bStrictRef - (limits.a2bStrictDropMax ?? 0.1)) {
-    fails.push(`A2b 严格 ${strict.toFixed(4)} 比冻结基线 ${limits.a2bStrictRef.toFixed(4)} 掉了 ${((limits.a2bStrictRef - strict) * 100).toFixed(1)}pp（>${((limits.a2bStrictDropMax ?? 0.1) * 100).toFixed(0)}pp）`);
+    main.push(`A2b 严格 ${strict.toFixed(4)} 比冻结基线 ${limits.a2bStrictRef.toFixed(4)} 掉了 ${((limits.a2bStrictRef - strict) * 100).toFixed(1)}pp（>${((limits.a2bStrictDropMax ?? 0.1) * 100).toFixed(0)}pp）`);
   }
-  if (!Number.isFinite(cover) || cover < limits.a2bCoverMin) fails.push(`A2b 覆盖 ${cover} < ${limits.a2bCoverMin}`);
-  return { ok: fails.length === 0, fails, values: { a1, a1Vacuous, a1Coverage, a5, a6, p50, a2bStrict: strict, a2bCover: cover, a2bN: recall.n ?? null } };
+  if (!Number.isFinite(cover) || cover < limits.a2bCoverMin) main.push(`A2b 覆盖 ${cover} < ${limits.a2bCoverMin}`);
+
+  // ── 约束条件：A1 / A5 / A6 / A4 ────────────────────────────────────────
+  const constraints = [];
+  if (!Number.isFinite(a1) || a1 > limits.a1Max) constraints.push(`A1 负迁移 ${a1} > ${limits.a1Max}`);
+  // A1=0 但覆盖率 0 ⇒ 空转：不判失败，但必须显式标注（2026-11-02 审计 P1-5）
+  if (!Number.isFinite(a5) || a5 > limits.a5Max) constraints.push(`A5 越界 ${a5} != 0`);
+  if (!Number.isFinite(a6) || a6 < limits.a6Min) constraints.push(`A6 溯源 ${a6} < ${limits.a6Min}`);
+  if (Number.isFinite(p50) && p50 > limits.a4p50MaxMs) constraints.push(`A4 p50 ${p50.toFixed(2)}ms > ${limits.a4p50MaxMs}ms`);
+
+  // ── 下游参考：repeatFailureRate（V1）—— 只算不红 ───────────────────────
+  // 它是"记忆有没有被下游用起来"的证据，不是本仓的验收面（见文件头「指标不可归因」）。
+  const repeatFailureRate = Number.isFinite(axes.A2?.value) ? axes.A2.value : null;
+
+  fails.push(...main, ...constraints);
+  return {
+    ok: fails.length === 0,
+    fails,
+    // 分层留档：消费方（evidence/metrics-guard.json）能直接看出哪条是主判据的红
+    layers: { main, constraints },
+    values: {
+      a1,
+      a1Vacuous,
+      a1Coverage,
+      a5,
+      a6,
+      p50,
+      a2bStrict: strict,
+      a2bCover: cover,
+      a2bN: recall.n ?? null,
+      repeatFailureRate,
+    },
+  };
 }
 
 const invokedDirectly = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
@@ -121,7 +161,12 @@ if (invokedDirectly) {
   } catch { /* 证据写失败不影响判定 */ }
   if (json) console.log(JSON.stringify(out, null, 2));
   else {
-    console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'} · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A2b严格=${out.values.a2bStrict}（n=${out.values.a2bN}） 覆盖=${out.values.a2bCover} p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
+    // 输出顺序 = 层级（T236b）：主判据 → 约束条件 → 下游参考。
+    const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
+    console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'}`);
+    console.log(`  主判据 · A2b 召回相关度：严格=${pct(out.values.a2bStrict)}（n=${out.values.a2bN}） 覆盖=${pct(out.values.a2bCover)}`);
+    console.log(`  约束条件 · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A4.p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
+    console.log(`  下游参考 · repeatFailureRate=${pct(out.values.repeatFailureRate)}（V1 · 不参与 exit code）`);
     for (const f of verdict.fails) console.error(`ERR ${f}`);
   }
   process.exit(verdict.ok ? 0 : 1);
