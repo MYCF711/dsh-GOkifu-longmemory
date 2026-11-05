@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.177.0（2026-11-05）
+
+### 移除零消费者的 `mergeRepresentativeOf` 索引（T227）
+audit-13 §②：T208 建的成员→代表反向索引（构建 0.0163 ms、"192× 快于全表扫"）**生产代码一次没用过**。
+R12 侧不需要它 —— `inject.mjs` 的 `collapseMergeNodes()` 自带同一个反向索引（`mergeIndexByMember`，每张卡构建一次，`size===0` 零成本直通），
+且 inject 里没有任何 `merge.members.includes(...)` 全表扫 ⇒ **不存在"拿成员 id 要全表扫"的快速路径**。
+
+按 `AGENTS.md` §2.4「指标先有消费者」：**未消费的索引是纯成本**（每次 walk 白扫 1379 条 claim）。
+
+**删除**：`buildMergeRepresentativeIndex()`、结果字段 `mergeRepresentativeOf`、`dropped.mergeCrossScopeMembers`（真数据跨域成员 **0** 个，A5 守卫从未被锻炼）、T208 的 `claims/claimById` 提前读。
+**验证**：`walk.mjs` 与 `git show ce9f2ab^:src/rooms/walk.mjs` **逐字节相同**。
+
+### 耗时（如实）
+`中位数 46.116 → 45.965 ms（−0.151 ms）`，**在噪声内**（同模块 A/B 噪声地板 +0.455 ms）。可确证的收益是"不再构建"，端到端看不到 192× 那种量级变化 —— 因为那条快速路径从未被调用。
+
+### 验证
+31 条 walk 测试全绿；764 条测试（759 pass / 0 fail / 5 skip）；`check PASS`（51 篇）。
+
 ## 0.176.0（2026-11-05）
 
 ### 知识库第 51 篇：一个字段怎么才算"活着"（T228）
