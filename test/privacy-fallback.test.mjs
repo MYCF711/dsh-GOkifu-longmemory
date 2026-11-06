@@ -2,13 +2,33 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { listFilesToScan, scanPrivacy } from '../scripts/privacy-scan.mjs';
 
 const B = String.fromCharCode(92);
 
-test('privacy: 没有 .git 时退化成目录遍历（不抛），并跳过 node_modules/tmp 与二进制', () => {
+// 正常全量测试中也模拟一次 pre-push：生产扫描必须尊重显式 cwd，测试后恢复原环境。
+function polluteWithOuterGitRepository(t) {
+  const keys = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'];
+  const previous = new Map(keys.map((key) => [key, process.env[key]]));
+  const repoRoot = fileURLToPath(new URL('..', import.meta.url));
+  const gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+  process.env.GIT_DIR = gitDir;
+  process.env.GIT_WORK_TREE = repoRoot;
+  process.env.GIT_INDEX_FILE = path.join(gitDir, 'index');
+  t.after(() => {
+    for (const key of keys) {
+      const value = previous.get(key);
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+}
+
+test('privacy: 没有 .git 时退化成目录遍历（不抛），并跳过 node_modules/tmp 与二进制', (t) => {
+  polluteWithOuterGitRepository(t);
   const dir = mkdtempSync(path.join(tmpdir(), 'kifuin-privacy-'));
   try {
     mkdirSync(path.join(dir, 'src'), { recursive: true });

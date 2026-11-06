@@ -34,7 +34,13 @@ export function listFilesToScan({ cwd = process.cwd() } = {}) {
     // 2026-11-04 再修（CI 脱敏闸红的那次）：只有 `--cached` 时**未跟踪的新文件根本不在列表里**，
     // 本地扫出来永远 0 处、一提交上去 CI 就红（`47c9be3` 的「本地因未跟踪漏检」）。
     // 加 `--others --exclude-standard` ⇒ 已跟踪 + 未忽略的未跟踪，本地与 CI 看到同一批文件。
-    return execSync('git ls-files -z --cached --others --exclude-standard', { cwd, encoding: 'utf8' })
+    // pre-push 会注入 GIT_DIR / GIT_WORK_TREE 等仓库定位变量；它们优先级高于 cwd，
+    // 会让扫描临时目录/导出包时误读外层仓库。仅清理仓库定位变量，PATH 等其余环境原样保留。
+    const env = { ...process.env };
+    for (const key of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_QUARANTINE_PATH', 'GIT_NAMESPACE']) {
+      delete env[key];
+    }
+    return execSync('git ls-files -z --cached --others --exclude-standard', { cwd, encoding: 'utf8', env })
       .split('\u0000').filter(Boolean);
   } catch {
     const SKIP_DIRS = new Set(['.git', 'node_modules', 'tmp', 'dist', 'coverage', '.cache', '.next', 'out']);

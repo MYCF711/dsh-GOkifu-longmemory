@@ -17,6 +17,19 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.45（2026-11-06 · pre-push 隐私扫描 cwd 修正，未发布）
+
+### 生产 Git 环境隔离（#362）
+
+- `scripts/privacy-scan.mjs` 的 `listFilesToScan` 在执行 `git ls-files` 时清理继承的 `GIT_DIR` / `GIT_WORK_TREE` 等仓库定位变量，保留 PATH 等其余环境，确保显式 `cwd` 生效。
+- `test/privacy-fallback.test.mjs` 在正常测试中也显式模拟外层 Git 仓库污染并由 `t.after` 恢复；修复前精确复现“临时目录返回当前仓库全量文件”。
+
+### 验证
+
+- 模拟 pre-push Git 环境的 privacy + 前两处夹具回归为 **42/42、exit 0**，HEAD 不变且无 fixture 残留。
+- 同一污染环境中的完整 `timeout 300 node --test` 为 **942 tests / 936 pass / 0 fail / 6 skip、exit 0**。
+- 同一污染环境中的 `timeout 300 node scripts/check.mjs` 为 **PASS、exit 0**。
+
 ## 0.2.44（2026-11-06 · 当前源码本地兼容分支，未发布）
 
 ### DSH 0.2.2-rc.1 / Cordis 4.1 effect 生命周期（#362）
