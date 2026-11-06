@@ -17,6 +17,19 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.71（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
+
+### 生命周期收尾与 fresh-tree 夹具（#362）
+
+- `scheduleAutoBuild` 记录每次 apply 的 timer/task：dispose 取消未触发计时器并释放去重标记；已开始建库时等待 task 结束，且不再迟写成功/失败日志；并发及后续重复 dispose 复用同一清理 Promise。
+- 新增 T367/T368 tombstone：旧实现先实测 0/2，修正后连同既有 autoBuild/D1 共 4/4；另证明取消后同 root 可重新调度、并发重复 dispose 等待同一 Promise。
+- T310 测试启动时自建仓库 `tmp/`：在父目录确实不存在的 fresh-tree 条件下 9/9，不再依赖别的测试预先创建。
+
+### 验证
+
+- `timeout 300 node --test`：**994 tests / 988 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（75 篇）。
+- 真实 rc1 ACTIVE(2)→DISPOSED(4)、核心 effect=function、disposers **5→0**、`cleanShutdown=true`（限探针 fiber），官方 engines evaluator `issue=null`。
+
 ## 0.2.70（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
 
 ### 最新 main 上的最小兼容移植（#362）

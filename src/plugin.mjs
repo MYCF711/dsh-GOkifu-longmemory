@@ -554,7 +554,7 @@ export function gateClaimIdsFromGates(gates, limit = 5) {
   return [...new Set(ids)].slice(0, Math.max(1, Number(limit) || 5));
 }
 
-async function decidePreStep({ ctx, config, deps, payload, decision }) {
+async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }) {
   const session = payload?.agent?.session ?? payload?.session ?? null;
   const text = lastUserText(payload?.messages);
   // T267：**合法信号扩展** —— 最近 N 条消息（含 assistant / tool）里的硬实体（文件路径/错误码/包名/命令）。
@@ -575,7 +575,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   if (!storeRoot) return { decision, action: 'skip', reason: 'no-store-root' };
   if (!fs.existsSync(storeRoot)) {
     warn(ctx, `记忆库不存在：${storeRoot}（本次沉默；${config.autoBuild ? '后台建库中' : '未开 autoBuild'}）`);
-    if (config.autoBuild) scheduleAutoBuild({ ctx, storeRoot, deps });
+    if (config.autoBuild) scheduleAutoBuild({ ctx, storeRoot, deps, lifecycle });
     return { decision, action: 'skip', reason: 'no-store' };
   }
 
@@ -714,17 +714,43 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
  *
  * @param {object} ctx  宿主上下文（用 `ctx.on`、`ctx.logger?.warn`；其余一概不碰）
  * @param {object} [rawConfig]
- * @returns {{name:string, hook:string, registered:boolean, config:object}}
+ * @returns {Function} Cordis disposer；旧诊断字段挂在函数属性上
  */
 const WALK_CACHES = new Map();
 
 const BUILDING = new Set();
 
 /** 零配置：库不存在时后台建一次（不阻塞本轮；失败只 warn，不重试风暴）。 */
-function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing' }) {
-  if (!storeRoot || BUILDING.has(storeRoot)) return;
+function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing', lifecycle = null }) {
+  if (!storeRoot || BUILDING.has(storeRoot) || lifecycle?.isDisposed()) return;
   BUILDING.add(storeRoot);
+  let resolveTask;
+  const task = new Promise((resolve) => { resolveTask = resolve; });
+  const record = { timer: null, task, cancel: null };
+  let settled = false;
+  const settle = () => {
+    if (settled) return;
+    settled = true;
+    lifecycle?.builds.delete(record);
+    resolveTask();
+  };
+  record.cancel = () => {
+    if (record.timer !== null) {
+      clearTimeout(record.timer);
+      record.timer = null;
+      BUILDING.delete(storeRoot);
+      settle();
+    }
+    return task;
+  };
+  lifecycle?.builds.add(record);
   const run = async () => {
+    record.timer = null;
+    if (lifecycle?.isDisposed()) {
+      BUILDING.delete(storeRoot);
+      settle();
+      return;
+    }
     try {
       const dataRoot = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME ? process.env.DSH_HOME : null;
       if (typeof deps?.buildStore === 'function') {
@@ -735,13 +761,15 @@ function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing' }) 
         if (!dataRoot) throw new Error('没有 DSH_HOME，无法建库');
         await mod.runArchive({ dataRoot, storeRoot, dryRun: false, user: 'owner' });
       }
-      warn(ctx, `记忆库已刷新（${reason}）：${storeRoot}`);
+      if (!lifecycle?.isDisposed()) warn(ctx, `记忆库已刷新（${reason}）：${storeRoot}`);
     } catch (error) {
-      warn(ctx, `自动建库失败：${String(error?.message ?? error)}`);
+      if (!lifecycle?.isDisposed()) warn(ctx, `自动建库失败：${String(error?.message ?? error)}`);
       BUILDING.delete(storeRoot); // 失败允许下次再试；成功不重试
+    } finally {
+      settle();
     }
   };
-  setTimeout(() => { run(); }, 0);
+  record.timer = setTimeout(() => { void run(); }, 0);
 }
 
 function walkCacheFor(storeRoot, store, deps) {
@@ -1060,8 +1088,9 @@ export function apply(ctx, rawConfig = {}) {
   // ctx.on 自己也会把监听器登记到当前 fiber，这里的逆序清理同时支持直接调用与宿主卸载；
   // Cordis 的 disposer 单次执行语义保证两条清理路径可以安全汇合。
   const makeEffect = (registered) => {
+    let disposePromise;
     const dispose = () => {
-      if (disposed) return;
+      if (disposed) return disposePromise;
       disposed = true;
       repeatStates.clear();
       const pending = [];
@@ -1069,7 +1098,10 @@ export function apply(ctx, rawConfig = {}) {
         const result = off();
         if (result && typeof result.then === 'function') pending.push(result);
       }
-      if (pending.length) return Promise.all(pending).then(() => undefined);
+      if (pending.length) {
+        disposePromise = Promise.all(pending).then(() => undefined);
+        return disposePromise;
+      }
     };
     Object.defineProperties(dispose, {
       name: { value: name, configurable: true },
@@ -1079,6 +1111,11 @@ export function apply(ctx, rawConfig = {}) {
     });
     return dispose;
   };
+  const lifecycle = { builds: new Set(), isDisposed: () => disposed };
+  disposers.push(() => {
+    const pending = [...lifecycle.builds].map((record) => record.cancel());
+    if (pending.length) return Promise.all(pending).then(() => undefined);
+  });
   const listen = (event, handler) => {
     const off = ctx.on(event, handler);
     if (typeof off === 'function') disposers.push(off);
@@ -1200,6 +1237,7 @@ export function apply(ctx, rawConfig = {}) {
                 deps: deps5,
                 payload: { ...payload, messages: [{ role: 'user', content: [{ type: 'text', text: trigger.quote }] }] },
                 decision,
+                lifecycle,
               });
               if (inner?.action === 'inject') {
                 state.injected += 1;
@@ -1222,7 +1260,7 @@ export function apply(ctx, rawConfig = {}) {
       if (config.oncePerSession && session && injected.has(session)) return decision;
 
       const deps = await resolveDeps(config);
-      const result = await decidePreStep({ ctx, config, deps, payload, decision });
+      const result = await decidePreStep({ ctx, config, deps, payload, decision, lifecycle });
       // enabled=false 时的 "skip disabled" 没有诊断价值，别写（任何库内调用都会带出来一堆噪声）。
       if (config.liveStats !== false && !(result.action === 'skip' && result.reason === 'disabled')) {
         const storeRootForStats = resolveStoreRoot(config);
@@ -1282,7 +1320,7 @@ export function apply(ctx, rawConfig = {}) {
         try { updated = Number(JSON.parse(fs.readFileSync(marker, 'utf8')).updatedAt) || 0; } catch { updated = 0; }
         const age = Date.now() - updated;
         if (age < config.autoArchiveMinutes * 60 * 1000) return;
-        scheduleAutoBuild({ ctx, storeRoot: root, deps: config.deps ?? null, reason: 'periodic' });
+        scheduleAutoBuild({ ctx, storeRoot: root, deps: config.deps ?? null, reason: 'periodic', lifecycle });
       } catch (error) {
         warn(ctx, `增量刷新检查失败：${String(error?.message ?? error)}`);
       }

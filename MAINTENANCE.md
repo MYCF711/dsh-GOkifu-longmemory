@@ -10,7 +10,7 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-gokifu-longmemory`（**公开**；main 由 ruleset 保护：必须经 PR + required check `rules`，禁 force push/删除；单机单人，不强制审批） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
-| 当前版本 | `0.2.70`（`compat/dsh-0.2.2-rc.1-0.2.62`，基于 origin/main 0.2.69 / 7a25b24，未打 tag） |
+| 当前版本 | `0.2.71`（`compat/dsh-0.2.2-rc.1-0.2.62`，基于 origin/main 0.2.69 / 7a25b24，未打 tag） |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
@@ -26,8 +26,8 @@
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | **984 条**（978 pass / 0 fail / 6 skip）[本] 2026-11-06 16:53 |
-| 本轮兼容验证 | 基于 origin/main 0.2.66 的完整 `node --test` 与 `check.mjs` 均 exit 0；真实 rc1 ACTIVE→DISPOSED、disposers 5→0、官方 engines evaluator issue=null |
+| 测试 | **994 条**（988 pass / 0 fail / 6 skip）[本] 2026-11-06 17:21 |
+| 本轮兼容验证 | 基于 origin/main 0.2.69 的完整 `node --test` 与 `check.mjs` 均 exit 0；真实 rc1 ACTIVE→DISPOSED、disposers 5→0、官方 engines evaluator issue=null |
 | 六轴 | A1 **0.00%** · A2 **21.67%** · A3 live · A4 p50 **19.67ms（3 次中位数，单次抖动 ±2ms）**（p50 是抖动量，按量级校验：台账 ≤ max(实测×2, 实测+20ms)） · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-06 07:49 · node scripts/m5-report.mjs` |
 | 语料 | 848 局 / **556 卷** / **claim 1578**（有效期已止 99；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-06 07:49 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |

@@ -405,6 +405,75 @@ test('T362: apply 返回可重复调用的 disposer，并清理两个事件钩�
   assert.doesNotThrow(() => effect(), '清理必须幂等');
 });
 
+test('T367: dispose 取消计时器并释放同 root 的 BUILDING 锁', async () => {
+  const { ctx, hooks } = makeCtx();
+  const { session } = makeSession(tmpdir());
+  let calls = 0;
+  const storeRoot = path.join(tmpdir(), `kifuin-autobuild-cancel-${process.pid}-${Date.now()}`);
+  const config = () => baseConfig({
+    storeRoot,
+    autoBuild: true,
+    deps: { buildStore: async () => { calls += 1; } },
+  });
+  const effect = apply(ctx, config());
+  const original = enterDecision([userMessage('yaml 装不上')]);
+  await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: original });
+  await effect();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 0, '计时器取消后不得再开始建库');
+  assert.deepEqual(hooks, {}, '两个监听器也必须清理');
+
+  const next = makeCtx();
+  const nextEffect = apply(next.ctx, config());
+  await runHook({ hooks: next.hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: original });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 1, '取消必须释放全局锁，同 root 后续挂载可以重新建库');
+  await nextEffect();
+  assert.deepEqual(next.hooks, {});
+});
+
+test('T368: dispose-during-build 与并发重复调用均等待同一清理', async () => {
+  const { ctx, hooks, warns } = makeCtx();
+  const { session } = makeSession(tmpdir());
+  let calls = 0;
+  let markStarted;
+  let releaseBuild;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const gate = new Promise((resolve) => { releaseBuild = resolve; });
+  const storeRoot = path.join(tmpdir(), `kifuin-autobuild-dispose-${process.pid}-${Date.now()}`);
+  const effect = apply(ctx, baseConfig({
+    storeRoot,
+    autoBuild: true,
+    deps: {
+      buildStore: async () => {
+        calls += 1;
+        markStarted();
+        await gate;
+      },
+    },
+  }));
+  const original = enterDecision([userMessage('yaml 装不上')]);
+  await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: original });
+  await started;
+  let settled = 0;
+  const first = effect();
+  const second = effect();
+  const disposing = Promise.resolve(first).then(() => { settled += 1; });
+  const repeated = Promise.resolve(second).then(() => { settled += 1; });
+  try {
+    assert.equal(second, first, '并发重复 dispose 必须复用首次清理 Promise');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(settled, 0, 'build 未结束时两次 dispose 都不得提前完成');
+  } finally {
+    releaseBuild();
+    await Promise.all([disposing, repeated]);
+  }
+  assert.equal(calls, 1);
+  assert.deepEqual(hooks, {});
+  assert.equal(warns.some((line) => line.includes('记忆库已刷新')), false, 'dispose 后不得迟写成功日志');
+  assert.equal(effect(), first, '清理完成后重复调用仍返回同一 Promise');
+});
+
 test('R16: decision.kind !== "enter" ⇒ 原样返回（不碰 messages）', async () => {
   const { ctx, hooks } = makeCtx();
   const { session } = makeSession(tmpdir());

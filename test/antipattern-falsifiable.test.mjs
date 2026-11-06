@@ -12,7 +12,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,6 +31,7 @@ import {
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const TMP = path.join(REPO_ROOT, 'tmp');
+mkdirSync(TMP, { recursive: true });
 
 const anti = (over = {}) => ({
   id: 'c-anti0001',
