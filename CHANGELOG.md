@@ -17,6 +17,21 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.3.2（2026-11-06）
+
+### cost 同分次序 A/B（T337）—— 评测镜像线上，主判据零影响
+**根因**：线上 `plugin.mjs` 传 `costIndex`（T332 已接线），但评测 `a2b-holdout.mjs` 没传 ⇒ 主判据测的是「不带 cost 排序」的旧行为，**与线上脱节**。且 0.2.75 的「主判据不再掉」是 cost 未接线的假象（T335）。
+**修法**：`runHoldout`/`replayFrozen` 加 `costIndex` 参数（默认 null 向后兼容）；`main` 从 sidecar 读 `costIndex` 传入（镜像线上）。新增 `scripts/cost-ab.mjs` 对照。
+**实测**（冻结考卷 114 题，同库同代码，唯一变量=传不传 costIndex）：
+```
+A 不传 costIndex : 58/114 = 50.88%
+B 传 costIndex   : 58/114 = 50.88%
+Δ = 0.00pp · 逐题翻转 0（变好 0 变坏 0）
+```
+**结论**：cost 同分次序（次级排序）对召回相关度**零影响** —— 真的不损害，不是没接线的假象。
+**边界**：Δ=0 也说明 cost 次级排序在此尺上无可测提升；其价值（先取已付过代价的失败）须由第一验收面干预实验证。
+证据 `evidence/T337-cost-ab.md`；复算 `node scripts/cost-ab.mjs`。
+
 ## 0.3.1（2026-11-06）
 
 > **版本号说明**：`version-suggest` 建议 **0.3.0**（minor，改 scripts 行为），但 `v0.3.0`/`v0.4.0` 是 2026-11-01 main 历史重组前的**游离发布**（提交 `2ee935bc` 不在 main 历史上、GitHub Release 仍在，撤公开 Release 风险高故不撤）。为避让已占用 tag 改用 **0.3.1**；本次改动按内容属 minor。
