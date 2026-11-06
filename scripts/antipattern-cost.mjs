@@ -40,11 +40,41 @@ function eventText(ev) {
 const WRITE_RE = /\b(?:write|edit|apply_patch|multi_edit|str_replace)\s*\(/;
 
 /**
+ * T336 · 重锚定：antipattern 的 `support.seq` 常锚在「提到失败的 assistant 消息」，
+ * 而真正的失败原文（行首 `Error:` / 独占非零 exit code）在**紧邻的 tool/result · job/settled** 里。
+ * 实测（2026-11-06，`tmp/diag-cost3.mjs`）：200 条里 195 条 support 指向的事件抽不出 Error 行，
+ * 其中 **151 条真正失败原文就在 ±3 条内**（`none:0`，每局都有）。不重锚 ⇒ `failureLineOf=null`
+ * ⇒ `subject=null` ⇒ retry/rework 全跳过 ⇒ **cost 恒 0**（这就是「只有 0.09% 能判出代价」的根因）。
+ *
+ * 契约：support 指的那条若本身含失败行 ⇒ 不动；否则在 ±window 内取**距离最近**的失败事件，
+ * 并列取**靠后**（Error 原文几乎总在 assistant 调用之后）。找不到 ⇒ 返回原 index（cost 仍 0，**不编**）。
+ * 只重锚「哪条是真失败」，不改写任何库数据；纯函数、无源不入。
+ */
+export function anchorFailureIndex(events, index, window = 3) {
+  if (!Array.isArray(events) || index < 0 || index >= events.length) return index;
+  if (failureLineOf(eventText(events[index]))) return index;
+  let best = -1;
+  let bestDist = Infinity;
+  const lo = Math.max(0, index - window);
+  const hi = Math.min(events.length - 1, index + window);
+  for (let i = lo; i <= hi; i += 1) {
+    if (i === index) continue;
+    if (!failureLineOf(eventText(events[i]))) continue;
+    const d = Math.abs(i - index);
+    // 距离最近优先；并列取靠后（i 大者）
+    if (d < bestDist || (d === bestDist && i > best)) { best = i; bestDist = d; }
+  }
+  return best >= 0 ? best : index;
+}
+
+/**
  * 机械判"付过代价"（纯函数）。
  * @returns {{cost:number, kinds:string[], steps:number|null}}
  *   `cost` = 命中的痕迹**种类数**（0 = 没测到，不是"没代价"）
  */
 export function costOf({ events = [], index = -1 } = {}) {
+  // T336：先把 support.seq 重锚到「真正的失败事件」（±3 内最近的含 Error 行者），再算痕迹。
+  index = anchorFailureIndex(events, index);
   if (index < 0 || index >= events.length) return { cost: 0, kinds: [], steps: null };
   const failText = eventText(events[index]);
   const line = failureLineOf(failText);

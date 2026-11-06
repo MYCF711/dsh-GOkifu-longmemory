@@ -17,6 +17,36 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.3.0（2026-11-06）
+
+### cost 重锚定（T336）—— **「付过代价」测量率 0.09% → 9.95%，110 倍**
+**根因**（真库诊断，`tmp/diag-cost3.mjs`，已随刀清理）：antipattern 的 `support.seq` 常锚在
+「**提到失败的 assistant 消息**」，而真正的失败原文（行首 `Error:` / 独占非零 exit code）在
+**紧邻的 tool/result · job/settled** 里。200 条抽样：**195 条 support 指向的事件抽不出 Error 行**，
+其中 **151 条真正失败原文就在 ±3 条内**（`none:0`，每局都有）。不重锚 ⇒ `failureLineOf=null`
+⇒ `subject=null` ⇒ retry/rework 全跳过 ⇒ **cost 恒 0**。这就是 0.2.75 里「cost 恒为 null /
+只有 0.09% 能判出代价 / 可反驳真教训 0 条」的共同根因。
+
+**修法**：`costOf` 消费侧新增 `anchorFailureIndex`（纯函数）——support 指的那条若本身含失败行则不动，
+否则在 **±3 窗口**内重锚到**距离最近**的失败事件（等距取**靠后**，因 Error 原文几乎总在 assistant 调用之后）；
+找不到则维持原 index（cost 仍 0，**不编**）。**不改任何库数据、不重跑归档**。
+
+**实测**（全量 1105 条 antipattern）：
+```
+重锚前   测到代价   1 / 1105 = 0.09%
+重锚后   测到代价 110 / 1105 = 9.95%   （rework 71 + retry 45）
+sidecar  非零 cost   110 条（costIndex 自此真正含非零值，同分次序有了数据前提）
+```
+- 剩下 995 条 `cost:0` 多为「一次性失败、无重试/返工痕迹」——机械判据的真实上限，**不编**。
+- `evidence/T336-cost-reanchor.md`；tombstone：`T336 ①`（support 锚在 assistant 消息，真 Error 在 +2，
+  删掉重锚逻辑则该测试红）。
+- **未动** `a2b-holdout.mjs` 的 `buildMemoryCard({costIndex})` 传参：那会改变主判据排序，须单独一刀先量化影响。
+
+### 清理（预先存在的测试债，非本刀引入）
+- `tmp/t296-stash`、`tmp/t300-stash` 下的旧 `*.test.mjs` 副本改名为 `.off`（保留原文不删）——
+  它们让 `node --test` 多跑一遍旧契约，`test/ledger-tmp-guard.test.mjs` 因此红、发版卡死。
+  按该守卫自己的提示处理（改名 `.off` / 归档），与本刀功能无关，属解锁发版的必要清理。
+
 ## 0.2.75（2026-11-06）
 
 ### cost 独立性不可计算（T335）—— **cost 恒为 null，同分次序从未生效过**
