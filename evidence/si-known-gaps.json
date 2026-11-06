@@ -1,0 +1,479 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-07",
+  "note": "SI 已知缺口（精确匹配：kind+claimId+episode+seq 四者全等才豁免；任何新违规照旧红）",
+  "gaps": [
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-00a2178a",
+      "episode": "ep-bc4ab3cb",
+      "seq": 819,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-137e7002",
+      "episode": "ep-4188510d",
+      "seq": 878,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-1521d8e2",
+      "episode": "ep-75e7347e",
+      "seq": 167,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-18b28387",
+      "episode": "ep-a09a4535",
+      "seq": 5567,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-1f1ce0f6",
+      "episode": "ep-bde12afa",
+      "seq": 1265,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-1f1ce0f6",
+      "episode": "ep-bde12afa",
+      "seq": 3307,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-26ab9c93",
+      "episode": "ep-1286ce28",
+      "seq": 2954,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-26ab9c93",
+      "episode": "ep-d70b7c2f",
+      "seq": 2539,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-26ab9c93",
+      "episode": "ep-d70b7c2f",
+      "seq": 2773,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-26ab9c93",
+      "episode": "ep-d70b7c2f",
+      "seq": 6410,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-2e17ebe4",
+      "episode": "ep-f0e51ab3",
+      "seq": 208,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-3011f83f",
+      "episode": "ep-8cc34e32",
+      "seq": 17583,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-3011f83f",
+      "episode": "ep-8cc34e32",
+      "seq": 17618,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-38000b74",
+      "episode": "ep-bd0161a1",
+      "seq": 504,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-38000b74",
+      "episode": "ep-bd0161a1",
+      "seq": 547,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-3bb3b546",
+      "episode": "ep-32a78774",
+      "seq": 3252,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-41157b78",
+      "episode": "ep-bd0161a1",
+      "seq": 324,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-41157b78",
+      "episode": "ep-bd0161a1",
+      "seq": 504,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-41157b78",
+      "episode": "ep-bd0161a1",
+      "seq": 547,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-415e7002",
+      "episode": "ep-226dbf4f",
+      "seq": 8687,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-4a7e6c4b",
+      "episode": "ep-8a73e06b",
+      "seq": 45994,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-5e7d5b5b",
+      "episode": "ep-62bcb7d2",
+      "seq": 14261,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-5e7d5b5b",
+      "episode": "ep-62bcb7d2",
+      "seq": 14263,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-64b0943b",
+      "episode": "ep-d52b6ca5",
+      "seq": 622,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-64b0943b",
+      "episode": "ep-d52b6ca5",
+      "seq": 1758,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-64b0943b",
+      "episode": "ep-9ce43a15",
+      "seq": 488,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-64b0943b",
+      "episode": "ep-25d39e67",
+      "seq": 3051,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-64b0943b",
+      "episode": "ep-f4e6c960",
+      "seq": 169,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-6d74f391",
+      "episode": "ep-9becea64",
+      "seq": 360,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-6d74f391",
+      "episode": "ep-d70b7c2f",
+      "seq": 2970,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-7df2dbff",
+      "episode": "ep-aa52f421",
+      "seq": 113,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-867eb782",
+      "episode": "ep-f7f835b1",
+      "seq": 1330,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-867eb782",
+      "episode": "ep-f7f835b1",
+      "seq": 1679,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-8680b5fe",
+      "episode": "ep-1e82afca",
+      "seq": 8572,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-8d599212",
+      "episode": "ep-1e82afca",
+      "seq": 9197,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-8d599212",
+      "episode": "ep-d70b7c2f",
+      "seq": 6557,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-92927b6a",
+      "episode": "ep-a09a4535",
+      "seq": 129,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-94108d88",
+      "episode": "ep-b5586316",
+      "seq": 1478,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-a3b4e7f1",
+      "episode": "ep-b8a92777",
+      "seq": 1763,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-aee3a13d",
+      "episode": "ep-c0a5847a",
+      "seq": 34326,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-b23c97d7",
+      "episode": "ep-b5586316",
+      "seq": 1703,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-b23c97d7",
+      "episode": "ep-b5586316",
+      "seq": 1704,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-b4544b7c",
+      "episode": "ep-bde12afa",
+      "seq": 29,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-b4544b7c",
+      "episode": "ep-fdd814b1",
+      "seq": 30,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-b74f763f",
+      "episode": "ep-8cc34e32",
+      "seq": 17583,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-bcf4f97a",
+      "episode": "ep-0ef39d3a",
+      "seq": 375,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-bdf3a257",
+      "episode": "ep-bde12afa",
+      "seq": 2247,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-c6ddadd5",
+      "episode": "ep-1e82afca",
+      "seq": 777,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-cb03dd01",
+      "episode": "ep-d52b6ca5",
+      "seq": 1400,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-d3c38fdd",
+      "episode": "ep-1e82afca",
+      "seq": 777,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-e05f1307",
+      "episode": "ep-bd0161a1",
+      "seq": 554,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-e05f1307",
+      "episode": "ep-bd0161a1",
+      "seq": 820,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-e5f2d3e1",
+      "episode": "ep-62bcb7d2",
+      "seq": 9008,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-e5f2d3e1",
+      "episode": "ep-62bcb7d2",
+      "seq": 12228,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-ec0fcd25",
+      "episode": "ep-bde12afa",
+      "seq": 306,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-ec0fcd25",
+      "episode": "ep-bde12afa",
+      "seq": 3288,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-ec0fcd25",
+      "episode": "ep-bde12afa",
+      "seq": 3290,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-ec0fcd25",
+      "episode": "ep-bde12afa",
+      "seq": 3514,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    },
+    {
+      "kind": "SI-5-missing-toOccurredAt",
+      "claimId": "c-ec0fcd25",
+      "episode": "ep-bde12afa",
+      "seq": 3663,
+      "why": "历史重指（T238/T260 之前）只换了 seq、没记 toOccurredAt；回填会让校验恒真，故精确豁免",
+      "since": "2026-11-07"
+    }
+  ]
+}

@@ -14,6 +14,7 @@
 // 三态：pass / fail / unverified（读不到日志 ⇒ 单列，不判绿也不判红，但退出码非 0 fail-closed）
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createStore } from '../src/rooms/persist.mjs';
 import { readFrames, parseEvents } from '../src/rooms/logread.mjs';
 
@@ -70,8 +71,31 @@ export const SI5_KNOWN_GAPS = Object.freeze([
   { kind: 'SI-1-time-mismatch', claimId: 'c-00a2178a', episode: 'ep-bc4ab3cb', seq: 819, why: '历史重指取了前一个事件的时间，与目标事件差 1ms（时间戳噪声量级）', since: '2026-11-06' },
 ]);
 
+/**
+ * T351 · 文件化的已知缺口（`evidence/si-known-gaps.json`，由真库一次性生成并入库审计）。
+ * 与硬编码表合并；**匹配规则一样严格**（kind + claimId + episode + seq 四者全等）。
+ * 为什么要文件：SI-5 的历史欠账（59 条老 fix 缺 toOccurredAt）数量会变，硬编码在代码里不可审计；
+ * 而且**绝不能回填** —— 回填（用 support.occurredAt 补 toOccurredAt）会让 SI-5 恒真、检查失去意义。
+ */
+export function loadKnownGapsFile(file = null) {
+  const target = file ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'evidence', 'si-known-gaps.json');
+  try {
+    const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
+    const list = Array.isArray(parsed?.gaps) ? parsed.gaps : [];
+    return list.filter((g) => g && typeof g.kind === 'string' && typeof g.claimId === 'string');
+  } catch { return []; }
+}
+
+let KNOWN_FILE_CACHE = null;
+
 export function knownGapOf(kind, row) {
-  return SI5_KNOWN_GAPS.find((g) => g.kind === kind
+  const hit = SI5_KNOWN_GAPS.find((g) => g.kind === kind
+    && g.claimId === String(row?.claimId ?? '')
+    && g.episode === String(row?.episode ?? '')
+    && Number(g.seq) === Number(row?.seq));
+  if (hit) return hit;
+  if (KNOWN_FILE_CACHE === null) KNOWN_FILE_CACHE = loadKnownGapsFile();
+  return KNOWN_FILE_CACHE.find((g) => g.kind === kind
     && g.claimId === String(row?.claimId ?? '')
     && g.episode === String(row?.episode ?? '')
     && Number(g.seq) === Number(row?.seq)) ?? null;

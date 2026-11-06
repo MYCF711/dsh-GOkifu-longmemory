@@ -128,3 +128,34 @@ test('T277 ④: 1ms 噪声（全 = +1ms）不算系统性偏移（阈值 |delta|
   const r = runSemanticChecks({ claims, timeIndexOf: idx(events), tolerance: 1 });
   assert.equal(r.buckets['SI-6-systematic-offset'], undefined, '+1ms 属容差噪声');
 });
+
+// ─── T351 · 已知缺口必须是**精确豁免**：任何新违规照旧红 ───
+import { knownGapOf, loadKnownGapsFile, SI5_KNOWN_GAPS } from '../scripts/semantic-check.mjs';
+
+test('T351 ① 文件化已知缺口能加载，且每条四元组齐全', () => {
+  const list = loadKnownGapsFile();
+  assert.ok(Array.isArray(list), '必须返回数组（文件缺失时为空数组，不是抛错）');
+  for (const g of list) {
+    assert.equal(typeof g.kind, 'string');
+    assert.equal(typeof g.claimId, 'string');
+    assert.equal(typeof g.episode, 'string');
+    assert.ok(Number.isFinite(g.seq), `${g.claimId} 缺 seq`);
+  }
+});
+
+test('T351 ② 已知缺口命中（四元组全等）⇒ 豁免；改任意一位 ⇒ **不豁免**（tombstone）', () => {
+  const sample = loadKnownGapsFile()[0] ?? SI5_KNOWN_GAPS[0];
+  assert.ok(sample, '至少要有一条已知缺口可测');
+  const hit = { claimId: sample.claimId, episode: sample.episode, seq: sample.seq };
+  assert.ok(knownGapOf(sample.kind, hit), '四元组全等必须命中');
+  assert.equal(knownGapOf(sample.kind, { ...hit, claimId: 'c-00000000' }), null, '换 claimId ⇒ 不豁免');
+  assert.equal(knownGapOf(sample.kind, { ...hit, episode: 'ep-00000000' }), null, '换 episode ⇒ 不豁免');
+  assert.equal(knownGapOf(sample.kind, { ...hit, seq: Number(sample.seq) + 1 }), null, '换 seq ⇒ 不豁免');
+  assert.equal(knownGapOf('SI-9-brand-new', hit), null, '换 kind ⇒ 不豁免');
+});
+
+test('T351 ③ 空/畸形输入不炸（fail-closed：判不了就当新违规，不静默放行）', () => {
+  assert.equal(knownGapOf('SI-5-missing-toOccurredAt', null), null);
+  assert.equal(knownGapOf('SI-5-missing-toOccurredAt', {}), null);
+  assert.equal(knownGapOf(undefined, { claimId: 'x' }), null);
+});
