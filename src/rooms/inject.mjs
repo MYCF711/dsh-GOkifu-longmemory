@@ -17,6 +17,8 @@
 import fs from 'node:fs';
 import { extractErrorKey } from './topic.mjs';
 import { loadSignatureIndex, lookupSignature } from './sigindex.mjs';
+// T347：F3 是 claim 文本的**纯函数** ⇒ 读时派生兜底，历史 claim（无该字段）也能上卡，且不动数据。
+import { deriveFalsifiableWhen } from './extract.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -63,8 +65,10 @@ export const GOVERNANCE_PATTERNS = Object.freeze([
  * 一条记忆行（模型可见字符串）的权威形态：
  *   `- [antipattern] 文本  (ep-9c11, 2026-11-01, seq 88)`
  * 闸 0 用它逐行核 provenance 与日期；R12 用它产出，二者不能各写一份。
+ * T347：允许坐标后跟**可选 F3 尾注**（` · 当…不再成立 [rule]`）；第 2 组仍是逐字正文，
+ * 闸 0 的日期/seq 只从坐标组取 —— 派生内容不参与 provenance 核验。
  */
-export const PROVENANCE_LINE_RE = /^- \[([^\]\n]+)\] (.+?) \((ep-[A-Za-z0-9._-]+), (\d{4}-\d{2}-\d{2}), seq (\d+)\)$/;
+export const PROVENANCE_LINE_RE = /^- \[([^\]\n]+)\] (.+?) \((ep-[A-Za-z0-9._-]+), (\d{4}-\d{2}-\d{2}), seq (\d+)\)(?: · .+)?$/;
 
 /** `indexLine` 的形态：事实陈述，不是指令。 */
 export const INDEX_LINE_RE = /^MEMORY: .+（scope=.+, (\d+) 局, 未列出≠不存在）$/;
@@ -579,8 +583,9 @@ function entryFromClaim(hit, claim, options = {}) {
     occurredAt,
     marker: stateTokenOf(claim),
     cost: Number.isFinite(options?.costIndex?.get?.(String(claim.id ?? ''))) ? options.costIndex.get(String(claim.id ?? '')) : null,
-    // T345：F3 失效条件（文本派生）随 claim 上卡；无该字段的 claim 输出与旧版逐字节一致。
-    falsifiableWhen: claim.falsifiableWhen ?? null,
+    // T345/T347：F3 优先用 claim 上存的；没有（历史 claim）⇒ **读时派生兜底**（纯函数、确定性）。
+    // `f3OnCard:false` 只给 A/B 对照与紧急关闭用。
+    falsifiableWhen: options?.f3OnCard === false ? null : (claim.falsifiableWhen ?? deriveFalsifiableWhen(body)),
     ...(crossAllowed ? { prefix: '[跨项目] ' } : {}),
     state: typeof claim.state === 'string' && claim.state ? claim.state : 'observed',
     text,
@@ -654,6 +659,8 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
   now = null,
   preconditionOk = null,
   costIndex = null,
+  // T347：F3 上卡开关（默认开；关掉只用于 A/B 对照或紧急回退）
+  f3OnCard = true,
 }) {
   const entries = [];
   let droppedNoProvenance = 0;
@@ -677,7 +684,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       continue;
     }
     const entry = claim
-      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex })
+      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard })
       : entryFromEpisode(hit, view);
     if (entry && scope) {
       const rec = view.episodesById.get(String(hit?.episode ?? ''));
@@ -977,6 +984,8 @@ export function buildMemoryCard({
   walkCrossScope = 0,
   preferenceHardOnly = false,
   allowCrossScopeClass = false,
+  // T347：F3 上卡开关（默认开）。关掉 ⇒ 卡片与 0.6.3 之前的格式逐字节一致（A/B 对照用）。
+  f3OnCard = true,
 } = {}) {
   const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
   const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
@@ -1027,7 +1036,7 @@ export function buildMemoryCard({
     };
   }
 
-  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex });
+  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex, f3OnCard });
   // T162a：认「合并节点」。合流（consolidate）会把多条近似 claim 压成一个带 `merge.members` 的节点；
   // 消费侧不认它，合并节点与它的成员就会在同一张卡里重复出现。规则见 collapseMergeNodes 的注释。
   const { entries, stats: collapseStats } = collapseMergeNodes({
