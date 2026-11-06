@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.3.3（2026-11-06 · DSH 0.2.2-rc.1 兼容候选，未发布）
+
+### PR #398 最终生命周期适配移植到 0.3.2 main（#362）
+
+- 以精确 `1257fe8` 为唯一基线，移植 PR #398 最终 `38a64ed8` 相对 `b3ea684` 的真实适配；不带入旧 main merge 提交，也不以 0.2.75/0.2.76 覆盖当前版本。
+- 核心 `apply` 返回幂等 Cordis disposer；无 build 时同样返回 Promise，并发与完成后的重复 dispose 严格复用同一 Promise，事件 off 在首次调用内同步执行。
+- `kifu-loader` 原样转发核心 effect/disposer，诊断继续由 `loadCore().spec` 提供，不再把 `coreSpec` 混入 effect。
+- `BUILDING` 使用共享 `Map<storeRoot, record>` 与 owners：queued 仅最后 owner 取消，running owner 各自等待共享 task；成功去重，失败/取消按 record 身份删除并允许重试，settle 双向清理引用。
+- pre-step、D5 内层 `decidePreStep` 与 turn-stopping 共用 lifecycle 闸门；autoBuild timer/task 纳入卸载，stale 路径不再调度，dispose 后不再迟写成功/失败日志。
+- 临时 Git 测试夹具与 `privacy-scan.listFilesToScan` 隔离仓库定位环境变量并确保显式 cwd；T310 fresh worktree 自建 `tmp/` 父目录。
+- `engines.dsh=">=0.2.2-rc.1 <0.3.0-0"`；T362、T367–T371、T310 与真实 rc1 双 fiber 验收覆盖 loader effect、共享 build 和完整清理。
+- 完整保留 0.3.2 的 cost/T336/T337 行为与证据，包括 `anchorFailureIndex`、评测侧 `costIndex` 接线和 A/B 脚本；本刀不改召回、排序或注入内容。
+- 版本按本轮兼容移植指令使用 patch **0.3.3**：生产差异仅宿主生命周期兼容、资源清理与环境隔离，不新增业务契约或召回能力。
+
+### 0.3.3 本地验证
+
+- 先红：仅移植测试后 targeted **1 pass / 9 fail**、privacy **1 pass / 1 fail**；失败分别指向对象 effect/缺失 disposer 与 Git 环境污染。
+- 后绿：生产适配后 targeted **10/10**、privacy **2/2**；完整 `node --test` **1009 tests / 1003 pass / 0 fail / 6 skip，exit 0**。
+- 真实官方 rc1、engines 接受/拒绝、最终 head 与 required rules 结果记录于 `tmp/dsh-latest-upgrade/longmemory-0.3.2-adaptation.md`。
+
 ## 0.3.2（2026-11-06）
 
 ### cost 同分次序 A/B（T337）—— 评测镜像线上，主判据零影响

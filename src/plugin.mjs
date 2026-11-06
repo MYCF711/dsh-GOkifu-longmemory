@@ -554,7 +554,7 @@ export function gateClaimIdsFromGates(gates, limit = 5) {
   return [...new Set(ids)].slice(0, Math.max(1, Number(limit) || 5));
 }
 
-async function decidePreStep({ ctx, config, deps, payload, decision }) {
+async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }) {
   const session = payload?.agent?.session ?? payload?.session ?? null;
   const text = lastUserText(payload?.messages);
   // T267：**合法信号扩展** —— 最近 N 条消息（含 assistant / tool）里的硬实体（文件路径/错误码/包名/命令）。
@@ -575,7 +575,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
   if (!storeRoot) return { decision, action: 'skip', reason: 'no-store-root' };
   if (!fs.existsSync(storeRoot)) {
     warn(ctx, `记忆库不存在：${storeRoot}（本次沉默；${config.autoBuild ? '后台建库中' : '未开 autoBuild'}）`);
-    if (config.autoBuild) scheduleAutoBuild({ ctx, storeRoot, deps });
+    if (config.autoBuild) scheduleAutoBuild({ ctx, storeRoot, deps, lifecycle });
     return { decision, action: 'skip', reason: 'no-store' };
   }
 
@@ -727,17 +727,71 @@ async function decidePreStep({ ctx, config, deps, payload, decision }) {
  *
  * @param {object} ctx  宿主上下文（用 `ctx.on`、`ctx.logger?.warn`；其余一概不碰）
  * @param {object} [rawConfig]
- * @returns {{name:string, hook:string, registered:boolean, config:object}}
+ * @returns {Function} Cordis disposer；旧诊断字段挂在函数属性上
  */
 const WALK_CACHES = new Map();
 
-const BUILDING = new Set();
+const BUILDING = new Map();
 
 /** 零配置：库不存在时后台建一次（不阻塞本轮；失败只 warn，不重试风暴）。 */
-function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing' }) {
-  if (!storeRoot || BUILDING.has(storeRoot)) return;
-  BUILDING.add(storeRoot);
+function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing', lifecycle }) {
+  if (!storeRoot || lifecycle.isDisposed()) return;
+
+  const existing = BUILDING.get(storeRoot);
+  if (existing) {
+    if (!existing.settled) {
+      existing.owners.add(lifecycle);
+      lifecycle.builds.add(existing);
+    }
+    return;
+  }
+
+  let resolveTask;
+  const record = {
+    timer: null,
+    owners: new Set([lifecycle]),
+    settled: false,
+    task: new Promise((resolve) => { resolveTask = resolve; }),
+    cancel: null,
+  };
+  BUILDING.set(storeRoot, record);
+  lifecycle.builds.add(record);
+
+  const activeOwner = () => [...record.owners].find((owner) => !owner.isDisposed()) ?? null;
+  const detach = (owner) => {
+    record.owners.delete(owner);
+    owner.builds.delete(record);
+  };
+  const deleteIfCurrent = () => {
+    if (BUILDING.get(storeRoot) === record) BUILDING.delete(storeRoot);
+  };
+  const settle = () => {
+    if (record.settled) return;
+    record.settled = true;
+    for (const owner of [...record.owners]) detach(owner);
+    resolveTask();
+  };
+
+  record.cancel = (owner) => {
+    detach(owner);
+    if (record.settled) return null;
+    if (record.timer === null) return record.task;
+    if (record.owners.size === 0) {
+      clearTimeout(record.timer);
+      record.timer = null;
+      deleteIfCurrent();
+      settle();
+    }
+    return null;
+  };
+
   const run = async () => {
+    record.timer = null;
+    if (!activeOwner()) {
+      deleteIfCurrent();
+      settle();
+      return;
+    }
     try {
       const dataRoot = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME ? process.env.DSH_HOME : null;
       if (typeof deps?.buildStore === 'function') {
@@ -748,13 +802,18 @@ function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing' }) 
         if (!dataRoot) throw new Error('没有 DSH_HOME，无法建库');
         await mod.runArchive({ dataRoot, storeRoot, dryRun: false, user: 'owner' });
       }
-      warn(ctx, `记忆库已刷新（${reason}）：${storeRoot}`);
+      const owner = activeOwner();
+      if (owner) warn(owner.ctx, `记忆库已刷新（${reason}）：${storeRoot}`);
     } catch (error) {
-      warn(ctx, `自动建库失败：${String(error?.message ?? error)}`);
-      BUILDING.delete(storeRoot); // 失败允许下次再试；成功不重试
+      deleteIfCurrent();
+      const owner = activeOwner();
+      if (owner) warn(owner.ctx, `自动建库失败：${String(error?.message ?? error)}`);
+    } finally {
+      settle();
     }
   };
-  setTimeout(() => { run(); }, 0);
+
+  record.timer = setTimeout(() => { void run(); }, 0);
 }
 
 function walkCacheFor(storeRoot, store, deps) {
@@ -1065,10 +1124,54 @@ export function apply(ctx, rawConfig = {}) {
   const config = resolveConfig(rawConfig);
   const injected = new WeakSet(); // 每会话只注入一次（对象身份；WeakSet 不留引用）
   const repeatStates = new Map(); // D5：每个会话的「同类失败计数」
+  const disposers = [];
+  let disposed = false;
+
+  // Cordis 4.1 会把 apply 的返回值当作 effect 收集：普通诊断对象会触发 Invalid effect。
+  // 返回真正的 disposer；旧诊断字段挂成函数属性，仅供现有测试/安装探针读取。
+  // ctx.on 自己也会把监听器登记到当前 fiber，这里的逆序清理同时支持直接调用与宿主卸载；
+  // Cordis 的 disposer 单次执行语义保证两条清理路径可以安全汇合。
+  const makeEffect = (registered) => {
+    let disposePromise = null;
+    const dispose = () => {
+      if (disposePromise) return disposePromise;
+      disposed = true;
+      disposePromise = (async () => {
+        repeatStates.clear();
+        const pending = [];
+        for (const off of disposers.splice(0).reverse()) {
+          const result = off();
+          if (result && typeof result.then === 'function') pending.push(result);
+        }
+        await Promise.all(pending);
+      })();
+      return disposePromise;
+    };
+    Object.defineProperties(dispose, {
+      name: { value: name, configurable: true },
+      hook: { value: HOOK },
+      registered: { value: registered },
+      config: { value: config },
+    });
+    return dispose;
+  };
+  const lifecycle = { ctx, builds: new Set(), isDisposed: () => disposed };
+  disposers.push(() => {
+    const pending = [];
+    for (const record of [...lifecycle.builds]) {
+      const result = record.cancel(lifecycle);
+      if (result && typeof result.then === 'function') pending.push(result);
+    }
+    return Promise.all(pending).then(() => undefined);
+  });
+  const listen = (event, handler) => {
+    const off = ctx.on(event, handler);
+    if (typeof off === 'function') disposers.push(off);
+  };
 
   if (typeof ctx?.on !== 'function') {
     warn(ctx, 'ctx.on 不可用（插件未挂载，宿主行为不变）');
-    return { name, hook: HOOK, registered: false, config };
+    return makeEffect(false);
   }
 
   // 预热：把 walk 需要的四类记录读进内存一次（~0.7s），把成本挪到插件加载，而不是首轮注入。
@@ -1152,7 +1255,7 @@ export function apply(ctx, rawConfig = {}) {
     warn(ctx, `设置接口没注册上：${String(error?.message ?? error)}`);
   }
 
-  ctx.on(HOOK, async (payload, next) => {
+  listen(HOOK, async (payload, next) => {
     const decision = await next();
     try {
       if (!decision || typeof decision !== 'object') return decision;
@@ -1182,6 +1285,7 @@ export function apply(ctx, rawConfig = {}) {
                 deps: deps5,
                 payload: { ...payload, messages: [{ role: 'user', content: [{ type: 'text', text: trigger.quote }] }] },
                 decision,
+                lifecycle,
               });
               if (inner?.action === 'inject') {
                 state.injected += 1;
@@ -1204,7 +1308,7 @@ export function apply(ctx, rawConfig = {}) {
       if (config.oncePerSession && session && injected.has(session)) return decision;
 
       const deps = await resolveDeps(config);
-      const result = await decidePreStep({ ctx, config, deps, payload, decision });
+      const result = await decidePreStep({ ctx, config, deps, payload, decision, lifecycle });
       // enabled=false 时的 "skip disabled" 没有诊断价值，别写（任何库内调用都会带出来一堆噪声）。
       if (config.liveStats !== false && !(result.action === 'skip' && result.reason === 'disabled')) {
         const storeRootForStats = resolveStoreRoot(config);
@@ -1254,7 +1358,7 @@ export function apply(ctx, rawConfig = {}) {
   // D1（2026-11-02）：轮次收尾时增量刷新记忆库——不再只靠手动/首次 autoBuild。
   // 条件：开了 autoArchive、库存在、且 manifest.updatedAt 已超过 autoArchiveMinutes。
   try {
-    ctx.on('agent/turn-stopping', async () => {
+    listen('agent/turn-stopping', async () => {
       try {
         if (!config.autoArchive) return;
         const root = resolveStoreRoot(config);
@@ -1264,7 +1368,7 @@ export function apply(ctx, rawConfig = {}) {
         try { updated = Number(JSON.parse(fs.readFileSync(marker, 'utf8')).updatedAt) || 0; } catch { updated = 0; }
         const age = Date.now() - updated;
         if (age < config.autoArchiveMinutes * 60 * 1000) return;
-        scheduleAutoBuild({ ctx, storeRoot: root, deps: config.deps ?? null, reason: 'periodic' });
+        scheduleAutoBuild({ ctx, storeRoot: root, deps: config.deps ?? null, reason: 'periodic', lifecycle });
       } catch (error) {
         warn(ctx, `增量刷新检查失败：${String(error?.message ?? error)}`);
       }
@@ -1273,7 +1377,7 @@ export function apply(ctx, rawConfig = {}) {
     warn(ctx, `turn-stopping 钩子没挂上：${String(error?.message ?? error)}`);
   }
 
-  return { name, hook: HOOK, registered: true, config };
+  return makeEffect(true);
 }
 
 export function enforceStoreRoot(config = {}) {
