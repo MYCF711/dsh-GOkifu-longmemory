@@ -86,6 +86,8 @@ export function planMerge({ episodes = [], claims = [] } = {}) {
   }
   const toMerge = [];
   let childrenWithFailures = 0;
+  let crossScopeSkipped = 0;
+  let orphanFailures = 0;
   let alreadyMerged = 0;
   let failures = 0;
   for (const ep of episodes) {
@@ -99,9 +101,9 @@ export function planMerge({ episodes = [], claims = [] } = {}) {
     // 已归并 = 该子局已有 subagent-merge 的 support（按 subEpisode+seq 去重）
     if (merged.has(mergeKey(ep.id, 0)) || merged.has(ep.id)) { alreadyMerged += 1; continue; }
     const parent = ep?.parentSessionId ? [...byId.values()].find((x) => x.sessionId === ep.parentSessionId && Number(x.delegationDepth ?? 0) === 0) : null;
-    if (!parent) continue;
-    // 不许跨 scope（A5 必须仍 0）：父子作用域不一致 ⇒ 不归并
-    if (String(parent.scopeKey ?? "") !== String(ep.scopeKey ?? "")) continue;
+    if (!parent) { orphanFailures += 1; continue; }
+    // 不许跨 scope（A5 必须仍 0）：父子作用域不一致 ⇒ 不归并，**单列**（不并进 orphan）
+    if (String(parent.scopeKey ?? "") !== String(ep.scopeKey ?? "")) { crossScopeSkipped += 1; continue; }
     toMerge.push({ child: ep.id, parent: parent.id, failures: n });
   }
   return {
@@ -114,7 +116,50 @@ export function planMerge({ episodes = [], claims = [] } = {}) {
     mergeRateAfter: childrenWithFailures ? (alreadyMerged + toMerge.length) / childrenWithFailures : null,
     newClaims: 0,
     newSupports: toMerge.length,
+    crossScopeSkipped,
+    orphanFailures,
   };
+}
+
+/**
+ * T296 · 归并率三读数 + 恒等式闭合校验（**只读**，纯函数）。
+ * 恒等式：分母(childrenWithFailures) = 已归并(alreadyMerged) + orphanFailures + crossScopeSkipped
+ */
+export function reportOf(plan = {}) {
+  const children = Number(plan.childrenWithFailures ?? 0);
+  // "归并" = 已归并 + 待归并（toMerge 是"这一刀会补上"的那部分；恒等式因此闭合）
+  const merged = Number(plan.alreadyMerged ?? 0) + (plan.toMerge ?? []).length;
+  const orphan = Number(plan.orphanFailures ?? 0);
+  const crossScope = Number(plan.crossScopeSkipped ?? 0);
+  const sum = merged + orphan + crossScope;
+  return {
+    mergeRate: children > 0 ? Number((merged / children).toFixed(4)) : null,
+    orphanFailures: orphan,
+    crossScopeSkipped: crossScope,
+    merged,
+    childrenWithFailures: children,
+    identityClosed: children === sum,
+    identityGap: children - sum,
+    pending: (plan.toMerge ?? []).length,
+    alreadyMerged: Number(plan.alreadyMerged ?? 0),
+    mergeRateAfter: plan.mergeRateAfter ?? null,
+  };
+}
+
+/** 巡检行：mergeRate < 0.90 或恒等式不闭合 ⇒ 要看（fail-closed）。 */
+export function mergeRowOf(report, { threshold = 0.9, firstOrphans = [] } = {}) {
+  if (!report || typeof report !== 'object') return { ok: false, text: '| 子代理归并 | 拿不到 subagent-merge --report 的输出（fail-closed） | **要看** |' };
+  const rate = report.mergeRate;
+  const pct = Number.isFinite(rate) ? (rate * 100).toFixed(2) + '%' : 'n/a';
+  const body = `mergeRate ${pct} · orphan ${report.orphanFailures ?? '?'} · crossScope ${report.crossScopeSkipped ?? '?'}`;
+  const problems = [];
+  if (!Number.isFinite(rate)) problems.push('无分母（没有带失败的子局）');
+  else if (rate < threshold) problems.push(`归并率 ${pct} < 门槛 ${(threshold * 100).toFixed(0)}%`);
+  if (report.identityClosed === false) problems.push(`恒等式不闭合（差 ${report.identityGap}）`);
+  // orphan 本身不红（它是已知类别，不是失败）；只有红的时候才把它作为「原因」附上
+  if (problems.length && firstOrphans.length) problems.push(`orphan 首例 ${firstOrphans.slice(0, 3).join(', ')}`);
+  const ok = problems.length === 0;
+  return { ok, text: `| 子代理归并 | ${body}${ok ? '' : ` | **要看**：${problems.join('；')}`}${ok ? ' | 通过 |' : ' |'}`.replace(' | |', ' |') };
 }
 
 function opt(argv, name, fallback = null) {
@@ -125,6 +170,7 @@ function opt(argv, name, fallback = null) {
 function main(argv) {
   const storeRoot = path.resolve(opt(argv, 'store', path.join(HOME, 'memory-context')));
   const apply = argv.includes('--apply');
+  const report = argv.includes('--report');
   const json = argv.includes('--json');
   if (!fs.existsSync(storeRoot)) {
     console.error(`没有 store：${storeRoot}`);
@@ -138,6 +184,16 @@ function main(argv) {
   const store = createStore({ root: storeRoot });
   const episodes = store.list('episodes').map((x) => x?.record).filter(Boolean);
   const claims = store.list('claims').map((x) => x?.record).filter(Boolean);
+  if (report) {
+    const plan = planMerge({ episodes, claims });
+    const rep = reportOf(plan);
+    const orphans = (plan.toMerge ?? []).map((x) => x.child);
+    if (json) { console.log(JSON.stringify({ ...rep, firstOrphans: orphans.slice(0, 3) }, null, 2)); return 0; }
+    const row = mergeRowOf(rep, { firstOrphans: orphans });
+    console.log(row.text);
+    console.log(`恒等式：分母 ${rep.childrenWithFailures} = 归并 ${rep.merged} + orphan ${rep.orphanFailures} + crossScope ${rep.crossScopeSkipped} ⇒ ${rep.identityClosed ? '闭合' : '不闭合（差 ' + rep.identityGap + '）'}`);
+    return rep.identityClosed ? 0 : 3;
+  }
   const plan = planMerge({ episodes, claims });
 
   // A 步口径对照：旧口径（子串 pending/failed）vs 新口径

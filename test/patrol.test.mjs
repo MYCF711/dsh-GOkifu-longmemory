@@ -2,7 +2,7 @@
 // 钉住三件事：心跳行解析（gates-failed 在「原因」行）、审计摘要解析、判定规则（A5/A6/日期）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseLiveStats, parseAudit, verdictOf, semanticRowOf } from '../scripts/patrol.mjs';
+import { parseLiveStats, parseAudit, verdictOf, semanticRowOf, mergeRowOf } from '../scripts/patrol.mjs';
 
 const LIVE = [
   '共 100 行 · 2026/11/4 10:00 → 2026/11/4 23:00 · shadow 0 行',
@@ -118,4 +118,34 @@ test('T269 ⑤: 输出不是 JSON ⇒ 红（绝不静默略过）', () => {
   const r = semanticRowOf('boom', 2);
   assert.equal(r.ok, false);
   assert.match(r.text, /拿不到 semantic-check 的输出/);
+});
+
+// ── T296：子代理归并率闸门 ──────────────────────────────────────────────────
+test('T296 ①: mergeRate 98.49% + 恒等式闭合 ⇒ 通过', () => {
+  const r = mergeRowOf(JSON.stringify({ mergeRate: 0.9849, orphanFailures: 8, crossScopeSkipped: 0, identityClosed: true, identityGap: 0, firstOrphans: ['ep-1'] }), 0);
+  assert.equal(r.ok, true);
+  assert.match(r.text, /mergeRate 98\.49%/);
+  assert.match(r.text, /orphan 8/);
+  assert.match(r.text, /crossScope 0/);
+  assert.match(r.text, /通过/);
+});
+
+test('T296 ②: mergeRate 掉到 0.50 ⇒ **要看**（门槛 90%）', () => {
+  const r = mergeRowOf(JSON.stringify({ mergeRate: 0.5, orphanFailures: 3, crossScopeSkipped: 0, identityClosed: true, firstOrphans: ['ep-a', 'ep-b', 'ep-c'] }), 0);
+  assert.equal(r.ok, false);
+  assert.match(r.text, /< 门槛 90%/);
+  assert.match(r.text, /orphan 首例 ep-a, ep-b, ep-c/);
+});
+
+test('T296 ③: 恒等式不闭合 ⇒ **要看**（不静默略过）', () => {
+  const r = mergeRowOf(JSON.stringify({ mergeRate: 0.99, orphanFailures: 1, crossScopeSkipped: 0, identityClosed: false, identityGap: 5 }), 0);
+  assert.equal(r.ok, false);
+  assert.match(r.text, /恒等式不闭合（差 5）/);
+});
+
+test('T296 ④: 跑不动 / 超时 ⇒ **要看**（fail-closed）', () => {
+  assert.equal(mergeRowOf('', null).ok, false);
+  assert.match(mergeRowOf('', null).text, /超时/);
+  assert.equal(mergeRowOf('boom', 2).ok, false);
+  assert.match(mergeRowOf('boom', 2).text, /拿不到 subagent-merge/);
 });
