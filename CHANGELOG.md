@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.40（2026-11-06）
+
+### 读侧过期过滤（T298）—— ②③ 生效，① 标 known-limitation
+**② `state === 'stale'` ⇒ 不进卡** ✅ · **③ `preconditions` 重跑通过 ⇒ 可复活** ✅
+**① `validUntil` 过期 ⇒ 不进卡** ❌ **标为 known-limitation 并 `test.skip`**（不假装通过）。
+
+**① 为什么没实现（如实）**：兜底分支（`view.claimsById` 查不到该 claim）**没有记录可判 `validUntil`**，
+`pickClaim` 内也拿不到 store；要修必须传 store 或上移过滤，**上移会误杀合法 hit**（T298b 已证）。
+**三次尝试都没成 ⇒ 按止损线回退，不再第四轮**（知识库 62：停止规则）。
+
+**影响面：0** —— 真库全量核过 `{"stale":0,"expired":0}`，
+**当前没有任何 claim 会被这条路径漏掉** ⇒ 这功能是**防未来**，不是修当前问题。
+继续投入的前提已写进证据：出现第一条 stale/过期 claim，或视图构建被重构。
+
+### 验证
+64 条 inject 测试（63 pass / 0 fail / 1 skip）；`check PASS`（64 篇）。
+
 ## 0.2.39（2026-11-06）
 
 ### 知识库 64：记忆的陈旧与过期（T297）
