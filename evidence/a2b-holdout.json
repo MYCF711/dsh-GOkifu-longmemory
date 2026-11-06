@@ -42,7 +42,7 @@
       }
     ]
   },
-  "generatedAt": 1793948408342,
+  "generatedAt": 1793950509709,
   "claimsCount": 1578,
   "n": 114,
   "errors": 0,
@@ -97,6 +97,7 @@
     {
       "itemId": "self:ep-c0a5847a",
       "at": 1793794008787,
+      "signalHash": "07561eb8813c18390ca21638f5082b94bebf2ed6c4266c52ef6a30f41228eb56",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-c0a5847a",
@@ -183,6 +184,7 @@
     {
       "itemId": "self:ep-543cf0b2",
       "at": 1793813634739,
+      "signalHash": "6e6809c70eb4fad795e46c5934d15957741ca10d89e8989edecb61cf6c8f35d7",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-543cf0b2",
@@ -269,6 +271,7 @@
     {
       "itemId": "self:ep-bc4ab3cb",
       "at": 1793648500548,
+      "signalHash": "179236d9edc4f6440a8c9257f79b28f8f4cd7f0f0ff29702562ca9b76fcf5853",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-bc4ab3cb",
@@ -329,6 +332,7 @@
     {
       "itemId": "self:ep-9becea64",
       "at": 1793749483684,
+      "signalHash": "e29972dbf0b1f24ff5021723c7e737c356c2a7ab3eac884bcb2e721af1aaa3ee",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-9becea64",
@@ -363,6 +367,7 @@
     {
       "itemId": "self:ep-a9f16ff0",
       "at": 1793749481945,
+      "signalHash": "60e3a0dbf412bfdc6edf18b9e7ef4e4c92d083120581fbd6066e55a68c7b7154",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-a9f16ff0",
@@ -423,6 +428,7 @@
     {
       "itemId": "self:ep-8a73e06b",
       "at": 1793884690273,
+      "signalHash": "bd692103a785cf10192bde3985567f1dd72830523ea40be0894f339812fe6335",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8a73e06b",
@@ -457,6 +463,7 @@
     {
       "itemId": "self:ep-00b50089",
       "at": 1793685893725,
+      "signalHash": "8e2d86ae10fafd95259606d377a17615c99b3fdb96c5bba97b1ae61fd0612201",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-00b50089",
@@ -543,6 +550,7 @@
     {
       "itemId": "self:ep-8cc34e32",
       "at": 1793884703908,
+      "signalHash": "5e9461b72cc0da388162913eaa8e5dce354a25d595a2f55e02f6df539c76d650",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8cc34e32",
@@ -577,6 +585,7 @@
     {
       "itemId": "self:ep-aa52f421",
       "at": 1793793531001,
+      "signalHash": "d1d89b9a8ddfaf3ba9acf1588eb0053ca3462a6743c55407d50c6529f4cb1d77",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-aa52f421",
@@ -650,6 +659,7 @@
     {
       "itemId": "self:ep-1e82afca",
       "at": 1793884702487,
+      "signalHash": "4f591eec59cc9cc4725befe40ecb6a7b75abce521422c5e7bce470f4b284141c",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-1e82afca",
@@ -710,6 +720,7 @@
     {
       "itemId": "self:ep-32a78774",
       "at": 1793749472535,
+      "signalHash": "3d4d75d694f22a124f80a751f5c8e7e7758d25404a6f3b6f282f162f34c06a30",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-32a78774",
@@ -757,6 +768,7 @@
     {
       "itemId": "self:ep-62bcb7d2",
       "at": 1793884703904,
+      "signalHash": "6059950a53f575d1774cc596ed7c99116190e471620ad332f19087f3938d0861",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-62bcb7d2",
@@ -843,6 +855,7 @@
     {
       "itemId": "self:ep-f7f835b1",
       "at": 1793639580406,
+      "signalHash": "439c8816d60de64bf84835ba6ba80f683f02023f90d67eee5092138e64066075",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-f7f835b1",
@@ -890,6 +903,7 @@
     {
       "itemId": "self:ep-0eba65b1",
       "at": 1793727589035,
+      "signalHash": "155f04365eb1672d3fa9eba8c8d444d838fbb575788d17bcd07493de2ccded0c",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-0eba65b1",
@@ -963,6 +977,7 @@
     {
       "itemId": "self:ep-601f0764",
       "at": 1793749483041,
+      "signalHash": "8067e92eef0b5776345319f60bcbd1c57f02537448c6865cbb443e11197fc199",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-601f0764",
@@ -1049,6 +1064,7 @@
     {
       "itemId": "self:ep-bde12afa",
       "at": 1793860129558,
+      "signalHash": "921b6ffdededed469a366a7f37704abae398efef415b9dd8ba784d53e769ec6c",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-bde12afa",
@@ -1096,6 +1112,7 @@
     {
       "itemId": "self:ep-4480912b",
       "at": 1793872899030,
+      "signalHash": "f848303d32777628ae0f800f32fbaad9b29f5b37e7582e4f4462291d28a1a788",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-4480912b",
@@ -1169,6 +1186,7 @@
     {
       "itemId": "self:ep-a1400ad0",
       "at": 1793884694815,
+      "signalHash": "65753b4a4d9042bd0d0e63d4a2c45e74c86ea2cfb7c7a01b2ab57c5c085beabc",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-a1400ad0",
@@ -1255,6 +1273,7 @@
     {
       "itemId": "self:ep-03bc3e53",
       "at": 1793628876556,
+      "signalHash": "0e3722e17e6a435f4114b5dd7fa08fabe64f74d7a5483ef459ce03fde829f12c",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-03bc3e53",
@@ -1302,6 +1321,7 @@
     {
       "itemId": "self:ep-e415e0f1",
       "at": 1793870844059,
+      "signalHash": "14f2aca86c1528e3b07e65a430780fb031c7a31855f7487b7bdb05e1489fbf23",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e415e0f1",
@@ -1388,6 +1408,7 @@
     {
       "itemId": "self:ep-2ddf0a19",
       "at": 1793796967216,
+      "signalHash": "99cf1b70f569536beab1c3c9323b9c1147435837e74379a0c558ec1e67241013",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-2ddf0a19",
@@ -1474,6 +1495,7 @@
     {
       "itemId": "self:ep-1286ce28",
       "at": 1793560328080,
+      "signalHash": "446805f2d7b42085a92c03980e5f385bb0c6115de9c8004868a66ef9e09fc338",
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-1286ce28",
@@ -1521,6 +1543,7 @@
     {
       "itemId": "self:ep-9d375d75",
       "at": 1793591538489,
+      "signalHash": "6eb5b44211bbf48470fc6eeacaaad021d0ae76a0cce60bec7cb428d8d69caf80",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-9d375d75",
@@ -1568,6 +1591,7 @@
     {
       "itemId": "self:ep-a09a4535",
       "at": 1793649174776,
+      "signalHash": "b1a092df7f5497adeb4fae8e3341661622f3a2cd234a03e0266c4880fbaf3f10",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-a09a4535",
@@ -1654,6 +1678,7 @@
     {
       "itemId": "self:ep-a1aab8ef",
       "at": 1793540581865,
+      "signalHash": "91882ba5613751a13f7c9f07bdd90e33f2a9a9460344d776cbec7ecda680cad6",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-a1aab8ef",
@@ -1701,6 +1726,7 @@
     {
       "itemId": "self:ep-e336b9dd",
       "at": 1793601269282,
+      "signalHash": "6d33163675ba80bdc7be744a1086eae4bfb82af95d89c877f6b2a3dd3fa13dd3",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e336b9dd",
@@ -1787,6 +1813,7 @@
     {
       "itemId": "self:ep-7bba753b",
       "at": 1793748715169,
+      "signalHash": "ef8fae2e7eb3373cf22fcc39861f226f88c6401b36c3ec31745e8006b7a59d2e",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-7bba753b",
@@ -1821,6 +1848,7 @@
     {
       "itemId": "self:ep-25d39e67",
       "at": 1793749488735,
+      "signalHash": "1afd8d455d3bc64638ecf42f99abed23f5aa943a8a74101f35d1d242ceecc182",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-25d39e67",
@@ -1868,6 +1896,7 @@
     {
       "itemId": "self:ep-3a3fb03c",
       "at": 1793749380451,
+      "signalHash": "849d54dd24d0a7b8d941ce46e0473d2c776a75c7bd3dc65d10838273e0acfc71",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-3a3fb03c",
@@ -1928,6 +1957,7 @@
     {
       "itemId": "self:ep-d70b7c2f",
       "at": 1793603754863,
+      "signalHash": "3cced8cd885894a9f146b79b9a886e019689633956fe6ee65d7709e35f8499f1",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-d70b7c2f",
@@ -1992,6 +2022,7 @@
     {
       "itemId": "self:ep-252091a4",
       "at": 1793776818481,
+      "signalHash": "286101c0c53bc338d32bba11140a3f18887d1dc109ab7ca464f82a9a6984aaad",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-252091a4",
@@ -2026,6 +2057,7 @@
     {
       "itemId": "self:ep-edf70ff3",
       "at": 1793814382471,
+      "signalHash": "4b7d3802a367dd41321aa9eb33bf3e28c69b9b905195f70c6d1781f2bceaa4e6",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-edf70ff3",
@@ -2099,6 +2131,7 @@
     {
       "itemId": "self:ep-fdbfa78c",
       "at": 1793749486432,
+      "signalHash": "59cc1162d5431f67496960b91a1ee0e3421145056485e59fefec0fcd6440203b",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-fdbfa78c",
@@ -2172,6 +2205,7 @@
     {
       "itemId": "self:ep-8a787c9f",
       "at": 1793794819798,
+      "signalHash": "903220c1409cad659fa08d7bfa5b00e3b66fbe27d38e356f552c55c37ed512a3",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8a787c9f",
@@ -2258,6 +2292,7 @@
     {
       "itemId": "self:ep-16d5a1e2",
       "at": 1793780138700,
+      "signalHash": "2093221a38bb343d07cba663ea4f81eeeab6a92f6e01bf3683e03c9a087092a3",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-16d5a1e2",
@@ -2331,6 +2366,7 @@
     {
       "itemId": "self:ep-135c7f7d",
       "at": 1793782264357,
+      "signalHash": "a40a434526b41455dd9a3fefcc759405a4873e25fa89d92a5f2272e35122c787",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-135c7f7d",
@@ -2378,6 +2414,7 @@
     {
       "itemId": "self:ep-9c2cbede",
       "at": 1793810706179,
+      "signalHash": "c8fe80c3f9921f15aa8018dd00661b9bdf292c29d6c6aeccb2c8814fc550e5f6",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-9c2cbede",
@@ -2451,6 +2488,7 @@
     {
       "itemId": "self:ep-bf742774",
       "at": 1793791406739,
+      "signalHash": "09052d69f78c6fec80aa4ac0d4872e6a17a0befca990b54949467f9348ce4782",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-bf742774",
@@ -2537,6 +2575,7 @@
     {
       "itemId": "self:ep-eb9b65ea",
       "at": 1793864765201,
+      "signalHash": "5029416cde2631461585b3776df6513251504e24e2354eca8d0ad6409e80ae24",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-eb9b65ea",
@@ -2610,6 +2649,7 @@
     {
       "itemId": "self:ep-dcc6efd2",
       "at": 1793871655809,
+      "signalHash": "78ddf956170cde2cb2d5489c6706e2512c0c6fe93af45d0cc01940fb0fd0b6fb",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-dcc6efd2",
@@ -2670,6 +2710,7 @@
     {
       "itemId": "self:ep-226dbf4f",
       "at": 1793793259547,
+      "signalHash": "76a7c4c7779b9d9f6ef6e55d9849abf936c4d2053dbd7449856c9d00b352dfd3",
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-226dbf4f",
@@ -2700,19 +2741,6 @@
           "episode": "ep-226dbf4f"
         },
         {
-          "claimId": "c-a0463d94",
-          "related": true,
-          "strict": true,
-          "strictTokens": true,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 13,
-          "bigram": 4,
-          "bigramRaw": 5,
-          "shared": [],
-          "episode": "ep-226dbf4f"
-        },
-        {
           "claimId": "c-141493a7",
           "related": false,
           "strict": false,
@@ -2724,12 +2752,26 @@
           "bigramRaw": 5,
           "shared": [],
           "episode": "ep-c0a5847a"
+        },
+        {
+          "claimId": "c-a0463d94",
+          "related": true,
+          "strict": true,
+          "strictTokens": true,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 13,
+          "bigram": 4,
+          "bigramRaw": 5,
+          "shared": [],
+          "episode": "ep-226dbf4f"
         }
       ]
     },
     {
       "itemId": "self:ep-08da81e8",
       "at": 1793860130830,
+      "signalHash": "500b71cd3e5fddc46eaf4e148356afb0f84cfe3c169c5038a572682528b25a16",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-08da81e8",
@@ -2803,6 +2845,7 @@
     {
       "itemId": "self:ep-bd0161a1",
       "at": 1793690931727,
+      "signalHash": "241e587c562f4bf137e3d8f00305afba13cff0a0f84cc12800cbda4491f61350",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-bd0161a1",
@@ -2889,6 +2932,7 @@
     {
       "itemId": "self:ep-1cf2b33f",
       "at": 1793747489606,
+      "signalHash": "8c314efe4c8e418370ff9255cb313c8614422a9467be25a678c75d7cd647de05",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-1cf2b33f",
@@ -2949,6 +2993,7 @@
     {
       "itemId": "self:ep-5e4ee30c",
       "at": 1793749490013,
+      "signalHash": "a45c24437e1763379d3df7a11e06ffe40caa3479ccac1eac854e149b4d386ef1",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-5e4ee30c",
@@ -3035,6 +3080,7 @@
     {
       "itemId": "self:ep-5cf57bb4",
       "at": 1793749480761,
+      "signalHash": "c75bf85ba0b7d08b6ccbca655e9baa224ea0cbb265ab6526749b9f614e529164",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-5cf57bb4",
@@ -3121,6 +3167,7 @@
     {
       "itemId": "self:ep-2955fa30",
       "at": 1793713370720,
+      "signalHash": "a415e7f6ce17dbf16a3579cbc441e937356881ff1aa7108ba77d8d478b6d055e",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-2955fa30",
@@ -3207,6 +3254,7 @@
     {
       "itemId": "self:ep-b8a92777",
       "at": 1793749476245,
+      "signalHash": "1432d36f71ade034c1fc9e524ee3dda679debbd4f9049614abe29d1972fc5f1e",
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-b8a92777",
@@ -3254,6 +3302,7 @@
     {
       "itemId": "self:ep-fbb43571",
       "at": 1793744418047,
+      "signalHash": "cf1b84ea862033dbf348c0a75c5fb1e1c3bc451102b1d991a0f1b6c825e79c08",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-fbb43571",
@@ -3327,6 +3376,7 @@
     {
       "itemId": "self:ep-9ce43a15",
       "at": 1793689008695,
+      "signalHash": "474920262c1f1db1a685aa8d82ffa3b6ea6a5f51f8fa8545cf054522df78892f",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-9ce43a15",
@@ -3400,6 +3450,7 @@
     {
       "itemId": "self:ep-e5eb8531",
       "at": 1793588948171,
+      "signalHash": "db2987c5459358c3b663477270abdb9d689e6262f4b60ede8c0fe9d807f78e54",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e5eb8531",
@@ -3486,6 +3537,7 @@
     {
       "itemId": "self:ep-4188510d",
       "at": 1793685266639,
+      "signalHash": "0b326c13994dc1ecc23668654623425ecb321afe0c97a19e2c5504ec45b380b6",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-4188510d",
@@ -3559,6 +3611,7 @@
     {
       "itemId": "self:ep-c460d468",
       "at": 1793734874625,
+      "signalHash": "781f514dfa8587ae07ac5ca159cdf99a74a41023eec1ed5f209b243ca0260692",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-c460d468",
@@ -3632,6 +3685,7 @@
     {
       "itemId": "self:ep-41514e25",
       "at": 1793801178045,
+      "signalHash": "cf63838ac112b4ac1405c8dbade87083c526d792c89cb51ac966a9573cd20adb",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-41514e25",
@@ -3705,6 +3759,7 @@
     {
       "itemId": "self:ep-b5586316",
       "at": 1793815845516,
+      "signalHash": "6d198545b37422c88d82a94717b2718666dd4a37d68fb0fd2cafe734cfd705d0",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-b5586316",
@@ -3791,6 +3846,7 @@
     {
       "itemId": "self:ep-d62a520c",
       "at": 1793705841067,
+      "signalHash": "24079f9c8d5795ccb8c688a968c129d5fc6e59b187e7e60507e2f77b243e3144",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-d62a520c",
@@ -3877,6 +3933,7 @@
     {
       "itemId": "self:ep-f46d6330",
       "at": 1793646946327,
+      "signalHash": "96b59e5989c6b61c763e409a8822853e412ab3b9b1afa2a3121572525e378cac",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-f46d6330",
@@ -3937,6 +3994,7 @@
     {
       "itemId": "self:ep-75e7347e",
       "at": 1793561353331,
+      "signalHash": "97d7de5cb0918d8b167871e351ce944c37670e385f190aa999e7d3c8137a16ff",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-75e7347e",
@@ -3997,6 +4055,7 @@
     {
       "itemId": "self:ep-fdd814b1",
       "at": 1793750453460,
+      "signalHash": "8c2a79fa8f834f52267c148b7212564c32cb76aed6272233a5d64028d1ff7897",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-fdd814b1",
@@ -4083,6 +4142,7 @@
     {
       "itemId": "self:ep-ad38cf8c",
       "at": 1793705839851,
+      "signalHash": "c643ec7b7248f19f83210315c671be3735a2cd9adedbefe8912e9ee2b0ee2324",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-ad38cf8c",
@@ -4143,6 +4203,7 @@
     {
       "itemId": "self:ep-ed98c462",
       "at": 1793749484269,
+      "signalHash": "513868faa71c049f9b5758acdc186851cdccbdcd58815035fa2f4751c0bc2ead",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-ed98c462",
@@ -4198,6 +4259,7 @@
     {
       "itemId": "self:ep-be4fc599",
       "at": 1793632284145,
+      "signalHash": "a5ca31979dc0c9b218284dca1171f9f59cdbe6be9d1bcd9d09f9cee6b7b2412b",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-be4fc599",
@@ -4271,6 +4333,7 @@
     {
       "itemId": "self:ep-147f0bf4",
       "at": 1793791484039,
+      "signalHash": "6e6b5ac55152233dd33aceae602e881b123e6e3b24ec7d5722408251c43b3f57",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-147f0bf4",
@@ -4344,6 +4407,7 @@
     {
       "itemId": "self:ep-22d3bd16",
       "at": 1793682556805,
+      "signalHash": "02df943a59767c810ff4f5884c4b13ed14efa119f3b5dee4cefbac23154663e2",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-22d3bd16",
@@ -4430,6 +4494,7 @@
     {
       "itemId": "self:ep-d52b6ca5",
       "at": 1793648573114,
+      "signalHash": "62300e67ffac464b4a7b9054bfca84d61d374f2844586521748ac527a843d4e6",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-d52b6ca5",
@@ -4464,6 +4529,7 @@
     {
       "itemId": "self:ep-e23a6a05",
       "at": 1793712320497,
+      "signalHash": "341673c76ba04b72eb81f606737a0913fa6ec810ff0fcb752343ce699e4f66be",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e23a6a05",
@@ -4537,6 +4603,7 @@
     {
       "itemId": "self:ep-7520721a",
       "at": 1793559835468,
+      "signalHash": "c5497d8aea3e99a2ec9bff4cef325db89f19c909f1fc10e6ce219918d4819f77",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-7520721a",
@@ -4623,6 +4690,7 @@
     {
       "itemId": "self:ep-1710f716",
       "at": 1793517294640,
+      "signalHash": "81d1f66d5bbb0d71831a3217bb400a5e9605ef20a0317689ec8075d7d91d234e",
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-1710f716",
@@ -4683,6 +4751,7 @@
     {
       "itemId": "self:ep-b718aab2",
       "at": 1793726654086,
+      "signalHash": "a8c46ddb7651ec3c5514c102517a5b0047fd2016ee9e390e2cf74bc23a6ca34f",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-b718aab2",
@@ -4769,6 +4838,7 @@
     {
       "itemId": "self:ep-f4e6c960",
       "at": 1793814471915,
+      "signalHash": "c16471eedb45b1a779f58fd324091f50468dfe680ad9626dc0493ac4becb0d79",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-f4e6c960",
@@ -4855,6 +4925,7 @@
     {
       "itemId": "self:ep-8a27caaa",
       "at": 1793793242962,
+      "signalHash": "41277488e091be3ee88bdde65ee4253393de5d7ae54e1f8c7a9fdf39a7c7e902",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8a27caaa",
@@ -4915,6 +4986,7 @@
     {
       "itemId": "self:ep-1f814ed5",
       "at": 1793687927325,
+      "signalHash": "5cced3719fba828c9b7f4626d19abc94b259be3d178c676b306a901ad8ef9def",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-1f814ed5",
@@ -4988,6 +5060,7 @@
     {
       "itemId": "self:ep-b4664e8f",
       "at": 1793696597355,
+      "signalHash": "218f16948a286630a181a8d06010b2df1b80e09b288fe9ced327eac1edd04ded",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-b4664e8f",
@@ -5061,6 +5134,7 @@
     {
       "itemId": "self:ep-858445da",
       "at": 1793688944353,
+      "signalHash": "e6d343f87444e8ef05baa643d92ccb35d478cd42ab1be65c4ac569b7ef54e02e",
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-858445da",
@@ -5147,6 +5221,7 @@
     {
       "itemId": "self:ep-f0e51ab3",
       "at": 1793802505287,
+      "signalHash": "5fedfcbf01b44baf4cb82e187744eeecd8b2f11b89fbcc6e8d4509f3c65c5a76",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-f0e51ab3",
@@ -5233,6 +5308,7 @@
     {
       "itemId": "self:ep-2209a95a",
       "at": 1793879332755,
+      "signalHash": "6e6809c70eb4fad795e46c5934d15957741ca10d89e8989edecb61cf6c8f35d7",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-2209a95a",
@@ -5306,6 +5382,7 @@
     {
       "itemId": "self:ep-0ef39d3a",
       "at": 1793603724508,
+      "signalHash": "22e0869842de242ca9bbc77f3c6ba7467e8d16eb15e33f5ac2597a43638b3567",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-0ef39d3a",
@@ -5353,6 +5430,7 @@
     {
       "itemId": "self:ep-3618a34d",
       "at": 1793517386091,
+      "signalHash": "49c36c721caa8eb81895f69bd78f40818023932687a99933d7f7930837265292",
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-3618a34d",
@@ -5439,6 +5517,7 @@
     {
       "itemId": "self:ep-c7f6b6d9",
       "at": 1793781625216,
+      "signalHash": "c82303873d39c181906b580bbee215ed2fc9b57e4bb54c28a893cd84d454441c",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-c7f6b6d9",
@@ -5512,6 +5591,7 @@
     {
       "itemId": "self:ep-62b1cd78",
       "at": 1793786662604,
+      "signalHash": "e9516a3038965ff37bf7af0e9d6522f6db25ab7f596b91651301784f236612cf",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-62b1cd78",
@@ -5585,6 +5665,7 @@
     {
       "itemId": "self:ep-1f6c629b",
       "at": 1793679380674,
+      "signalHash": "37c98f548a2e5710f2b69d029a5f9674350943bfe78a48dc006a2ea3af13838b",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-1f6c629b",
@@ -5671,6 +5752,7 @@
     {
       "itemId": "self:ep-d512e747",
       "at": 1793633371966,
+      "signalHash": "1b001945b5229f3ba86e45985e4f03787b99c7fe0aedebd3f81c6f4e85411025",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-d512e747",
@@ -5744,6 +5826,7 @@
     {
       "itemId": "self:ep-294c4c1d",
       "at": 1793731668152,
+      "signalHash": "e9f9a9c31447ea5e2e5ad0011e7398d86e8958db95529e4de022b9c10017f6d7",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-294c4c1d",
@@ -5817,6 +5900,7 @@
     {
       "itemId": "self:ep-28168c77",
       "at": 1793747209879,
+      "signalHash": "d07943951e52e7434fe9fde644df5881a04334282723ba2d81cb77411d54ea2a",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-28168c77",
@@ -5903,6 +5987,7 @@
     {
       "itemId": "self:ep-bdd26050",
       "at": 1793713602252,
+      "signalHash": "6e6809c70eb4fad795e46c5934d15957741ca10d89e8989edecb61cf6c8f35d7",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-bdd26050",
@@ -5989,6 +6074,7 @@
     {
       "itemId": "self:ep-ee0d63a9",
       "at": 1793536572636,
+      "signalHash": "d5ddd17c30c94b7026a434c25fd0185dc13b6364e6d21ed223ed44a767876cae",
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-ee0d63a9",
@@ -6023,6 +6109,7 @@
     {
       "itemId": "self:ep-685dfadb",
       "at": 1793686529486,
+      "signalHash": "55a3bea1ccabaa8e43ef460edacd55d29b4ea3403d2f00fb14d98a60c46c57d7",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-685dfadb",
@@ -6043,6 +6130,7 @@
     {
       "itemId": "self:ep-3f03c71c",
       "at": 1793800791704,
+      "signalHash": "bb3e8423d941322166ad2fcfbece1a56363ac7992b9d51fa1fd4d6a908013d43",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-3f03c71c",
@@ -6116,6 +6204,7 @@
     {
       "itemId": "self:ep-5e91a1bc",
       "at": 1793746036673,
+      "signalHash": "c776ba22b3b5ba33a5ac2b83ba049cf3e348fbe6e41f427d0c20af8b4e734dc3",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-5e91a1bc",
@@ -6202,6 +6291,7 @@
     {
       "itemId": "self:ep-1a49c80a",
       "at": 1793532511905,
+      "signalHash": "3a3b214e3a62253494a68e3fd83a484e3214bbe2c72aadadf32cb6ef492aef5e",
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-1a49c80a",
@@ -6288,6 +6378,7 @@
     {
       "itemId": "self:ep-6294ad9f",
       "at": 1793540238968,
+      "signalHash": "bd41155b809de7372379044ecc8fe1a53e60d240f61c103417b23c3a6cbf1029",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-6294ad9f",
@@ -6374,6 +6465,7 @@
     {
       "itemId": "self:ep-25af318d",
       "at": 1793648520200,
+      "signalHash": "1f9a4ff26e037fa4b1cb4b18d6628738c9e987dfcc48c619b777cafb05101522",
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-25af318d",
@@ -6460,6 +6552,7 @@
     {
       "itemId": "self:ep-411a2729",
       "at": 1793530541657,
+      "signalHash": "fc770e411d1140644c66338dd380e3669adc3975fb544b468d0d75530a9b5df8",
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-411a2729",
@@ -6546,6 +6639,7 @@
     {
       "itemId": "self:ep-e5a98b06",
       "at": 1793713114330,
+      "signalHash": "71f402e280c17126eb4a2f09cff7d8b6f5af4021b94cce2dc94b41090fcb532b",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e5a98b06",
@@ -6619,6 +6713,7 @@
     {
       "itemId": "self:ep-821c88d9",
       "at": 1793817069955,
+      "signalHash": "961af2f25459abcd4bea20031283e5ee436fc5a441f506e5abe2b33c23eb3d93",
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-821c88d9",
@@ -6694,6 +6789,7 @@
     {
       "itemId": "repeat:ep-8a73e06b:257",
       "at": 1793577600000,
+      "signalHash": "bac059ef1ce068262611e2c1f6d46084d96db30608db236f82f39bf2a5eb99d3",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -6728,6 +6824,7 @@
     {
       "itemId": "repeat:ep-9becea64:257",
       "at": 1793577600000,
+      "signalHash": "bac059ef1ce068262611e2c1f6d46084d96db30608db236f82f39bf2a5eb99d3",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9becea64",
@@ -6814,6 +6911,7 @@
     {
       "itemId": "repeat:ep-8a73e06b:342",
       "at": 1793577600000,
+      "signalHash": "46792986af19e9675ca88e5cbad38c19f25da977424cea63dac75fbbc2829aac",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -6848,6 +6946,7 @@
     {
       "itemId": "repeat:ep-a09a4535:342",
       "at": 1793577600000,
+      "signalHash": "46792986af19e9675ca88e5cbad38c19f25da977424cea63dac75fbbc2829aac",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
@@ -6895,6 +6994,7 @@
     {
       "itemId": "repeat:ep-ed98c462:342",
       "at": 1793577600000,
+      "signalHash": "46792986af19e9675ca88e5cbad38c19f25da977424cea63dac75fbbc2829aac",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-ed98c462",
@@ -6942,6 +7042,7 @@
     {
       "itemId": "repeat:ep-a09a4535:257",
       "at": 1793577600000,
+      "signalHash": "5854855218c35b00283eb35bd8276df25bbc1180abdcce82c2c3128dee303397",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
@@ -7002,6 +7103,7 @@
     {
       "itemId": "repeat:ep-8a73e06b:338",
       "at": 1793577600000,
+      "signalHash": "662d6c7e397d333a4863160eee6f4ce5a8f4fc1ae6df6f4139962ef9651e1ed2",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -7040,6 +7142,7 @@
     {
       "itemId": "repeat:ep-9d375d75:338",
       "at": 1793577600000,
+      "signalHash": "662d6c7e397d333a4863160eee6f4ce5a8f4fc1ae6df6f4139962ef9651e1ed2",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9d375d75",
@@ -7078,6 +7181,7 @@
     {
       "itemId": "repeat:ep-a09a4535:338",
       "at": 1793577600000,
+      "signalHash": "662d6c7e397d333a4863160eee6f4ce5a8f4fc1ae6df6f4139962ef9651e1ed2",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
@@ -7116,6 +7220,7 @@
     {
       "itemId": "repeat:ep-e336b9dd:338",
       "at": 1793577600000,
+      "signalHash": "662d6c7e397d333a4863160eee6f4ce5a8f4fc1ae6df6f4139962ef9651e1ed2",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-e336b9dd",
@@ -7154,6 +7259,7 @@
     {
       "itemId": "repeat:ep-9becea64:111",
       "at": 1793577600000,
+      "signalHash": "0652c1337143b12d3ce078c444d22f70fe1bfaa1aec98aee4b7af6d931f67410",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9becea64",
@@ -7186,7 +7292,7 @@
           "episode": "ep-75e7347e"
         },
         {
-          "claimId": "c-34a72797",
+          "claimId": "c-1293d2a5",
           "related": true,
           "strict": true,
           "strictTokens": true,
@@ -7201,7 +7307,7 @@
           "episode": "ep-d70b7c2f"
         },
         {
-          "claimId": "c-1293d2a5",
+          "claimId": "c-34a72797",
           "related": true,
           "strict": true,
           "strictTokens": true,
@@ -7220,6 +7326,7 @@
     {
       "itemId": "repeat:ep-ed98c462:111",
       "at": 1793577600000,
+      "signalHash": "0652c1337143b12d3ce078c444d22f70fe1bfaa1aec98aee4b7af6d931f67410",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-ed98c462",
@@ -7252,7 +7359,7 @@
           "episode": "ep-75e7347e"
         },
         {
-          "claimId": "c-34a72797",
+          "claimId": "c-1293d2a5",
           "related": true,
           "strict": true,
           "strictTokens": true,
@@ -7267,7 +7374,7 @@
           "episode": "ep-d70b7c2f"
         },
         {
-          "claimId": "c-1293d2a5",
+          "claimId": "c-34a72797",
           "related": true,
           "strict": true,
           "strictTokens": true,
@@ -7286,6 +7393,7 @@
     {
       "itemId": "repeat:ep-8a73e06b:214",
       "at": 1793577600000,
+      "signalHash": "5ead56e4f51f9acf5c696b92b9719708791b6a86f66d352318edbe60294879ac",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -7333,6 +7441,7 @@
     {
       "itemId": "repeat:ep-c0a5847a:257",
       "at": 1793577600000,
+      "signalHash": "37a5422a6520fb7208051a724a3db6c07b29b82531a47f5561c31e6224048519",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-c0a5847a",
@@ -7406,6 +7515,7 @@
     {
       "itemId": "repeat:ep-e336b9dd:84",
       "at": 1793577600000,
+      "signalHash": "4b8dd0a14425cc77e28321f3e69e9f2903c7dbd110883e6fbd3dc5ca6a07c2ca",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-e336b9dd",
@@ -7479,6 +7589,7 @@
     {
       "itemId": "repeat:ep-c0a5847a:214",
       "at": 1793577600000,
+      "signalHash": "4cc6999fc644a1471bd2a9bbedb742a82da44734a93df7e98585b0b791b215c8",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-c0a5847a",
@@ -7513,6 +7624,7 @@
     {
       "itemId": "repeat:ep-8a73e06b:214",
       "at": 1793577600000,
+      "signalHash": "7f12fbb8b3ce2409b84e473dbce7228d6bb8f44e385b068e0a352adbbf68d42f",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -7560,6 +7672,7 @@
     {
       "itemId": "repeat:ep-8a73e06b:85",
       "at": 1793577600000,
+      "signalHash": "a668717d384b608c5725b34a8cc4b2b953189bebc264299b97e612dbec9e328f",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -7597,6 +7710,7 @@
     {
       "itemId": "repeat:ep-8a73e06b:269",
       "at": 1793577600000,
+      "signalHash": "2447b3b41b4780462079fc8798a2743630cf50aa53e729be16cf05bfbe3aa242",
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
