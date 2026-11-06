@@ -126,3 +126,26 @@ test('T344 ⑥ 机械判复发：没有失败事件 ⇒ recurred=false（不编�
   assert.equal(judgeRecurrence({ tasks, events: [] })[0].recurred, false);
   assert.deepEqual(judgeRecurrence({ tasks: [], events: [] }), []);
 });
+
+// ─── T352 · 出题必须取**因果**那次 tool/call，不是"最近的前一个" ───
+test('T352 ① seq 指向 assistant 消息时，用 toolCallId 关联到因果调用（不是最近的前一个）', () => {
+  const events = [
+    call(10, 'old', 'bash', { command: 'echo unrelated' }),          // 与失败无关的旧调用
+    { type: 'assistant/message', seq: 11, data: { message: { role: 'assistant', content: [{ type: 'reasoning', text: 'the check failed' }] } } },
+    call(13, 'c9', 'bash', { command: 'node scripts/check.mjs' }),   // 因果调用
+    result(14, 'c9', 'Error: boom'),                                 // 真失败在它后面
+  ];
+  const p = actionPromptAt(events, 11);
+  assert.ok(p && p.includes('node scripts/check.mjs'), `要取因果调用，实际：${p}`);
+  assert.ok(!String(p).includes('unrelated'), `不许退化成最近的前一个：${p}`);
+});
+
+test('T352 ② 只有 job_id 的工具（job_output）也要能出题', () => {
+  const events = [
+    call(20, 'j1', 'job_output', { job_id: 'bash-abc123', wait: true }),
+    result(21, 'j1', 'Error: unknown job bash-abc123'),
+  ];
+  const p = actionPromptAt(events, 21);
+  assert.ok(p && p.includes('bash-abc123'), `空参数的题没用，实际：${p}`);
+});
+
