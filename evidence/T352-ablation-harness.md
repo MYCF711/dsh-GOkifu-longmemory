@@ -13,8 +13,8 @@
 export ELECTRON_RUN_AS_NODE=1
 export DSH_HOME="<隔离 home>"
 export MAGPIE_GATEWAY_KEY="<任意非空>"        # magpie 网关本身不校验 key（实测 /v1/models → 200）
-"D:/DeepSeek Harness/Desktop/DeepSeek Harness.exe" \
-  "D:/DeepSeek Harness/Desktop/resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" \
+"<DSH_INSTALL>/Desktop/DeepSeek Harness.exe" \
+  "<DSH_INSTALL>/Desktop/resources/app.asar/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js" \
   headless -        # 从 stdin 读一步任务，答完即退
 ```
 
