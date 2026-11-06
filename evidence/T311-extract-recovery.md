@@ -24,7 +24,7 @@ Error: cannot modify "/d/主工作区/repos/dsh-GOkifu-compact/src/engine.mjs": 
 恢复事件：
 ```
 bash-ab69f743907d421b
-session-00b50089-b7a1-4a5a-8d3f-c5775a7329a0
+session-<session-id>
 bash
 grep -c "measureFoldQuality" "/d/主工作区/tmp/dsh-gokifu-compact/modules/src/engine.mjs" 2>/dev/null; ls -la --time-style=+%H:%M:%S 
 ```
@@ -38,7 +38,7 @@ Error: cannot modify "/d/主工作区/repos/dsh-GOkifu-compact/src/engine.mjs": 
 恢复事件：
 ```
 bash-ab69f743907d421b
-session-00b50089-b7a1-4a5a-8d3f-c5775a7329a0
+session-<session-id>
 bash
 grep -c "measureFoldQuality" "/d/主工作区/tmp/dsh-gokifu-compact/modules/src/engine.mjs" 2>/dev/null; ls -la --time-style=+%H:%M:%S 
 ```
