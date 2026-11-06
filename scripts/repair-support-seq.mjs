@@ -229,6 +229,7 @@ export function applyPlan({ store, plan, apply = false, at = Date.now() }) {
   for (const row of plan.dateSync ?? []) push(row, 'dateSync');
   const changed = [];
   const skippedNoTime = [];
+  const loweredAt = [];
   // T349 · 旧实现每条 claim 都 `store.list('claims')` 重读全库 ⇒ O(claims²)；这里一次建 Map。
   const claimById = new Map(store.list('claims').map((e) => [String(e?.id ?? ''), e]));
   for (const [claimId, rows] of byClaim) {
@@ -260,8 +261,18 @@ export function applyPlan({ store, plan, apply = false, at = Date.now() }) {
       applied.push(row);
     }
     if (!applied.length) continue;
+    // T350 · SI-4b：重指可能把某条 support 挪到**更早**的事件 ⇒ claim.occurredAt（首次发生）必须跟着降到
+    // min(support.occurredAt)，否则「claim 晚于它的全部证据」。**只降不升**（保守：不把已有结论往后推）。
+    const supportTimes = support.map((x) => Number(x?.occurredAt)).filter((v) => Number.isFinite(v));
+    const minSupport = supportTimes.length ? Math.min(...supportTimes) : null;
+    const declaredAt = Number(record.occurredAt);
+    const nextOccurredAt = (Number.isFinite(declaredAt) && Number.isFinite(minSupport) && declaredAt > minSupport)
+      ? minSupport
+      : record.occurredAt;
+    if (Number.isFinite(minSupport) && Number.isFinite(declaredAt) && declaredAt > minSupport) loweredAt.push({ claimId, from: declaredAt, to: minSupport });
     const next = {
       ...record,
+      ...(nextOccurredAt !== record.occurredAt ? { occurredAt: nextOccurredAt } : {}),
       support,
       provenanceRepair: [
         ...(Array.isArray(record.provenanceRepair) ? record.provenanceRepair : []),
@@ -271,7 +282,7 @@ export function applyPlan({ store, plan, apply = false, at = Date.now() }) {
     changed.push({ claimId, fixes: applied.length });
     if (apply) store.put('claims', next, { at });
   }
-  return { changed: changed.length, fixes: changed.reduce((n, c) => n + c.fixes, 0), claims: changed, skippedNoTime };
+  return { changed: changed.length, fixes: changed.reduce((n, c) => n + c.fixes, 0), claims: changed, skippedNoTime, loweredAt };
 }
 
 export function formatReport(plan, result = null) {
