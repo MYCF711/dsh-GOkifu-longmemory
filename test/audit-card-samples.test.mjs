@@ -66,6 +66,8 @@ test('parseCardLines: 抽出 marker / 正文 / (ep, 日期, seq)', () => {
     episode: 'ep-aaaa0001',
     date: '2026-11-04',
     seq: 10,
+    // T345：F3 尾注单独给字段（本行无尾注 ⇒ null），绝不混进 text
+    falsifiableWhen: null,
   });
 });
 

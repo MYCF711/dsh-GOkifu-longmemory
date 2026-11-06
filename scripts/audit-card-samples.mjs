@@ -34,8 +34,10 @@ export const DEFAULT_WINDOW = 10;
 
 /** 卡片行的 provenance 尾巴：`(ep-xxxxxxxx, YYYY-MM-DD, seq N)`（日期字段也可能带时分）。 */
 const PROV_SOURCE = /\((ep-[0-9a-f]{8}),\s*([^,]+),\s*seq\s*(\d+)\)/g;
-/** 卡片行整体：`- [marker] 正文 (ep-…, 日期, seq N)`。 */
-const LINE_SOURCE = /^- \[([^\]]+)\] (.+) \((ep-[0-9a-f]{8}),\s*([^,]+),\s*seq\s*(\d+)\)\s*$/;
+/** 卡片行整体：`- [marker] 正文 (ep-…, 日期, seq N)`，可选 F3 尾注 ` · <当…不再成立> [rule]`。 */
+// T345：F3 是**派生内容**（非逐字），必须落在坐标之后；正文组（第 2 组）仍是逐字原文，
+// A6 文字层只核它。尾注可选 ⇒ 旧卡片行照常解析（组 6 为 undefined）。
+const LINE_SOURCE = /^- \[([^\]]+)\] (.+) \((ep-[0-9a-f]{8}),\s*([^,]+),\s*seq\s*(\d+)\)(?: · (.+))?$/;
 
 /** 取一个全新的 provenance 正则（避免 /g 的 lastIndex 串味）。 */
 export function provRegex() {
@@ -55,13 +57,14 @@ export function normalizeCardText(text) {
   return singleLine(s);
 }
 
-/** 从 section 里解析出每条渲染行的 { marker, text, episode, date, seq }。 */
+/** 从 section 里解析出每条渲染行的 { marker, text, episode, date, seq, falsifiableWhen }。 */
 export function parseCardLines(section) {
   const out = [];
   for (const line of String(section ?? '').split('\n')) {
     const m = line.match(LINE_SOURCE);
     if (!m) continue;
-    out.push({ marker: m[1], text: m[2], episode: m[3], date: m[4].trim(), seq: Number(m[5]) });
+    // T345：text 只取**逐字正文**（第 2 组）；F3 尾注单独给字段，绝不混进 text 参与 A6 比对。
+    out.push({ marker: m[1], text: m[2], episode: m[3], date: m[4].trim(), seq: Number(m[5]), falsifiableWhen: m[6] ? m[6].trim() : null });
   }
   return out;
 }

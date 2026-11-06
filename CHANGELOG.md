@@ -17,6 +17,20 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.6.3（2026-11-06）
+
+### F3 失效条件上卡（T345）—— 派生内容与逐字正文严格分离
+**版本说明**：src 行为改动（卡片格式新增可选尾注）⇒ minor；v0.6.0–0.6.2 均被历史重组前的游离 tag 占用，避让用 0.6.3。
+**做了什么**：记忆卡每条 antipattern 之后追加「当 X 不再成立 [rule]」，让模型知道**这条教训什么时候失效**（防负迁移）。
+- 卡片格式：`- [marker] <逐字正文> (ep, 日期, seq N) · <当…不再成立> [rule]` —— 尾注**在坐标之后**，正文仍是逐字原文。
+- `src/rooms/inject.mjs`：`buildEntry` 挂 `f3`（截断 `F3_MAX_CHARS=60`）、`entryFromClaim` 透传、`renderEntryLine` 渲染；**无 F3 时输出逐字节不变**。
+- **踩到并修的真坑**：`buildMemoryCard` 的 claim 是**显式投影**（只拷 id/kind/state/text/occurredAt/support/level/merge），新字段不加进投影就永远上不了卡（首次测试即红）。
+- `scripts/audit-card-samples.mjs`：`LINE_SOURCE` 扩成「坐标 + 可选尾注」，`parseCardLines` 把尾注单独给 `falsifiableWhen` —— **A6 文字层仍只核逐字正文**。
+**成本对照**（AGENTS「成本透明」）：可派生 566/1305 = **43.37%**；尾注平均 **37 字符**（p95 47，超 60 截断）；最坏单卡 5 行全带 = **53 tokens ≈ 预算 10.6%**（预算机制自限）；**现有库影响 0**（历史 claim 无该字段 ⇒ 输出逐字节一致）。
+**测试**：`test/f3-on-card.test.mjs` +5（含两处 tombstone：旧格式逐字节一致、F3 绝不混进正文）；全量 **1035 条 / 1029 pass / 0 fail**，check PASS。
+**未做**：A2b 对照无法在现有库做（历史 claim 无 F3 ⇒ 必然零变化），须等新归档；未加配置开关（预算已自限，避免「配置面陷阱」）。
+证据 `evidence/T345-f3-on-card.md`。
+
 ## 0.5.2（2026-11-06）
 
 ### ablation 实验修复（T344）—— 出题防泄漏 + 机械判复发
