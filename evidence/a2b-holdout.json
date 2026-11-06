@@ -42,7 +42,8 @@
       }
     ]
   },
-  "generatedAt": 1793911463971,
+  "generatedAt": 1793948408342,
+  "claimsCount": 1578,
   "n": 114,
   "errors": 0,
   "strictHits": 55,
@@ -95,6 +96,7 @@
   "results": [
     {
       "itemId": "self:ep-c0a5847a",
+      "at": 1793794008787,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-c0a5847a",
@@ -180,6 +182,7 @@
     },
     {
       "itemId": "self:ep-543cf0b2",
+      "at": 1793813634739,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-543cf0b2",
@@ -265,6 +268,7 @@
     },
     {
       "itemId": "self:ep-bc4ab3cb",
+      "at": 1793648500548,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-bc4ab3cb",
@@ -324,6 +328,7 @@
     },
     {
       "itemId": "self:ep-9becea64",
+      "at": 1793749483684,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-9becea64",
@@ -357,6 +362,7 @@
     },
     {
       "itemId": "self:ep-a9f16ff0",
+      "at": 1793749481945,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-a9f16ff0",
@@ -416,6 +422,7 @@
     },
     {
       "itemId": "self:ep-8a73e06b",
+      "at": 1793884690273,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8a73e06b",
@@ -449,6 +456,7 @@
     },
     {
       "itemId": "self:ep-00b50089",
+      "at": 1793685893725,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-00b50089",
@@ -534,6 +542,7 @@
     },
     {
       "itemId": "self:ep-8cc34e32",
+      "at": 1793884703908,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8cc34e32",
@@ -567,6 +576,7 @@
     },
     {
       "itemId": "self:ep-aa52f421",
+      "at": 1793793531001,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-aa52f421",
@@ -639,6 +649,7 @@
     },
     {
       "itemId": "self:ep-1e82afca",
+      "at": 1793884702487,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-1e82afca",
@@ -698,6 +709,7 @@
     },
     {
       "itemId": "self:ep-32a78774",
+      "at": 1793749472535,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-32a78774",
@@ -744,6 +756,7 @@
     },
     {
       "itemId": "self:ep-62bcb7d2",
+      "at": 1793884703904,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-62bcb7d2",
@@ -829,6 +842,7 @@
     },
     {
       "itemId": "self:ep-f7f835b1",
+      "at": 1793639580406,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-f7f835b1",
@@ -875,6 +889,7 @@
     },
     {
       "itemId": "self:ep-0eba65b1",
+      "at": 1793727589035,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-0eba65b1",
@@ -947,6 +962,7 @@
     },
     {
       "itemId": "self:ep-601f0764",
+      "at": 1793749483041,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-601f0764",
@@ -1032,6 +1048,7 @@
     },
     {
       "itemId": "self:ep-bde12afa",
+      "at": 1793860129558,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-bde12afa",
@@ -1078,6 +1095,7 @@
     },
     {
       "itemId": "self:ep-4480912b",
+      "at": 1793872899030,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-4480912b",
@@ -1150,6 +1168,7 @@
     },
     {
       "itemId": "self:ep-a1400ad0",
+      "at": 1793884694815,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-a1400ad0",
@@ -1235,6 +1254,7 @@
     },
     {
       "itemId": "self:ep-03bc3e53",
+      "at": 1793628876556,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-03bc3e53",
@@ -1281,6 +1301,7 @@
     },
     {
       "itemId": "self:ep-e415e0f1",
+      "at": 1793870844059,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e415e0f1",
@@ -1366,6 +1387,7 @@
     },
     {
       "itemId": "self:ep-2ddf0a19",
+      "at": 1793796967216,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-2ddf0a19",
@@ -1451,6 +1473,7 @@
     },
     {
       "itemId": "self:ep-1286ce28",
+      "at": 1793560328080,
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-1286ce28",
@@ -1497,6 +1520,7 @@
     },
     {
       "itemId": "self:ep-9d375d75",
+      "at": 1793591538489,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-9d375d75",
@@ -1543,6 +1567,7 @@
     },
     {
       "itemId": "self:ep-a09a4535",
+      "at": 1793649174776,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-a09a4535",
@@ -1628,6 +1653,7 @@
     },
     {
       "itemId": "self:ep-a1aab8ef",
+      "at": 1793540581865,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-a1aab8ef",
@@ -1674,6 +1700,7 @@
     },
     {
       "itemId": "self:ep-e336b9dd",
+      "at": 1793601269282,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e336b9dd",
@@ -1759,6 +1786,7 @@
     },
     {
       "itemId": "self:ep-7bba753b",
+      "at": 1793748715169,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-7bba753b",
@@ -1792,6 +1820,7 @@
     },
     {
       "itemId": "self:ep-25d39e67",
+      "at": 1793749488735,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-25d39e67",
@@ -1838,6 +1867,7 @@
     },
     {
       "itemId": "self:ep-3a3fb03c",
+      "at": 1793749380451,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-3a3fb03c",
@@ -1897,6 +1927,7 @@
     },
     {
       "itemId": "self:ep-d70b7c2f",
+      "at": 1793603754863,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-d70b7c2f",
@@ -1960,6 +1991,7 @@
     },
     {
       "itemId": "self:ep-252091a4",
+      "at": 1793776818481,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-252091a4",
@@ -1993,6 +2025,7 @@
     },
     {
       "itemId": "self:ep-edf70ff3",
+      "at": 1793814382471,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-edf70ff3",
@@ -2065,6 +2098,7 @@
     },
     {
       "itemId": "self:ep-fdbfa78c",
+      "at": 1793749486432,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-fdbfa78c",
@@ -2137,6 +2171,7 @@
     },
     {
       "itemId": "self:ep-8a787c9f",
+      "at": 1793794819798,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8a787c9f",
@@ -2222,6 +2257,7 @@
     },
     {
       "itemId": "self:ep-16d5a1e2",
+      "at": 1793780138700,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-16d5a1e2",
@@ -2294,6 +2330,7 @@
     },
     {
       "itemId": "self:ep-135c7f7d",
+      "at": 1793782264357,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-135c7f7d",
@@ -2340,6 +2377,7 @@
     },
     {
       "itemId": "self:ep-9c2cbede",
+      "at": 1793810706179,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-9c2cbede",
@@ -2412,6 +2450,7 @@
     },
     {
       "itemId": "self:ep-bf742774",
+      "at": 1793791406739,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-bf742774",
@@ -2497,6 +2536,7 @@
     },
     {
       "itemId": "self:ep-eb9b65ea",
+      "at": 1793864765201,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-eb9b65ea",
@@ -2569,6 +2609,7 @@
     },
     {
       "itemId": "self:ep-dcc6efd2",
+      "at": 1793871655809,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-dcc6efd2",
@@ -2628,6 +2669,7 @@
     },
     {
       "itemId": "self:ep-226dbf4f",
+      "at": 1793793259547,
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-226dbf4f",
@@ -2687,6 +2729,7 @@
     },
     {
       "itemId": "self:ep-08da81e8",
+      "at": 1793860130830,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-08da81e8",
@@ -2759,6 +2802,7 @@
     },
     {
       "itemId": "self:ep-bd0161a1",
+      "at": 1793690931727,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-bd0161a1",
@@ -2844,6 +2888,7 @@
     },
     {
       "itemId": "self:ep-1cf2b33f",
+      "at": 1793747489606,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-1cf2b33f",
@@ -2903,6 +2948,7 @@
     },
     {
       "itemId": "self:ep-5e4ee30c",
+      "at": 1793749490013,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-5e4ee30c",
@@ -2988,6 +3034,7 @@
     },
     {
       "itemId": "self:ep-5cf57bb4",
+      "at": 1793749480761,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-5cf57bb4",
@@ -3073,6 +3120,7 @@
     },
     {
       "itemId": "self:ep-2955fa30",
+      "at": 1793713370720,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-2955fa30",
@@ -3158,6 +3206,7 @@
     },
     {
       "itemId": "self:ep-b8a92777",
+      "at": 1793749476245,
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-b8a92777",
@@ -3204,6 +3253,7 @@
     },
     {
       "itemId": "self:ep-fbb43571",
+      "at": 1793744418047,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-fbb43571",
@@ -3276,6 +3326,7 @@
     },
     {
       "itemId": "self:ep-9ce43a15",
+      "at": 1793689008695,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-9ce43a15",
@@ -3348,6 +3399,7 @@
     },
     {
       "itemId": "self:ep-e5eb8531",
+      "at": 1793588948171,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e5eb8531",
@@ -3433,6 +3485,7 @@
     },
     {
       "itemId": "self:ep-4188510d",
+      "at": 1793685266639,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-4188510d",
@@ -3505,6 +3558,7 @@
     },
     {
       "itemId": "self:ep-c460d468",
+      "at": 1793734874625,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-c460d468",
@@ -3577,6 +3631,7 @@
     },
     {
       "itemId": "self:ep-41514e25",
+      "at": 1793801178045,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-41514e25",
@@ -3649,6 +3704,7 @@
     },
     {
       "itemId": "self:ep-b5586316",
+      "at": 1793815845516,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-b5586316",
@@ -3734,6 +3790,7 @@
     },
     {
       "itemId": "self:ep-d62a520c",
+      "at": 1793705841067,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-d62a520c",
@@ -3819,6 +3876,7 @@
     },
     {
       "itemId": "self:ep-f46d6330",
+      "at": 1793646946327,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-f46d6330",
@@ -3878,6 +3936,7 @@
     },
     {
       "itemId": "self:ep-75e7347e",
+      "at": 1793561353331,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-75e7347e",
@@ -3937,6 +3996,7 @@
     },
     {
       "itemId": "self:ep-fdd814b1",
+      "at": 1793750453460,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-fdd814b1",
@@ -4022,6 +4082,7 @@
     },
     {
       "itemId": "self:ep-ad38cf8c",
+      "at": 1793705839851,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-ad38cf8c",
@@ -4081,6 +4142,7 @@
     },
     {
       "itemId": "self:ep-ed98c462",
+      "at": 1793749484269,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-ed98c462",
@@ -4135,6 +4197,7 @@
     },
     {
       "itemId": "self:ep-be4fc599",
+      "at": 1793632284145,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-be4fc599",
@@ -4207,6 +4270,7 @@
     },
     {
       "itemId": "self:ep-147f0bf4",
+      "at": 1793791484039,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-147f0bf4",
@@ -4279,6 +4343,7 @@
     },
     {
       "itemId": "self:ep-22d3bd16",
+      "at": 1793682556805,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-22d3bd16",
@@ -4364,6 +4429,7 @@
     },
     {
       "itemId": "self:ep-d52b6ca5",
+      "at": 1793648573114,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-d52b6ca5",
@@ -4397,6 +4463,7 @@
     },
     {
       "itemId": "self:ep-e23a6a05",
+      "at": 1793712320497,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e23a6a05",
@@ -4469,6 +4536,7 @@
     },
     {
       "itemId": "self:ep-7520721a",
+      "at": 1793559835468,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-7520721a",
@@ -4554,6 +4622,7 @@
     },
     {
       "itemId": "self:ep-1710f716",
+      "at": 1793517294640,
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-1710f716",
@@ -4613,6 +4682,7 @@
     },
     {
       "itemId": "self:ep-b718aab2",
+      "at": 1793726654086,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-b718aab2",
@@ -4698,6 +4768,7 @@
     },
     {
       "itemId": "self:ep-f4e6c960",
+      "at": 1793814471915,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-f4e6c960",
@@ -4783,6 +4854,7 @@
     },
     {
       "itemId": "self:ep-8a27caaa",
+      "at": 1793793242962,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8a27caaa",
@@ -4842,6 +4914,7 @@
     },
     {
       "itemId": "self:ep-1f814ed5",
+      "at": 1793687927325,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-1f814ed5",
@@ -4914,6 +4987,7 @@
     },
     {
       "itemId": "self:ep-b4664e8f",
+      "at": 1793696597355,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-b4664e8f",
@@ -4986,6 +5060,7 @@
     },
     {
       "itemId": "self:ep-858445da",
+      "at": 1793688944353,
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-858445da",
@@ -5071,6 +5146,7 @@
     },
     {
       "itemId": "self:ep-f0e51ab3",
+      "at": 1793802505287,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-f0e51ab3",
@@ -5156,6 +5232,7 @@
     },
     {
       "itemId": "self:ep-2209a95a",
+      "at": 1793879332755,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-2209a95a",
@@ -5228,6 +5305,7 @@
     },
     {
       "itemId": "self:ep-0ef39d3a",
+      "at": 1793603724508,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-0ef39d3a",
@@ -5274,6 +5352,7 @@
     },
     {
       "itemId": "self:ep-3618a34d",
+      "at": 1793517386091,
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-3618a34d",
@@ -5359,6 +5438,7 @@
     },
     {
       "itemId": "self:ep-c7f6b6d9",
+      "at": 1793781625216,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-c7f6b6d9",
@@ -5431,6 +5511,7 @@
     },
     {
       "itemId": "self:ep-62b1cd78",
+      "at": 1793786662604,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-62b1cd78",
@@ -5503,6 +5584,7 @@
     },
     {
       "itemId": "self:ep-1f6c629b",
+      "at": 1793679380674,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-1f6c629b",
@@ -5588,6 +5670,7 @@
     },
     {
       "itemId": "self:ep-d512e747",
+      "at": 1793633371966,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-d512e747",
@@ -5660,6 +5743,7 @@
     },
     {
       "itemId": "self:ep-294c4c1d",
+      "at": 1793731668152,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-294c4c1d",
@@ -5732,6 +5816,7 @@
     },
     {
       "itemId": "self:ep-28168c77",
+      "at": 1793747209879,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-28168c77",
@@ -5817,6 +5902,7 @@
     },
     {
       "itemId": "self:ep-bdd26050",
+      "at": 1793713602252,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-bdd26050",
@@ -5902,6 +5988,7 @@
     },
     {
       "itemId": "self:ep-ee0d63a9",
+      "at": 1793536572636,
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-ee0d63a9",
@@ -5935,6 +6022,7 @@
     },
     {
       "itemId": "self:ep-685dfadb",
+      "at": 1793686529486,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-685dfadb",
@@ -5954,6 +6042,7 @@
     },
     {
       "itemId": "self:ep-3f03c71c",
+      "at": 1793800791704,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-3f03c71c",
@@ -6026,6 +6115,7 @@
     },
     {
       "itemId": "self:ep-5e91a1bc",
+      "at": 1793746036673,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-5e91a1bc",
@@ -6111,6 +6201,7 @@
     },
     {
       "itemId": "self:ep-1a49c80a",
+      "at": 1793532511905,
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-1a49c80a",
@@ -6196,6 +6287,7 @@
     },
     {
       "itemId": "self:ep-6294ad9f",
+      "at": 1793540238968,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-6294ad9f",
@@ -6281,6 +6373,7 @@
     },
     {
       "itemId": "self:ep-25af318d",
+      "at": 1793648520200,
       "kind": "self",
       "signalSource": "shortRoot",
       "episode": "ep-25af318d",
@@ -6366,6 +6459,7 @@
     },
     {
       "itemId": "self:ep-411a2729",
+      "at": 1793530541657,
       "kind": "self",
       "signalSource": "firstUser",
       "episode": "ep-411a2729",
@@ -6451,6 +6545,7 @@
     },
     {
       "itemId": "self:ep-e5a98b06",
+      "at": 1793713114330,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-e5a98b06",
@@ -6523,6 +6618,7 @@
     },
     {
       "itemId": "self:ep-821c88d9",
+      "at": 1793817069955,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-821c88d9",
@@ -6597,6 +6693,7 @@
     },
     {
       "itemId": "repeat:ep-8a73e06b:257",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -6630,6 +6727,7 @@
     },
     {
       "itemId": "repeat:ep-9becea64:257",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9becea64",
@@ -6715,6 +6813,7 @@
     },
     {
       "itemId": "repeat:ep-8a73e06b:342",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -6748,6 +6847,7 @@
     },
     {
       "itemId": "repeat:ep-a09a4535:342",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
@@ -6794,6 +6894,7 @@
     },
     {
       "itemId": "repeat:ep-ed98c462:342",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-ed98c462",
@@ -6840,6 +6941,7 @@
     },
     {
       "itemId": "repeat:ep-a09a4535:257",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
@@ -6899,6 +7001,7 @@
     },
     {
       "itemId": "repeat:ep-8a73e06b:338",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -6936,6 +7039,7 @@
     },
     {
       "itemId": "repeat:ep-9d375d75:338",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9d375d75",
@@ -6973,6 +7077,7 @@
     },
     {
       "itemId": "repeat:ep-a09a4535:338",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
@@ -7010,6 +7115,7 @@
     },
     {
       "itemId": "repeat:ep-e336b9dd:338",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-e336b9dd",
@@ -7047,6 +7153,7 @@
     },
     {
       "itemId": "repeat:ep-9becea64:111",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9becea64",
@@ -7112,6 +7219,7 @@
     },
     {
       "itemId": "repeat:ep-ed98c462:111",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-ed98c462",
@@ -7177,6 +7285,7 @@
     },
     {
       "itemId": "repeat:ep-8a73e06b:214",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -7223,6 +7332,7 @@
     },
     {
       "itemId": "repeat:ep-c0a5847a:257",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-c0a5847a",
@@ -7295,6 +7405,7 @@
     },
     {
       "itemId": "repeat:ep-e336b9dd:84",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-e336b9dd",
@@ -7367,6 +7478,7 @@
     },
     {
       "itemId": "repeat:ep-c0a5847a:214",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-c0a5847a",
@@ -7400,6 +7512,7 @@
     },
     {
       "itemId": "repeat:ep-8a73e06b:214",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -7446,6 +7559,7 @@
     },
     {
       "itemId": "repeat:ep-8a73e06b:85",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
@@ -7482,6 +7596,7 @@
     },
     {
       "itemId": "repeat:ep-8a73e06b:269",
+      "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",

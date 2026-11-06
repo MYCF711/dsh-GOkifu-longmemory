@@ -399,6 +399,7 @@ export function judgeCard({ card, store, item, minOverlap = 2, bigramFilter = nu
   }
   return {
     itemId: item?.id ?? null,
+    at: Number.isFinite(item?.at) ? item.at : null,
     kind: item?.kind ?? null,
     signalSource: item?.signalSource ?? null,
     episode: item?.episode ?? null,
@@ -508,6 +509,7 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
     version: HOLDOUT_VERSION,
     control,
     generatedAt: Number.isFinite(now) ? now : Date.now(),
+    claimsCount: store.list('claims').length,   // T315：钉住"当时的库规模"，重跑时比对
     n,
     errors: results.filter((r) => r.error).length,
     strictHits,
