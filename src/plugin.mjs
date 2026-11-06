@@ -166,9 +166,15 @@ function positiveInt(value, fallback, max) {
 /** 配置净化：只认已知键、类型不对就退回默认（不静默接受垃圾）。 */
 export function sanitizeConfig(raw = {}) {
   const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  // T341 · ablation 实验开关：`GOKIFU_INJECT=off|false|0` ⇒ 完全静默（enabled=false 且 shadow=false）。
+  // 背景（precision-auditor 评审 evidence/ablation-设计评审.md）：旧 ablation 脚本写的 `GOKIFU_INJECT=off`
+  // 此前无人读取 ⇒ B 臂仍带注入、两臂等价 ⇒ "无差别"是假象。仅显式 off/false/0 才关；
+  // 不设/其他值 = 配置键为准（绝不误关生产注入）。进程级生效，不碰宿主配置/不触发热重载。
+  const injectEnv = String(process.env.GOKIFU_INJECT ?? '').trim().toLowerCase();
+  const injectOff = injectEnv === 'off' || injectEnv === 'false' || injectEnv === '0';
   return {
-    enabled: boolOf(src.enabled, DEFAULT_CONFIG.enabled),
-    shadow: boolOf(src.shadow, DEFAULT_CONFIG.shadow),
+    enabled: injectOff ? false : boolOf(src.enabled, DEFAULT_CONFIG.enabled),
+    shadow: injectOff ? false : boolOf(src.shadow, DEFAULT_CONFIG.shadow),
     storeRoot: typeof src.storeRoot === 'string' && src.storeRoot.trim() !== '' ? src.storeRoot.trim() : null,
     sampleCards: typeof src.sampleCards === 'boolean' ? src.sampleCards : DEFAULT_CONFIG.sampleCards,
     collectMessages: typeof src.collectMessages === 'boolean' ? src.collectMessages : DEFAULT_CONFIG.collectMessages,
