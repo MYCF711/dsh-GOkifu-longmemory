@@ -17,6 +17,31 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.57（2026-11-06）
+
+### 考卷钉住三件套（T315）—— I1 双跑逐字节相同
+**三件套**：`at`（逐条钉死，114/114）· `claimsCount`（顶层 1578）· **完整 row 字段**
+（`claimId/related/strict/strictTokens/strictByBigramOnly/pending/overlap/bigram/bigramRaw/shared/episode`）。
+
+**I1 双跑**：
+```
+run1 results sha256: cca00010aeb87e2ab289a6317077803a | strict 55 | claimsCount 1578
+run2 results sha256: cca00010aeb87e2ab289a6317077803a | strict 55 | claimsCount 1578
+✅ 逐字节相同（I1 通过）
+```
+
+**但 teammate 纠正了自己的归因**：`at` 钉死后**仍差 12 条** ⇒
+T314 推测的"建卡不确定"**被排除**，那 6 条**不是 `at` 造成的** —— 上一次的归因**错了**。
+
+**新的归因**：**3 条实体桥（定义差异）+ 9 条分词实现差异**（`myTerms` vs `discriminativeTokens`）。
+
+**结论**：**这 12 条不是噪声，是判据定义的可选空间** —— 换一套分词/实体桥，48.25% 就变成 39.47%。
+**判据的定义必须固化成规范**（把 `discriminativeTokens` 与 `sharedHardEntities` 提为公开契约），
+否则"换一套实现就换了一个数"。
+
+### 验证
+24 条测试全绿；`check PASS`（70 篇）。
+
 ## 0.2.56（2026-11-06）
 
 ### 独立实现复算（T314）—— **主判据不可复算**
