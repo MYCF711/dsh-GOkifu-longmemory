@@ -17,6 +17,22 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.5.2（2026-11-06）
+
+### ablation 实验修复（T344）—— 出题防泄漏 + 机械判复发
+**版本说明**：本刀是**实验工具的判据修复**（漏洞 ②③），未改产品注入行为；version-suggest 建议 patch 0.5.2，采纳。（若按「scripts 行为改动 ⇒ minor」从严可判 0.6.x，但 v0.6.0–0.6.2 均被游离 tag 占用，且本刀性质是修复而非新增产品能力。）
+**漏洞 ③ 考卷泄漏（最致命）**：原 `listCandidates` 把错误原文当题目提示 ⇒ A 臂卡片里就有答案，测的是「抄答案」。
+- 新增 `actionPromptAt`：题目提示只取**动作**（从失败 seq 往回找最近的 `tool/call`，取 `name + 命令/文件参数`）。
+- 新增 `leaksAnswer`：提示含错误原文（前 30 字）或归一签名 ⇒ 判泄漏。
+- `listCandidates`：取不到动作或提示泄漏 ⇒ `promptSafe:false`，**默认不出题**（`--allow-unsafe` 才放行，且不得用于判「记忆有用」）。
+- 字段用途分离：`taskPrompt`（发模型）/ `signature`（只给判分，严禁进提示）/ `errorText`（只给人追溯）。
+**漏洞 ② 判据不机械**：原 `--recurred 0/1` 靠手工填（违反「计数不是打分」）。
+- 新增 `judgeRecurrence` + CLI `--judge --tasks <file> --log <会话日志> [--variant A|B] [--record]`：把日志里所有失败行归一成签名（复用 `errorKeyOf`）与任务 `signature` 求交，**零模型判断**。
+**测试**：`test/ablation-live.test.mjs` 4→10 条（含两处 tombstone），全量 **1030 条 / 1024 pass / 0 fail**，check PASS。
+**同步更新**：`docs/ablation-运行指南.md` 重写为现行做法（B 臂改 `GOKIFU_INJECT=off`；判分改 `--judge`；新增字段用途表）。
+**仍未验**：实验本身需**新会话**跑（本宿主全会话都注入）；「记忆有用/没用」的结论**一条都还没有**。
+证据 `evidence/T344-ablation-fix.md`。
+
 ## 0.5.1（2026-11-06）
 
 ### F3「可反驳」的文本派生（T343）—— 2.61% → 43.35%

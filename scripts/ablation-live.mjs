@@ -19,6 +19,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createStore } from '../src/rooms/persist.mjs';
+import { readFrames, parseEvents } from '../src/rooms/logread.mjs';
+import { failureLineOf, eventText } from './extract-recovery.mjs';
+import { errorKeyOf } from '../src/rooms/claim.mjs';
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 export const RESULTS = path.join(REPO_ROOT, 'evidence', 'ablation-live.jsonl');
@@ -48,25 +51,92 @@ export function mcnemarExact(b, c) {
   return Math.min(1, total);
 }
 
+/** 复发签名：路径归一后的错误文本（复用 R09 的 `errorKeyOf`），供机械判分。 */
+export function signatureOf(text) {
+  return errorKeyOf(String(text ?? ''));
+}
+
 /**
- * 出题：从库里挑"有 claim 引用、且错误原文可复现"的失败签名。
- * 每条 = { taskId, episode, seq, claimId, errorText, hint }。
+ * 题目提示必须来自**动作**（当时在跑什么），绝不来错误原文。
+ * 从失败 seq 往回找最近的 `tool/call`，取 `name + 命令/文件参数`。
+ * 返回 null = 取不到动作 ⇒ 该题不出（**宁缺不泄**）。
  */
-export function listCandidates({ store, n = 20 } = {}) {
+export function actionPromptAt(events, seq) {
+  const list = Array.isArray(events) ? events : [];
+  const idx = list.findIndex((e) => Number(e?.seq) === Number(seq));
+  if (idx < 0) return null;
+  for (let i = idx; i >= 0; i -= 1) {
+    const e = list[i];
+    if (e?.type !== 'tool/call') continue;
+    const name = e?.data?.name;
+    if (!name) continue;
+    let args = {};
+    try { args = JSON.parse(e?.data?.arguments ?? '{}'); } catch { args = {}; }
+    const detail = args?.command ?? args?.file_path ?? args?.path ?? '';
+    const text = `${name} ${String(detail).replace(/\s+/g, ' ').trim()}`.trim();
+    if (text) return text.slice(0, 200);
+  }
+  return null;
+}
+
+/** 提示里是否泄漏了错误原文（原始子串 30 字 或 归一化签名）。 */
+export function leaksAnswer(prompt, errorText) {
+  const p = String(prompt ?? '');
+  const q = String(errorText ?? '').trim();
+  if (!p || !q) return false;
+  const head = q.slice(0, 30).toLowerCase();
+  if (head && p.toLowerCase().includes(head)) return true;
+  const sig = signatureOf(q);
+  return Boolean(sig) && signatureOf(p).includes(sig);
+}
+
+/**
+ * 出题：从库里挑「有 claim 引用、错误原文可复现」的失败签名。
+ * **T344 防泄漏**：`taskPrompt` 只取动作；取不到动作或提示里泄漏错误原文 ⇒ `promptSafe:false`，
+ * 默认**不出题**（要出必须显式 `allowUnsafe`，且该题不得用于判「记忆有用」）。
+ * `signature` 是**判分用**的归一化错误签名，发给模型时必须剥掉。
+ */
+export function listCandidates({ store, n = 20, allowUnsafe = false, readEvents = null } = {}) {
   const claims = store.list('claims').map((e) => e.record).filter(Boolean);
+  const episodes = new Map(store.list('episodes').map((e) => [e?.record?.id, e?.record]).filter(([id]) => typeof id === 'string'));
+  const evCache = new Map();
+  const loadEvents = (epId) => {
+    if (typeof readEvents === 'function') return readEvents(epId);
+    if (evCache.has(epId)) return evCache.get(epId);
+    let events = [];
+    try {
+      const logPath = episodes.get(epId)?.closure?.logPath;
+      if (logPath) {
+        const abs = path.isAbsolute(logPath) ? logPath : path.join(defaultHome(), logPath);
+        if (fs.existsSync(abs)) {
+          const fr = readFrames(fs.readFileSync(abs));
+          const frames = Array.isArray(fr) ? fr : fr?.frames;
+          events = parseEvents(frames ?? [])?.events ?? [];
+        }
+      }
+    } catch { events = []; }
+    evCache.set(epId, events);
+    return events;
+  };
   const out = [];
   for (const c of claims) {
     for (const s of Array.isArray(c.support) ? c.support : []) {
       const quote = String(s?.quote ?? '').trim();
       if (quote.length < 20) continue;
       if (!/(error|failed|exception|ENOENT|EACCES|cannot|not found|exit code)/i.test(quote)) continue;
+      const episode = String(s?.episode ?? '');
+      const taskPrompt = actionPromptAt(loadEvents(episode), s?.seq);
+      const promptSafe = Boolean(taskPrompt) && !leaksAnswer(taskPrompt, quote);
+      if (!promptSafe && !allowUnsafe) continue;
       out.push({
-        taskId: `T-${String(s?.episode ?? '').slice(3, 11)}-${Number(s?.seq) || 0}`,
-        episode: String(s?.episode ?? ''),
+        taskId: `T-${episode.slice(3, 11)}-${Number(s?.seq) || 0}`,
+        episode,
         seq: Number(s?.seq) || 0,
         claimId: String(c.id ?? ''),
-        errorText: quote.slice(0, 200),
-        hint: String(c.text ?? '').slice(0, 120),
+        taskPrompt: taskPrompt ?? null,
+        promptSafe,
+        signature: signatureOf(quote),
+        errorText: quote.slice(0, 200),  // 判分用；**不得进提示**
       });
     }
     if (out.length >= n) break;
@@ -74,6 +144,37 @@ export function listCandidates({ store, n = 20 } = {}) {
   // 去重（同 episode+seq 只留一条）
   const seen = new Set();
   return out.filter((x) => { const k = `${x.episode}#${x.seq}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, n);
+}
+
+/**
+ * T344 · **机械判复发**：给定任务集与一次运行的事件，判每条任务的错误签名是否在该运行里再现。
+ * 判据（全机械，零模型）：把运行里所有失败行归一成签名（`errorKeyOf`），与任务 `signature` 求交。
+ * 不读 claim 文本、不看提示、不手工填 0/1。
+ */
+export function judgeRecurrence({ tasks = [], events = [] } = {}) {
+  const list = Array.isArray(events) ? events : [];
+  const seen = new Set();
+  for (let i = 0; i < list.length; i += 1) {
+    const hit = failureLineOf(eventText(list[i]));
+    if (!hit) continue;
+    const sig = signatureOf(hit.line);
+    if (sig) seen.add(sig);
+  }
+  return (Array.isArray(tasks) ? tasks : []).map((t) => ({
+    taskId: String(t?.taskId ?? ''),
+    signature: String(t?.signature ?? ''),
+    recurred: Boolean(t?.signature) && seen.has(String(t.signature)),
+  }));
+}
+
+/** 从会话日志读出事件（`--judge --log <path>` 用）。 */
+export function eventsFromLog(file) {
+  if (!file || !fs.existsSync(file)) return [];
+  try {
+    const fr = readFrames(fs.readFileSync(file));
+    const frames = Array.isArray(fr) ? fr : fr?.frames;
+    return parseEvents(frames ?? [])?.events ?? [];
+  } catch { return []; }
 }
 
 /** 记一次实验（幂等：同 taskId+variant 覆盖）。 */
@@ -129,13 +230,30 @@ export async function main(argv = process.argv.slice(2)) {
     console.log(`\n判定：${s.verdict}`);
     return 0;
   }
+  if (argv.includes('--judge')) {
+    // T344：机械判复发（取代手工 --recurred），用归一化签名扫一次运行的日志。
+    const tasksFile = opt('tasks', null);
+    const logFile = opt('log', null);
+    if (!tasksFile || !logFile) { console.error('--judge 需要 --tasks <tasks.json> 与 --log <会话日志>'); return 2; }
+    const parsed = JSON.parse(fs.readFileSync(path.resolve(tasksFile), 'utf8'));
+    const tasks = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.tasks) ? parsed.tasks : []);
+    const rows = judgeRecurrence({ tasks, events: eventsFromLog(path.resolve(logFile)) });
+    const variant = opt('variant', null);
+    if (argv.includes('--record')) {
+      if (!['A', 'B'].includes(variant)) { console.error('--record 需要 --variant A|B'); return 2; }
+      for (const r of rows) record({ taskId: r.taskId, variant, recurred: r.recurred, note: 'judged:signature' });
+    }
+    console.log(JSON.stringify({ judged: rows.length, recurred: rows.filter((r) => r.recurred).length, tasks: rows }, null, 2));
+    return 0;
+  }
   const store = createStore({ root: path.resolve(opt('store', path.join(home, 'memory-context'))) });
-  const list = listCandidates({ store, n: Number(opt('n', '20')) });
+  const list = listCandidates({ store, n: Number(opt('n', '20')), allowUnsafe: argv.includes('--allow-unsafe') });
   if (argv.includes('--json')) { console.log(JSON.stringify({ n: list.length, tasks: list }, null, 2)); return 0; }
-  console.log(`T307 · 真 ablation 出题 · 候选失败签名 ${list.length} 条`);
-  console.log('| # | taskId | episode | seq | claimId | 错误原文（前 80） |');
-  console.log('|---|---|---|---|---|---|');
-  list.forEach((x, i) => console.log(`| ${i + 1} | ${x.taskId} | ${x.episode} | ${x.seq} | ${x.claimId} | ${x.errorText.slice(0, 80).replace(/\|/g, '\|')} |`));
+  const unsafe = list.filter((x) => !x.promptSafe).length;
+  console.log(`T344 · 真 ablation 出题 · 可用题 ${list.length} 条${unsafe ? `（其中 ${unsafe} 条 promptSafe=false，不得用于判「记忆有用」）` : ''}`);
+  console.log('| # | taskId | 动作提示（发给模型） | 判分签名（不许进提示） |');
+  console.log('|---|---|---|---|');
+  list.forEach((x, i) => console.log(`| ${i + 1} | ${x.taskId} | ${String(x.taskPrompt ?? '（不可用）').slice(0, 70).replace(/\|/g, '\\|')} | ${x.signature.slice(0, 60).replace(/\|/g, '\\|')} |`));
   return 0;
 }
 
