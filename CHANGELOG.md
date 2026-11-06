@@ -17,6 +17,19 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.70（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
+
+### 最新 main 上的最小兼容移植（#362）
+
+- 初始基点为 `0c1ca27 / 0.2.62`；未推送提交已跟随到 `7a25b24 / 0.2.69`，保留 main 的知识库 75、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
+- 核心 `apply` 返回真实、幂等的 Cordis disposer；loader 保留独立包惰性解析并原样转发 effect；语料保持 `<DSH_HOME>/memory-context/corpus/messages.jsonl`；`engines.dsh=">=0.2.2-rc.1 <0.3.0-0"`。
+- 两个临时 Git 测试夹具与 `privacy-scan.listFilesToScan` 的生产 Git 调用均隔离仓库定位环境变量，确保显式 cwd。
+- 仅元数据冲突；保留最新 main 文档，不带入旧 0.2.51 或中间版本号。
+
+### 验证
+
+- 最终整合的完整测试与真实 rc1 记录见下一兼容段。
+
 ## 0.2.69（2026-11-06）
 
 ### 重跑抽取（T327）—— X3 54.60% → 58.90%；210 条是永久损失

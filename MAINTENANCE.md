@@ -10,14 +10,14 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-gokifu-longmemory`（**公开**；main 由 ruleset 保护：必须经 PR + required check `rules`，禁 force push/删除；单机单人，不强制审批） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
-| 当前版本 | `0.117.0` |
+| 当前版本 | `0.2.70`（`compat/dsh-0.2.2-rc.1-0.2.62`，基于 origin/main 0.2.69 / 7a25b24，未打 tag） |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
 ## 二、当前状态（2026-11-02 20:40 · 整点巡检）
 
 ```
-分支         main = 0.2.69；功能分支 → PR → CI → 合并 → release（--require-ci）
+分支         compat/dsh-0.2.2-rc.1-0.2.62（基点 origin/main 0.2.69 / 7a25b24；独立 worktree，不改 live）
 里程碑       M7 线上验收：A3 live / A5 跨作用域 0 **已达成**；A6 判据升级为「引文可核」；**擂台已开打**（赢 3 / 输 0 / 不可比 3，主判据 A2 仍不可比）
 插件         **已启用并在宿主里真跑**：`kifu-loader` 别名包挂进 profile，且 `dsh-gokifu-longmemory` 是指向本工作区的**软链**，
              所以源码改动 **下次重启即生效、无需安装步骤**；宿主心跳 `live-stats.jsonl` 累计 11699 次 pre-step / `inject=62` / `failed=0`；
@@ -26,7 +26,8 @@
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | **923 条**（918 pass / 0 fail / 5 skip）[本] 2026-11-06 07:49 |
+| 测试 | **984 条**（978 pass / 0 fail / 6 skip）[本] 2026-11-06 16:53 |
+| 本轮兼容验证 | 基于 origin/main 0.2.66 的完整 `node --test` 与 `check.mjs` 均 exit 0；真实 rc1 ACTIVE→DISPOSED、disposers 5→0、官方 engines evaluator issue=null |
 | 六轴 | A1 **0.00%** · A2 **21.67%** · A3 live · A4 p50 **19.67ms（3 次中位数，单次抖动 ±2ms）**（p50 是抖动量，按量级校验：台账 ≤ max(实测×2, 实测+20ms)） · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-06 07:49 · node scripts/m5-report.mjs` |
 | 语料 | 848 局 / **556 卷** / **claim 1578**（有效期已止 99；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-06 07:49 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
@@ -36,6 +37,7 @@
 
 ## 三、下一步（2026-11-02 23:40 修订）
 
+0. **#362 当前源码独立 home 复验**：以本 PR 提交部署到新的复验 home，核对 realpath/源码哈希后运行 timeout 300 的 loader/headless 与 cleanShutdown；旧 staged 40/40 不计作本提交结果。
 > **当前唯一未决项**：注入失败率的**分母积累**（当前 67 次注入、失败 0，样本还小，继续观察）。
 > ① Q18 已于 2026-11-04 裁定 **A（维持关闸）**，依据 `evidence/q18-preview.md`（开闸展示 +2/12 但严格 −1 条）；复核触发条件写在 `docs/拷问记录.md` 的自裁 S15。
 > ② Q18（A 维持同域 / B 类级章节跨项目，预演 0%→41.7%）。审计侧已收敛：六轮独立审计 → 活文档 10/10（`reports/audit-06.md`）。
