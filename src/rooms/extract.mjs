@@ -269,6 +269,58 @@ function isUserMessage(ev) {
 }
 
 /**
+ * T343 · F3「可反驳」的**文本派生**（text-derived，不是观测）。
+ *
+ * 背景（`evidence/T343-f3-text-derivation.md`）：
+ *   · 从**会话恢复证据**推 F3，对 antipattern 只有 **2.61%（4/153）** —— antipattern 恰恰是
+ *     「当场没修好」的错误类，恢复证据天然稀缺（T338/T339 已量化）。
+ *   · 改从**错误文本本身**机械派生「什么情况算我错」，同一真库实测 **43.35%（561/1294）**。
+ *
+ * 契约：
+ *   · 纯函数、零依赖、规则表可审计（每条有 id）；命中即产出 `when` + 逐字 `quote`。
+ *   · `kind: 'text-pattern'` 明确标注「由文本派生」，**不冒充「观测到恢复」**（那是 T339 的 `same-command-success`）。
+ *   · 判不出 ⇒ `null`（不编）。
+ *   · 顺序敏感：更具体的规则排在更泛的规则之前（如 `http-404` 先于 `generic-not-found`）。
+ */
+export const FALSIFIABLE_RULES = Object.freeze([
+  { id: 'missing-module', re: /Cannot find module ['"`]?([^'"`\n]+)['"`]?/i, when: (m) => `当模块 ${m[1].trim()} 可被加载时不再成立` },
+  { id: 'enoent', re: /ENOENT[^\n]*?['"`]([^'"`\n]+)['"`]/i, when: (m) => `当路径 ${m[1].trim()} 存在时不再成立` },
+  { id: 'no-such-file', re: /no such file or directory/i, when: () => '当目标文件存在时不再成立' },
+  { id: 'cmd-not-found', re: /not recognized as an internal or external command|command not found|Executable not found in \$?PATH/i, when: () => '当该命令在 PATH 中可执行时不再成立' },
+  { id: 'permission', re: /permission denied|EACCES|EPERM/i, when: () => '当所需权限可用时不再成立' },
+  { id: 'econnrefused', re: /ECONNREFUSED/i, when: () => '当目标服务在监听时不再成立' },
+  { id: 'eaddrinuse', re: /EADDRINUSE/i, when: () => '当端口空闲时不再成立' },
+  { id: 'timeout', re: /ETIMEDOUT|timed out/i, when: () => '当在时限内完成时不再成立' },
+  { id: 'syntax-error', re: /\bSyntaxError\s*:/i, when: () => '当源码语法合法时不再成立' },
+  { id: 'type-error', re: /\bTypeError\s*:/i, when: () => '当类型满足预期时不再成立' },
+  { id: 'not-a-function', re: /([\w.$]+) is not a function/i, when: (m) => `当 ${m[1]} 是函数时不再成立` },
+  { id: 'undefined-prop', re: /Cannot read propert(?:y|ies) of (?:undefined|null)/i, when: () => '当该属性访问的对象非空时不再成立' },
+  { id: 'http-404', re: /HTTP[\s/]*404|\b404\s*Not Found|status(?:Code)?\s*[:=]\s*404|E404|No match found for version/i, when: () => '当资源可访问（返回 2xx）时不再成立' },
+  { id: 'http-auth', re: /Unauthorized|Forbidden|E40[13]\b/i, when: () => '当授权有效时不再成立' },
+  { id: 'json-parse', re: /Unexpected token .* in JSON|Unexpected end of JSON|JSON\.parse|ConvertFrom-Json/i, when: () => '当输入是合法 JSON 时不再成立' },
+  { id: 'already-exists', re: /EEXIST|already exists/i, when: () => '当目标不存在时不再成立' },
+  { id: 'git-fatal', re: /^fatal:\s*\S/m, when: () => '当 git 前置状态满足该命令时不再成立' },
+  { id: 'tests-fail', re: /failing tests?:|ℹ fail [1-9]\d*|[✖✗]\s*\d+\s*(?:test|个)/i, when: () => '当同一测试通过时不再成立' },
+  { id: 'exit-nonzero', re: /\[?exit code:?\s*([1-9]\d*)\]?/i, when: (m) => `当同一命令返回 0（而非 ${m[1]}）时不再成立` },
+  { id: 'generic-not-found', re: /\bnot found\b|no match found/i, when: () => '当该对象/资源存在时不再成立' },
+]);
+
+/**
+ * 从失败原文机械派生「什么情况算我错」（F3）。
+ * @returns {{kind:'text-pattern', rule:string, when:string, quote:string}|null}
+ */
+export function deriveFalsifiableWhen(text, { maxQuote = MAX_QUOTE } = {}) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return null;
+  for (const r of FALSIFIABLE_RULES) {
+    const m = r.re.exec(raw);
+    if (!m) continue;
+    return { kind: 'text-pattern', rule: r.id, when: r.when(m), quote: clip(raw, maxQuote) };
+  }
+  return null;
+}
+
+/**
  * 机械抽取。
  *
  * @param {{graph?: object|null, events?: object[]|{events:object[]}, maxQuote?: number}} input
@@ -360,7 +412,12 @@ export function extractSignals({ graph = null, events = null, maxQuote = MAX_QUO
       ...occurredAtOf(seq, edge),
       source: 'edge',
     };
-    if (bucket === 'failures') failures.push(entry);
+    if (bucket === 'failures') {
+      // T343：失败边顺带派生 F3 失效条件（文本派生；判不出就不挂，不编）
+      const f3 = deriveFalsifiableWhen(q, { maxQuote });
+      if (f3) entry.falsifiableWhen = f3;
+      failures.push(entry);
+    }
     else if (bucket === 'successes') successes.push(entry);
     else unsettled.push(entry);
   }

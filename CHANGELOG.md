@@ -17,6 +17,19 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.5.1（2026-11-06）
+
+### F3「可反驳」的文本派生（T343）—— 2.61% → 43.35%
+**版本说明**：version-suggest 建议 0.5.0（minor，src 新增能力），但 v0.5.0 为历史重组前的游离发布（占用），避让用 0.5.1。
+**两条死路（已量化排除）**：① 字段派生（T310）**0%**——字段里本就没有失效条件，回填 = 拿现在的库编过去；② 会话恢复证据（T311/T339）对 antipattern 只有 **2.61%（4/153）**——antipattern 恰恰是「当场没修好」的错误类，恢复证据天然稀缺（只看 `support[0]` 时仅 0.77%）。
+**正路**：从**错误文本本身**机械派生「什么情况算我错」，同一真库 **43.35%（561/1294）**。
+- `src/rooms/extract.mjs`：新增 `FALSIFIABLE_RULES`（20 条可审计规则）+ `deriveFalsifiableWhen`（纯函数）；失败边顺带产出 `falsifiableWhen: {kind:'text-pattern', rule, when, quote}`。
+- `src/rooms/claim.mjs`：F3 随失败支撑带到 antipattern claim；**只补空不覆盖**；判不出的 claim **不带该字段**（输出与旧版逐字节一致）；历史 claim 不回填（只增不改）。
+**边界**：`kind:'text-pattern'` 明确标注「由文本派生」，**不冒充「观测到恢复」**；噪声（pip 通知、目录转储）正确地不派生。
+**测试**：`test/f3-text-derivation.test.mjs` +7，全量 **1024 条 / 1018 pass / 0 fail**，check PASS。
+**未做**：渲染未接（字段已入库，上卡与否下一刀决定）；历史 1294 条不回填。
+证据 `evidence/T343-f3-text-derivation.md`。
+
 ## 0.4.1（2026-11-06）
 
 ### ablation 实验开关 + rc1 真实验收包（T341/T342，同步推进）
