@@ -17,6 +17,22 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.4.1（2026-11-06）
+
+### ablation 实验开关 + rc1 真实验收包（T341/T342，同步推进）
+**版本说明**：version-suggest 建议 0.4.0（minor，src/plugin.mjs 新增环境变量开关），但 v0.4.0 为 2026-11-01 历史重组前的游离发布（占用），避让用 0.4.1。
+
+### T341 · GOKIFU_INJECT 环境变量开关（缺口 1 实验解锁）
+**根因**（precision-auditor 评审 `evidence/ablation-设计评审.md`）：旧 ablation 脚本的 `GOKIFU_INJECT=off` 此前无人读取（**虚构开关**）⇒ B 臂仍带注入、两臂等价 ⇒ 缺口 1（不重复踩坑）的干预实验永远无法正确跑。
+**修法**：`sanitizeConfig` 接上 `GOKIFU_INJECT`——显式 `off|false|0` ⇒ `enabled=false 且 shadow=false`（完全静默）；不设/其他值 = 配置键为准（**默认行为不变**，绝不误关生产）。进程级生效，不碰宿主配置/不触发热重载。
+**测试**：`test/inject-env-switch.test.mjs` +4（off 双关 / 默认不变 / 防误关 / off 优先配置键）。
+
+### T342 · ablation 评审与指南 + rc1 真实验收包（配套）
+- precision-auditor：`evidence/ablation-设计评审.md`（虚构开关 + 判据不机械 + 考卷泄漏三漏洞）、`docs/ablation-运行指南.md`（最小可用版 + 标准版 + 机械判定标准）。
+- store-keeper：`scripts/rc1-desktop-acceptance.mjs`（一键验收，默认 dry-run、强制隔离 home、内置回滚）、`scripts/rc1-buildstore-verify.mjs`（真实建库验证，不注入 buildStore）、`docs/rc1-验收指南.md`、`evidence/rc1-buildstore-verify.md`（真实建库 PASS，GUI 层未验已标注）。
+**复验**：rc1 真实建库脚本独立隔离 home 重跑 exit 0、entryCount 1（真实建库，断言全过）。
+**边界**：ablation 实验本身需新会话跑（本开关让它能真做无注入对照）；rc1 的 GUI 层验收仍需用户按指南人眼确认。
+
 ## 0.3.4（2026-11-06）
 
 ### DSH 0.2.2-rc.1 / Cordis 4.1 兼容（R14 / #362）—— apply 改函数型 disposer，真实 rc1 探针双向验证
