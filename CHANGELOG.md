@@ -17,6 +17,29 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.44（2026-11-06）
+
+### 归档幂等性（T303）—— 静态定位 + 机制实证
+**三个问题的答案**：
+- `readdirSync` **已排序**（`persist.mjs` 的 `listNames`）；
+- `recordedAt` **参与 sha256，但重放时被强制取旧值**（`persist.mjs` 的 `put`：`sameExceptClocks` 为真时**直接短路**，不写盘、不追加 journal）；
+- `generatedAt` **不进 checksum**（`renderIndex({ generatedAt: null })`）。
+
+⇒ **设计上幂等**，三条保护都在源码里可核。
+
+**机制实证**：
+```
+✔ R15: 幂等 —— 同内容重放不写盘、不追加 journal、manifest 字节不变
+ℹ tests 15 · ℹ pass 15 · ℹ fail 0
+```
+
+**未做（如实）**：两次全量归档的逐字节对照没跑完（848 局 > 30 分钟）。
+但幂等的**机制**已由上述测试证明；全量对照只是**规模验证**。
+`AGENTS.md` 陷阱 15：**活跃会话不幂等属预期**（源还在写）。
+
+### 验证
+`check PASS`（66 篇）。
+
 ## 0.2.43（2026-11-06）
 
 ### tombstone 接进 CI（T301）+ 知识库 66（幂等与可复现）
