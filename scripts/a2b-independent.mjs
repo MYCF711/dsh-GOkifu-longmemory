@@ -21,43 +21,109 @@ import { buildMemoryCard, signalFromText } from '../src/rooms/inject.mjs';
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 export const MAX_DF_RATIO = 0.02;
 
-/** 中文 bigram（2 字滑窗）+ 英文/数字 token（≥4 字，路径整体保留）。 */
-export function myTerms(text) {
-  const src = String(text ?? '');
+/**
+ * J1 · 判别词（契约 §J1，逐字实现）
+ *   text.toLowerCase().split(/[^a-z0-9一-鿿]+/).filter(t => t.length >= 4 && t !== 'path')
+ */
+export function contractTokens(text) {
+  return String(text ?? '').toLowerCase().split(/[^a-z0-9一-鿿]+/).filter((t) => t.length >= 4 && t !== 'path');
+}
+
+/** J1 重合数：判别词在 claim 文本里的出现次数。 */
+export function tokenOverlap(signalText, claimText) {
+  const hay = String(claimText ?? '').toLowerCase();
+  return contractTokens(signalText).filter((t) => hay.includes(t)).length;
+}
+
+/**
+ * J2 · 判别性 bigram（契约 §J2，逐字实现）
+ *   中文连续段 2 字滑窗；英文/数字/路径 split(/[^a-z0-9_./-]+/)，长度 ≥3 保留（_ - . / 不切）
+ */
+export function contractBigrams(text) {
   const out = new Set();
-  for (const run of src.match(/[\u4e00-\u9fff]+/g) ?? []) {
+  const src = String(text ?? '');
+  for (const run of src.match(/[一-鿿]+/g) ?? []) {
     for (let i = 0; i + 2 <= run.length; i += 1) out.add(run.slice(i, i + 2));
   }
-  for (const tok of src.toLowerCase().split(/[^a-z0-9_./-]+/)) if (tok.length >= 4) out.add(tok);
+  for (const tok of src.toLowerCase().split(/[^a-z0-9_./-]+/)) if (tok.length >= 3) out.add(tok);
   return out;
 }
 
-/** 词表 df（出现在多少条 claim 里）+ N。 */
+/** J2 词表 df + N（N = 全库 claim 数）。 */
 export function buildDf(claimTexts) {
   const df = new Map();
   let n = 0;
   for (const t of claimTexts) {
     if (!t) continue;
     n += 1;
-    for (const term of myTerms(t)) df.set(term, (df.get(term) ?? 0) + 1);
+    for (const term of contractBigrams(t)) df.set(term, (df.get(term) ?? 0) + 1);
   }
   return { df, n };
 }
 
-/** 判据核心（自己写，独立于 a2b-holdout）。 */
-export function judge({ signal, claimText, related, df, n }) {
-  if (!related) return { strict: false, overlap: 0, terms: 0 };
+/** J2 重合数（只数判别性 bigram：df/N ≤ MAX_DF_RATIO）。 */
+export function bigramOverlap(signalText, claimText, { df, n } = {}) {
   const hay = String(claimText ?? '').toLowerCase();
-  let overlap = 0;
-  let terms = 0;
-  for (const term of myTerms(signal)) {
-    terms += 1;
-    if (!hay.includes(term)) continue;
-    const d = df.get(term) ?? 0;
-    const discriminative = n > 0 ? d / n <= MAX_DF_RATIO : true;
-    if (discriminative) overlap += 1;
+  let hits = 0;
+  for (const bg of contractBigrams(signalText)) {
+    if (!hay.includes(bg)) continue;
+    const d = df?.get?.(bg) ?? 0;
+    const discriminative = !n || d / n <= MAX_DF_RATIO;
+    if (discriminative) hits += 1;
   }
-  return { strict: overlap >= 2, overlap, terms };
+  return hits;
+}
+
+/**
+ * J3 · 硬实体（契约 §J3，逐字实现六条模式 + 归一化 + basename）
+ */
+export const HARD_ENTITY_PATTERNS = Object.freeze([
+  // 文件路径：Windows 盘符 / POSIX 绝对路径
+  /[A-Za-z]:[\\/][\w./\\-]{3,}/g,
+  /(?:^|[\s"'(=])\/(?:[\w.-]+\/)*[\w.-]{3,}/g,
+  // 错误码 / 错误类
+  /\bclass:[a-z0-9-]+\b/gi,
+  /\b(?:ENOENT|EACCES|EPERM|EEXIST|ECONNREFUSED|ETIMEDOUT|MODULE_NOT_FOUND|ERR_[A-Z_]+)\b/g,
+  // 包名（scoped 或无 scope）
+  /(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]+\/[a-z0-9][a-z0-9._-]+/gi,
+  // 命令（git/node/npm/go/python/bash… + 少量参数）
+  /\b(?:git|node|npm|pnpm|yarn|go|python|bash|pwsh|powershell|curl|gh)\b(?:\s+[-\w./=:]{1,40}){0,4}/gi,
+]);
+
+export function contractEntities(text) {
+  const raw = String(text ?? '');
+  const out = new Set();
+  for (const re of HARD_ENTITY_PATTERNS) {
+    re.lastIndex = 0;
+    for (const m of raw.matchAll(re)) {
+      const value = String(m[0] ?? '').trim().replace(/^[\s"'(=]+|[\s"'),.]+$/g, '');
+      if (value.length < 3) continue;
+      out.add(value.toLowerCase());
+      const base = value.split(/[\/]/).pop();
+      if (base && base.length >= 6 && /[._-]/.test(base)) out.add(base.toLowerCase());
+    }
+  }
+  return out;
+}
+
+export function sharedEntities(signalText, claimText) {
+  const a = contractEntities(signalText);
+  if (!a.size) return [];
+  const b = contractEntities(claimText);
+  if (!b.size) return [];
+  return [...a].filter((x) => b.has(x));
+}
+
+/**
+ * J4 · 判中条件（契约 §J4）：
+ *   related ∧ ( 判别词 ≥2 ∨ 判别性 bigram ≥2 ∨ 共享硬实体 ≥1 )
+ */
+export function judge({ signal, claimText, related, df, n }) {
+  if (!related) return { strict: false, overlap: 0, bigram: 0, shared: [] };
+  const overlap = tokenOverlap(signal, claimText);
+  const bigram = bigramOverlap(signal, claimText, { df, n });
+  const shared = sharedEntities(signal, claimText);
+  return { strict: overlap >= 2 || bigram >= 2 || shared.length >= 1, overlap, bigram, shared };
 }
 
 export function run({ store, examPath = path.join(REPO_ROOT, 'evidence', 'a2b-holdout.json'), limit = 5 } = {}) {
@@ -79,18 +145,21 @@ export function run({ store, examPath = path.join(REPO_ROOT, 'evidence', 'a2b-ho
     const walk = walkFromSignals({ signal: sig, store, scope: item.scopeKey, depth: 2, limit, budgetTokens: 500, cache });
     const card = buildMemoryCard({ cache, signal: sig, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens: 500 });
     let hit = false;
-    let best = { overlap: 0, terms: 0 };
+    let best = { overlap: 0, bigram: 0, shared: [] };
     for (const row of Array.isArray(card?.claims) ? card.claims : []) {
       const id = String(row?.claimId ?? '');
       if (!id) continue;
       const rec = store.get('claims', id);
-      const related = (Array.isArray(rec?.support) ? rec.support : []).some((s) => String(s?.episode ?? '') === String(item.episode));
+      // 契约 §J4：related = support 含该局 **或** claim id 在 expected.claimIds 里（两条都要，缺一条就偏离契约）
+      const supportHit = (Array.isArray(rec?.support) ? rec.support : []).some((s) => String(s?.episode ?? '') === String(item.episode));
+      const idHit = Array.isArray(item.expectedClaimIds) && item.expectedClaimIds.map(String).includes(id);
+      const related = supportHit || idHit;
       if (!related) continue;
       const j = judge({ signal: item.signal, claimText: String(rec?.text ?? ''), related, df, n });
-      if (j.overlap > best.overlap) best = j;
+      if (j.overlap + j.bigram + j.shared.length > best.overlap + best.bigram + best.shared.length) best = j;
       if (j.strict) { hit = true; break; }
     }
-    out.push({ itemId: item.itemId, episode: item.episode, kind: item.kind, mine: hit, main: Boolean(item.hitStrict), overlap: best.overlap, terms: best.terms, rendered: (card?.claims ?? []).length });
+    out.push({ itemId: item.itemId, episode: item.episode, kind: item.kind, mine: hit, main: Boolean(item.hitStrict), overlap: best.overlap, bigram: best.bigram, shared: best.shared.length, rendered: (card?.claims ?? []).length });
   }
   const mineHits = out.filter((x) => x.mine).length;
   const mainHits = out.filter((x) => x.main).length;
