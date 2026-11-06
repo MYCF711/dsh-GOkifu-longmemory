@@ -101,3 +101,25 @@ $ grep -n "bigramFilter|judgeCard" scripts/a2b-independent.mjs
 3. **卡面 claim 的 `text` 取值不同**（`store.get('claims', id)` 与主判据用的 `record.text` 可能不是同一字段）。
 
 **判据（知识库 62）**：已定位的两处**都修完**（`signalHash` 22→0；`expectedEpisodes` 已落盘），**剩 3 条属于"实现上不好"但根因未知**。**下一刀必须先做"逐条 diff 3 个 item 的 card 面"**，否则再改都是猜。
+
+## 最终根因（Lead 自查考卷字段后定位）
+
+考卷里这 3 条的记录是 `hitStrict=False`（**当时判不中**）：
+```
+self:ep-c0a5847a: related=3, strict=0, hitStrict=False
+self:ep-bde12afa: related=2, strict=0, hitStrict=False
+self:ep-08da81e8: related=2, strict=0, hitStrict=False
+```
+但**重放后主判据判中** ⇒ **主判据自己重放后的判定与考卷里存的判定不同**。
+
+**根因**：**库的内容在两次运行之间变了**（即使 `claimsCount` 一致）。
+考卷存的是**当时的判定**，重放时**库的内容已经变了** ⇒ 主判据现在判中、当时判不中。
+独立实现读的是考卷里存的判定（`hitStrict=False`）⇒ 表现为"主=中、独立=不中"。
+
+**⇒ "考卷不可复现"的最后一层**：
+**不只要钉住 `at` 和 `signal`，还要钉住"库的内容"**（否则重放时库变了，判定就不同）。
+
+**修法**：考卷必须**同时存"当时的判定"和"当时的库快照"**（或重放时用库快照）。
+`claimsCount` 一致**不等于**内容一致（可能同样 1578 条但内容不同）。
+
+**这是"考卷完整性"的最后一层**，已停止（不再第三轮）。
