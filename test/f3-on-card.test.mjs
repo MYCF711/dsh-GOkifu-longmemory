@@ -56,13 +56,32 @@ test('T345 ① 有 F3 ⇒ 尾注在坐标之后（正文仍是逐字原文）', 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('T345 ② 无 F3 ⇒ 无尾注（输出与旧格式逐字节一致，tombstone）', () => {
+test('T345 ② `f3OnCard:false` ⇒ 无尾注（与 0.6.3 之前逐字节一致，tombstone）', () => {
   const { root, store } = makeStore(false);
   try {
-    const card = buildMemoryCard({ walkResult: walkOf([hit]), store, scope: SCOPE, now: T(24) });
+    const card = buildMemoryCard({ walkResult: walkOf([hit]), store, scope: SCOPE, now: T(24), f3OnCard: false });
     const line = cardLines(card)[0];
     assert.ok(!line.includes('当模块'), line);
     assert.ok(/^\- \[[^\]]+\] .+ \(ep-[0-9a-f]{8}, [^,]+, seq 41\)$/.test(line), `旧格式必须原样：${line}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T347 ① 历史 claim（**没有**存 falsifiableWhen）⇒ 读时派生兜底，仍上卡', () => {
+  const { root, store } = makeStore(false); // 库里没有该字段（模拟 1305 条历史 claim）
+  try {
+    const card = buildMemoryCard({ walkResult: walkOf([hit]), store, scope: SCOPE, now: T(24) });
+    const [parsed] = parseCardLines(card.section);
+    assert.ok(parsed.falsifiableWhen?.includes('当模块'), '历史 claim 也必须能派生 F3');
+    assert.equal(parsed.text, QUOTE, '派生不许污染逐字正文');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T347 ② 派生是纯函数：两次建卡逐字节相同（确定性，可复算）', () => {
+  const { root, store } = makeStore(false);
+  try {
+    const a = buildMemoryCard({ walkResult: walkOf([hit]), store, scope: SCOPE, now: T(24) }).section;
+    const b = buildMemoryCard({ walkResult: walkOf([hit]), store, scope: SCOPE, now: T(25) }).section;
+    assert.equal(a, b, '同库同题 ⇒ 卡片逐字节相同（now 只进 shadow 记录）');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

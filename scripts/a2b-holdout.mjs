@@ -474,7 +474,7 @@ export function signalHash(text) {
  * 与 `runHoldout` 的区别：信号、expected、at 全部来自考卷，库只用来建卡。
  * @returns {{n, strictHits, strictRate, wilson, byKind, control, hashMismatch, controlCurrent}}
  */
-export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache = null, costIndex = null } = {}) {
+export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache = null, costIndex = null, f3OnCard = true } = {}) {
   const walkCache = cache ?? createWalkCache(store);
   const items = Array.isArray(exam?.results) ? exam.results : [];
   const rows = [];
@@ -489,7 +489,7 @@ export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache
     let card = null;
     try {
       const walk = walkFromSignals({ signal, store, scope: item.scopeKey, depth: 2, limit, budgetTokens, cache: walkCache });
-      card = buildMemoryCard({ cache: walkCache, signal, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens, costIndex });
+      card = buildMemoryCard({ cache: walkCache, signal, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens, costIndex, f3OnCard });
     } catch { card = null; }
     // 冻结考卷只存 expectedClaimIds（没有 expected.episodes）⇒ 必须补齐，否则 related 永远为假（T318 踩过）
     // 冻结考卷只存 expectedClaimIds ⇒ 两条通道都补上（support 含该局 或 claim id 命中）
@@ -517,7 +517,7 @@ export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache
 }
 
 /** 跑全套考卷（只读）。 */
-export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = null, cache = null, signalMode = null, costIndex = null } = {}) {
+export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = null, cache = null, signalMode = null, costIndex = null, f3OnCard = true } = {}) {
   const walkCache = cache ?? createWalkCache(store);
   // T286：**IDF 过滤器必须真的接上** —— `buildBigramDf` 之前定义了却从没被调用，
   // 于是 `bigramFilter` 恒为 null ⇒ 过滤不生效，读数停在"不过滤"的 50.88%（含泛词水分）。
@@ -538,7 +538,7 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
     let card = null;
     try {
       const walk = walkFromSignals({ signal, store, scope: item.scopeKey, depth: 2, limit, budgetTokens, cache: walkCache });
-      card = buildMemoryCard({ cache: walkCache, signal, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens, costIndex });
+      card = buildMemoryCard({ cache: walkCache, signal, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens, costIndex, f3OnCard });
     } catch (error) {
       results.push({ itemId: item.id, kind: item.kind, signalSource: item.signalSource, episode: item.episode, error: String(error?.message ?? error), hitStrict: false, hitRelated: false, rendered: 0 });
       continue;

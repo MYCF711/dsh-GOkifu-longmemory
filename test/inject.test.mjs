@@ -223,7 +223,8 @@ test('R12: 命中 ⇒ ≤5 条、≤500 tokens、每行带绝对日期与 (episo
   for (const c of card.claims) {
     assert.ok(Number.isFinite(c.occurredAt), 'occurredAt 是一等字段');
     assert.equal(c.date, formatCardDate(c.occurredAt));
-    assert.equal(c.date, c.line.match(/\(([^,]+), (\d{4}-\d{2}-\d{2}), seq (\d+)\)$/)[2], '行里的日期 = occurredAt 的 UTC 日期');
+    // T347：日期只从**坐标组**取 —— 复用导出的正则，别在这里再写一份（尾注会破 `$` 锚定）
+    assert.equal(c.date, PROVENANCE_LINE_RE.exec(c.line)?.[4], '行里的日期 = occurredAt 的 UTC 日期');
     assert.ok(c.source.episode && Number.isFinite(c.source.seq));
   }
 });
