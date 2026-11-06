@@ -17,6 +17,16 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.3.3（2026-11-06）
+
+### 命令主体恢复（T339）—— F3 测量覆盖率 4.51% → 11.05%
+**根因**（T338 诊断）：F3 恢复覆盖率仅 4.51%，**86.73% 失败无文件路径主体**；放宽恢复信号实测新增 0、前 40 字兜底对恢复无效（两条死路已排除）。
+**机制**：恢复主体从「文件路径」扩到「触发命令」。`tool/result.toolCallId → tool/call.callId` 关联，命令主体取 `name+arguments`（bash 的 command / write·edit 的 file_path）。新增 `commandSubjectOf`/`commandRuns`/`findCommandRecovery` 三纯函数，`extractRecovery` 整合为「文件级优先、命令级兜底」（并集，保留主体约束不凑数）。
+**实测**（20 局 / 1575 失败）：文件级 4.51% → 并集 **11.05%**（2.45 倍；命令级独抓 131、补文件级抓不到的 103 条）。
+**测试**：`test/extract-recovery.test.mjs` +4（9/9 绿），含 tombstone、文件级优先、不凑数、旧形态兼容。
+**边界**：这是 F3「测量机制」增强；`falsifiableWhen` 字段在产品里尚不存在（`grep -r falsifiableWhen src/` 空），接进归档/抽取层让 antipattern 真带失效条件是**下一里程碑**。
+证据 `evidence/T339-command-recovery.md`；复算 `node scripts/extract-recovery.mjs --limit 20`。
+
 ## 0.3.2（2026-11-06）
 
 ### cost 同分次序 A/B（T337）—— 评测镜像线上，主判据零影响
