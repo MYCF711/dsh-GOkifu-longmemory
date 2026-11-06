@@ -17,11 +17,11 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
-## 0.2.71（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
+## 0.2.72（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
 
 ### 最新 main 兼容移植与生命周期收尾（#362）
 
-- 初始基点为 `0c1ca27 / 0.2.62`；最终合并 `9434a8f / 0.2.70`，保留 main 的知识库 76、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
+- 初始基点为 `0c1ca27 / 0.2.62`；最终合并 `e7c5e6d / 0.2.71`，保留 main 的知识库 77、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
 - 核心 `apply` 返回真实、幂等的 Cordis disposer；loader 保留独立包惰性解析并原样转发 effect；语料保持 `<DSH_HOME>/memory-context/corpus/messages.jsonl`；`engines.dsh=">=0.2.2-rc.1 <0.3.0-0"`。
 - 两个临时 Git 测试夹具与 `privacy-scan.listFilesToScan` 的生产 Git 调用均隔离仓库定位环境变量，确保显式 cwd。
 - `scheduleAutoBuild` 记录每次 apply 的 timer/task：dispose 取消未触发计时器并释放去重标记；已开始建库时等待 task 结束，且不再迟写成功/失败日志；并发及后续重复 dispose 复用同一清理 Promise。
@@ -29,8 +29,29 @@
 
 ### 验证
 
-- `timeout 300 node --test`：**994 tests / 988 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（76 篇）。
+- `timeout 300 node --test`：**994 tests / 988 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（77 篇）。
 - 真实 rc1 ACTIVE(2)→DISPOSED(4)、核心 effect=function、disposers **5→0**、`cleanShutdown=true`（限探针 fiber），官方 engines evaluator `issue=null`。
+
+## 0.2.71（2026-11-06）
+
+### 知识库 77：什么值得被记住（T329）
+**SEP《Memory》**：**记忆是事实性的（factivity）** —— "记得 P"**蕴含 P 为真**；
+**truth（符合事实）与 authenticity（忠实于自己的过去经验）是两个可分离的维度**。
+
+**二维准入表**（可靠 × 准确）：successful remembering（进主证据）· veridical confabulation（蒙对，只存 `observed`）·
+misremembering（`invalidated`）· confabulation（不进库）。
+**"内容可能对"不能替代"来源可追溯"** —— 蒙对没有机制保证。
+
+**五条门票**：**T1 事实性**（quote 是原文）· **T2 因果链**（可回溯 `(ep, seq, quote)`）·
+T3 代价 · T4 可复现 · T5 可反驳。
+**T1+T2 = 事实性门票**；**T3–T5 = 复用性门票**。**缺 T2 ⇒ 内容再好也不得入馆**。
+
+**本仓对照**：`provenance` 与 `quote` 分设 = 已实现二维（未成文）；
+实测：A1 门排 **53.76%**（T1 失效）、**仅 58.90% 有依赖链**、**失效条件 0%** ⇒ 多数条目只过 T1/T2。
+**最便宜的补法**：给 `errorSnippet` 加一个 `cost`（付过代价）字段。
+
+### 验证
+`check PASS`（77 篇）。
 
 ## 0.2.70（2026-11-06）
 
