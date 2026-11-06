@@ -21,6 +21,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createStore } from '../src/rooms/persist.mjs';
 import { readFrames, parseEvents } from '../src/rooms/logread.mjs';
 import { failureLineOf, eventText } from './extract-recovery.mjs';
+import { anchorFailureIndex } from './antipattern-cost.mjs';
 import { errorKeyOf } from '../src/rooms/claim.mjs';
 
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -57,26 +58,76 @@ export function signatureOf(text) {
 }
 
 /**
+ * 出题用的工具参数里，哪一个是"这次动作在做什么"。
+ * 顺序 = 从最具体到最泛；`job_id` 单独认（`job_output` 这类工具只有它）。
+ */
+function actionDetailOf(args) {
+  const a = args && typeof args === 'object' ? args : {};
+  const pick = a.command ?? a.file_path ?? a.path ?? null;
+  if (pick != null && String(pick).trim() !== '') return String(pick);
+  const job = a.job_id ?? a.jobId ?? null;
+  if (job != null && String(job).trim() !== '') return String(job);
+  const q = a.query ?? a.pattern ?? a.text ?? null;
+  if (q != null && String(q).trim() !== '') return String(q);
+  return '';
+}
+
+/** 锚点事件附近（±window）出现过的 toolCallId，按离锚点的距离由近到远。 */
+function linkedCallIds(events, anchor, window = 3) {
+  const ids = [];
+  const push = (id) => { if (typeof id === 'string' && id && !ids.includes(id)) ids.push(id); };
+  const order = [0];
+  for (let d = 1; d <= window; d += 1) { order.push(d); order.push(-d); }
+  for (const d of order) {
+    const i = anchor + d;
+    if (i < 0 || i >= events.length) continue;
+    const e = events[i];
+    push(e?.data?.message?.toolCallId);
+    push(e?.data?.toolCallId);
+    const blocks = e?.data?.message?.content;
+    if (Array.isArray(blocks)) {
+      for (const b of blocks) { push(b?.toolCallId); push(b?.id); }
+    }
+  }
+  return ids;
+}
+
+/**
  * 题目提示必须来自**动作**（当时在跑什么），绝不来错误原文。
- * 从失败 seq 往回找最近的 `tool/call`，取 `name + 命令/文件参数`。
+ *
+ * T352：`support.seq` **常指向「提到失败的 assistant 消息」**（T336 实测 96.8%），
+ * 直接往上找"最近的前一个 `tool/call`"会取到**与这次失败无关**的那次调用 ——
+ * 出出来的题跑下去**不复现**原失败（实测 8 次跑批 A/B 全 0 复发，实验无法判别）。
+ * 所以先把 seq **重锚**到真正的失败事件（复用 T336 的 `anchorFailureIndex`，±3），
+ * 再按 `toolCallId` 关联到**因果那次** `tool/call`；关联不上才退回"最近的前一个"。
+ *
  * 返回 null = 取不到动作 ⇒ 该题不出（**宁缺不泄**）。
  */
 export function actionPromptAt(events, seq) {
   const list = Array.isArray(events) ? events : [];
   const idx = list.findIndex((e) => Number(e?.seq) === Number(seq));
   if (idx < 0) return null;
-  for (let i = idx; i >= 0; i -= 1) {
-    const e = list[i];
-    if (e?.type !== 'tool/call') continue;
-    const name = e?.data?.name;
-    if (!name) continue;
-    let args = {};
-    try { args = JSON.parse(e?.data?.arguments ?? '{}'); } catch { args = {}; }
-    const detail = args?.command ?? args?.file_path ?? args?.path ?? '';
-    const text = `${name} ${String(detail).replace(/\s+/g, ' ').trim()}`.trim();
-    if (text) return text.slice(0, 200);
+  const anchor = anchorFailureIndex(list, idx, 3);
+  let call = null;
+  for (const callId of linkedCallIds(list, anchor, 3)) {
+    const found = list.find((e) => e?.type === 'tool/call' && e?.data?.callId === callId);
+    if (found) { call = found; break; }
   }
-  return null;
+  if (!call) {
+    for (let i = anchor; i >= 0; i -= 1) {
+      if (list[i]?.type !== 'tool/call') continue;
+      call = list[i];
+      break;
+    }
+  }
+  if (!call) return null;
+  const name = call?.data?.name;
+  if (!name) return null;
+  let args = {};
+  try { args = JSON.parse(call?.data?.arguments ?? '{}'); } catch { args = {}; }
+  const detail = actionDetailOf(args);
+  const text = `${name} ${String(detail).replace(/\s+/g, ' ').trim()}`.trim();
+  return text ? text.slice(0, 200) : null;
 }
 
 /** 提示里是否泄漏了错误原文（原始子串 30 字 或 归一化签名）。 */

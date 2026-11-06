@@ -17,6 +17,44 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.9.0（2026-11-07）
+
+### 出题改取「因果动作」（T352）—— 隔离实例跑通后暴露的第一个真缺陷
+**版本说明**：`scripts/ablation-live.mjs` 的 `actionPromptAt` 改了取数逻辑（脚本行为变更）⇒ minor 0.9.0。
+**顺带修一个文件缺陷**：`CHANGELOG.md` 里混进过 **2 个字面 NUL 字节**（`episode\0seq\0rawText` 的转义被写成真字节），
+导致编辑工具把整个文件判成 binary、再也改不动。本轮把它们还原成可见的 `\u0000` 文本，**只动这 2 个字节**，
+其余 5023 行一字未改（`git diff --cached --numstat` = `1 1`）。这是修复不是改写，已发布段落的文字内容保持原样。
+
+**能跑新会话了**：`docs/ablation-运行指南.md` 一直说要"新会话"跑，本轮把独立实例跑通——
+`ELECTRON_RUN_AS_NODE=1 <Desktop>/DeepSeek Harness.exe <asar>/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js headless -`，
+配全新 `DSH_HOME` + 主库 `profiles/headless` 的 magpie 路由（magpie 网关不校验 key，`/v1/models` → 200）。
+
+**暴露的问题**：真跑了 4 条只读题 × 2 臂 = 8 次，**两臂全 0 复发**，`--score` 判"无数据"。
+根因不在记忆，在**出题**：claim support 的 `seq` 有 **96.8%（388/401）指向「提到失败的 assistant 消息」**，
+旧逻辑"从 seq 往上找最近一个 `tool/call`"取到的是**与这次失败无关**的那次调用 ——
+题跑下去不复现原错误，实验没有判别力。实例：`T-c0a5847a-50332` 的题是 `gh release create`，
+它记录的失败却是 `Error: unknown job bash-49fb11d400eb4696`。
+
+**做法**：复用 T336 已有的 `anchorFailureIndex`（`scripts/antipattern-cost.mjs`，注释里本来就写着这件事）——
+先按 ±3 **重锚**到真正带失败行的事件，再按 `toolCallId` 关联到**因果那次** `tool/call`；
+参数取值 `command → file_path → path → job_id → query/pattern/text`（`job_output` 这类只有 `job_id` 也要能出题）；
+关联不上才退回旧行为（不把题池清零）。**仍守"宁缺不泄"**：取不到动作返回 `null`，该题不出。
+
+**实测收益**（500 条 claim support）：重锚后下标移动 **69.0%（345/500）**，锚点落在 `tool/result` **32.0%（160/500）**。
+**修复前后出题对比**（真库 `--list --n 20`）：3 条重叠 taskId **全部变化**且与失败自洽 ——
+`T-8cc34e32-22116` 由 `git rev-list -n1 v0.116.0` 变为 `echo "=== 046509f 是否在 main 上 ===" && git merge-base …`，
+与失败签名 `=== 046509f 是否在 main 上 === [exit code: 1]` **同一条命令**。
+
+**测试**：`test/ablation-live.test.mjs` +2（T352 ①②），其中 ① 是 tombstone（退回"最近的前一个"即红）。
+
+**还没证**：缺口 1「不重复踩坑」**仍未证**。修好后本作用域只剩 3 条题，其中 2 条会真改源文件 ⇒
+下一刀必须在仓库**一次性副本**里跑（T353），不在本轮冒充。
+证据 `evidence/T352-ablation-harness.md`。
+
+### 记一条操作事故
+跑批首版 `spawnSync` + 管道被 Electron 子进程卡死 20 分钟；清理时**误杀两条不属于本轮的进程**
+（`tmp/W199/drivers/w171-inline.mjs` 及其子进程）。两条 CPU < 0.3s，但越界属实，改文件重定向后正常。
+
 ## 0.8.5（2026-11-07）
 
 ### SI-5 历史欠账文件化（T351）—— 精确豁免，绝不回填
@@ -2608,7 +2646,7 @@ audit-13 发现上一版还有两处未武装/文案撒谎，现已补齐并实�
 
 ### 生产缺陷追凶（T151）
 - 两次 `gate4/unsuperseded-duplicate`（22:25:47 / 00:00:44）**不是两条 claim 重复**，而是**同一条 claim 的两个出处被同时渲染进卡**：
-  `collectEntries` 的去重键 `episode seq rawText` **不含 claimId**，闸 4 按同文判等 ⇒ `ids` 里同一个 id 出现两次。
+  `collectEntries` 的去重键 `episode\u0000seq\u0000rawText` **不含 claimId**，闸 4 按同文判等 ⇒ `ids` 里同一个 id 出现两次。
 - 暴露面：146/1232 条 claim 有 ≥2 个不同出处（11.9%）。修法已派给 R12/R13 负责人（T154 治本 / T155 兜底）。
 - 证据：`evidence/gate4-duplicates.md`。
 
