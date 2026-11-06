@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.71（2026-11-06）
+
+### 知识库 77：什么值得被记住（T329）
+**SEP《Memory》**：**记忆是事实性的（factivity）** —— "记得 P"**蕴含 P 为真**；
+**truth（符合事实）与 authenticity（忠实于自己的过去经验）是两个可分离的维度**。
+
+**二维准入表**（可靠 × 准确）：successful remembering（进主证据）· veridical confabulation（蒙对，只存 `observed`）·
+misremembering（`invalidated`）· confabulation（不进库）。
+**"内容可能对"不能替代"来源可追溯"** —— 蒙对没有机制保证。
+
+**五条门票**：**T1 事实性**（quote 是原文）· **T2 因果链**（可回溯 `(ep, seq, quote)`）·
+T3 代价 · T4 可复现 · T5 可反驳。
+**T1+T2 = 事实性门票**；**T3–T5 = 复用性门票**。**缺 T2 ⇒ 内容再好也不得入馆**。
+
+**本仓对照**：`provenance` 与 `quote` 分设 = 已实现二维（未成文）；
+实测：A1 门排 **53.76%**（T1 失效）、**仅 58.90% 有依赖链**、**失效条件 0%** ⇒ 多数条目只过 T1/T2。
+**最便宜的补法**：给 `errorSnippet` 加一个 `cost`（付过代价）字段。
+
+### 验证
+`check PASS`（77 篇）。
+
 ## 0.2.70（2026-11-06）
 
 ### 知识库 76：记忆的信噪比（T328）
