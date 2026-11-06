@@ -127,9 +127,35 @@ function main() {
     console.log(`\n== 口径 ${mode} ==`);
     const pct = (w) => (w.phat === null ? 'n/a' : `${(w.phat * 100).toFixed(1)}% [${(w.lower * 100).toFixed(1)}, ${(w.upper * 100).toFixed(1)}]`);
     console.log(`  有货可召 ${r.recallable.n} 条 · 严格命中率 ${pct(r.recallable.strictRate)}`);
-    console.log(`  无货可召 ${r.notRecallable.n} 条 · **沉默率** ${pct(r.notRecallable.silenceRate)}（应接近 100%）`);
-    console.log(`     其中给了卡 ${r.notRecallable.gaveCard} 条（**噪声率** ${pct(r.notRecallable.noiseRate)}，应接近 0）· 仍被判命中 ${r.notRecallable.falseHits} 条`);
+    // 注意：**不要**用"卡为空"当沉默率 —— 该考卷几乎每题都有卡（同 scope 下总有 claim），
+    // 那个指标在此**退化**（恒为 0），不是有效判据（知识库 56 的反事实：判据恒失败 ⇒ 判据坏）。
+    // 有意义的只有"无货却仍被判命中"（取来的是该局但与信号无关的 claim）。
+    console.log(`  无货可召 ${r.notRecallable.n} 条 · 其中仍被判命中 ${r.notRecallable.falseHits} 条（= 取来了该局但与信号无关的 claim）`);
   }
+  const ov = overlapAnalysis(exam.results);
+  console.log(`
+== 新旧口径重合（related=同局 vs 内容相关） ==`);
+  console.log(`  两口径都命中 ${ov.both} · 仅旧口径（同局但内容重合低）${ov.onlyOld} · **仅新口径（跨局但内容相关）${ov.onlyNew}** · 都未命中 ${ov.neither}`);
+  console.log(`  旧口径 ${ov.both + ov.onlyOld} = ${(((ov.both + ov.onlyOld) / exam.results.length) * 100).toFixed(1)}%`);
+  console.log(`  新口径 ${ov.both + ov.onlyNew} = ${(((ov.both + ov.onlyNew) / exam.results.length) * 100).toFixed(1)}%`);
+  console.log(`  ⇒ 旧口径**假阴性** ${ov.onlyNew} 条（跨局但相关被判未命中）· **假阳性** ${ov.onlyOld} 条（同局但无关被判命中）`);
+  console.log(`  ⇒ **真正"无货可召"只有 ${ov.neither} 条**（两口径都未命中）`);
+}
+
+
+/** 新旧口径的重合分析：谁在两个方向上被误判。 */
+export function overlapAnalysis(results) {
+  const contentRelated = (x) => (x.rows || []).some((r) => (r.bigramRaw || 0) >= 2 || (r.overlap || 0) >= 1);
+  let both = 0, onlyOld = 0, onlyNew = 0, neither = 0;
+  const onlyNewIds = [], onlyOldIds = [];
+  for (const x of results) {
+    const o = x.hitRelated === true, n = contentRelated(x);
+    if (o && n) both += 1;
+    else if (o) { onlyOld += 1; onlyOldIds.push(x.itemId); }
+    else if (n) { onlyNew += 1; onlyNewIds.push(x.itemId); }
+    else neither += 1;
+  }
+  return { both, onlyOld, onlyNew, neither, onlyNewIds, onlyOldIds };
 }
 
 if (process.argv[1] && process.argv[1].endsWith('recallable-split.mjs')) main();
