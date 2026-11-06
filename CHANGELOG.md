@@ -17,11 +17,11 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
-## 0.2.74（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
+## 0.2.75（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
 
 ### 最新 main 兼容移植与生命周期收尾（#362）
 
-- 初始基点为 `0c1ca27 / 0.2.62`；最终合并 `4235a58 / 0.2.73`，保留 main 的知识库 77、antipattern cost 与同分次序、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
+- 初始基点为 `0c1ca27 / 0.2.62`；最终合并 `b3ea684 / 0.2.74`，保留 main 的知识库 78、antipattern cost 与同分次序、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
 - 核心 `apply` 返回真实、幂等的 Cordis disposer；loader 保留独立包惰性解析并原样转发 effect；语料保持 `<DSH_HOME>/memory-context/corpus/messages.jsonl`；`engines.dsh=">=0.2.2-rc.1 <0.3.0-0"`。
 - 两个临时 Git 测试夹具与 `privacy-scan.listFilesToScan` 的生产 Git 调用均隔离仓库定位环境变量，确保显式 cwd。
 - `scheduleAutoBuild` 记录每次 apply 的 timer/task：dispose 取消未触发计时器并释放去重标记；已开始建库时等待 task 结束，且不再迟写成功/失败日志；并发及后续重复 dispose 复用同一清理 Promise。
@@ -29,8 +29,28 @@
 
 ### 验证
 
-- `timeout 300 node --test`：**1000 tests / 994 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（77 篇）。
+- `timeout 300 node --test`：**1000 tests / 994 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（78 篇）。
 - 真实 rc1 ACTIVE(2)→DISPOSED(4)、核心 effect=function、disposers **5→0**、`cleanShutdown=true`（限探针 fiber），官方 engines evaluator `issue=null`。
+
+## 0.2.74（2026-11-06）
+
+### 知识库 78：正交性（T334）
+**PostgreSQL 多变量统计**：**默认独立 = 把选择率乘起来** ⇒ 估 **0.01%**，实际 **100 行**。
+**检测手段是显式的**（`CREATE STATISTICS (dependencies)`）；
+**耦合强度 = 联合频率 ÷ 边际频率之积**，等于 1 才独立。
+
+**"两个维度独立"的三判据**：**I1 乘法检验** · **I2 条件翻转** · **I3 函数依赖**。
+
+**为什么不能拿 A 硬过滤 B（四机制）**：乘法假设逆用 · **削掉的正是信号**（T333 实测削掉 60%）·
+不可逆 · 掩盖耦合。
+**结论**：**不独立时 A 只能做同分内次级排序，不能做硬门**；只有 I1 比值 ≈1 才允许过滤。
+
+**一个我必须承认的缺口**：T333 说 `cost` 与"文本相关"正交 ——
+但**"以为是正交"与"测出来独立"是两件事**，**`P(cost>0 ∧ 相关)` 未实测** ⇒
+我们的"正交"是**定性判断，不是统计检验**。
+
+### 验证
+`check PASS`（78 篇）。
 
 ## 0.2.73（2026-11-06）
 
