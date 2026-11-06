@@ -65,6 +65,54 @@
 - **运行中不改 `profiles/*/cordis.patch.yml`**：会整树热重载，可能让 host `exit(1)`（压缩仓 2026-11-01 实机事故）。要改配置走设置 UI。
 - **禁止重启/关闭 DSH、禁止 `taskkill`、禁止关 magpie**（本机铁律，见 `$DSH_HOME/AGENTS.md`）。
 
+### 2.2.1 DSH 0.2.2-rc.1 / Cordis 4.1 兼容交接（2026-11-06，升级 Lead 写给当前插件 agent）
+
+**由当前正在推进本仓 main 的 agent 自己完成兼容，不要用升级任务的旧快照覆盖当前 main。**
+写入时 main 已到 `90750104` / package `0.3.3`（T339），live 分支仍可能继续移动；开工先重新读 `MAINTENANCE.md`、`package.json`、`git status` 与 `origin/main`，以**版本号更高的当前权威源码**为准，保留 T336–T339 及后续功能。旧 #377、#398 和独立快照只能作实现参考，不能直接当当前 live 的替换输入。
+
+**可读的参考实现与证据（只读）：**
+
+- PR `MYCF711/dsh-GOkifu-longmemory#398`，head `38a64ed8ffe35e1bd3ddff7e9d98cddabfbdc1d8`：完整的 rc1 生命周期实现，但 base 仅为 0.2.74，不能合并来覆盖 0.3.x。
+- 独立候选 `b7b2578b0f52e71cad18f774e77bfdabbab4907b`：基于 `1257fe8`（0.3.2）移植，保留 T336/T337，但不含 T338/T339，也只作逐 hunk 参考。
+- 最终生命周期报告：`tmp/dsh-latest-upgrade/longmemory-autobuild-shared-final.md`。
+- 真实探针：`tmp/dsh-latest-upgrade/longmemory-rc1-probe.mjs`；0.3.2 候选预提交日志：`longmemory-0.3.2-rc1-precommit.log`、`longmemory-0.3.2-full-precommit.log`。
+
+**必须移植的兼容行为：**
+
+1. `package.json` 的 `engines.dsh` 改为 `>=0.2.2-rc.1 <0.3.0-0`，并用官方 evaluator 跑接受/拒绝矩阵，不只写声明。
+2. 核心 `src/plugin.mjs` 的 `apply` 必须返回**函数型 Cordis disposer**，不能返回普通诊断对象，否则 rc1/Cordis 4.1 报 `TypeError: Invalid effect`。
+3. `packages/kifu-loader/index.mjs` 的 `async apply` 原样返回 `mod.apply(ctx, config)` 的 Promise 结果（函数 effect），不要把 `coreSpec` 混进 effect；`coreSpec` 没有生产消费者，诊断仍由 `loadCore().spec` 提供。
+4. `makeEffect` 首次调用同步置 `disposed=true`、同步逆序执行事件 off 并收集清理 Promise；无 build 时也返回 Promise，并发/后续重复 dispose 必须严格复用同一个 `disposePromise`。
+5. autoBuild 使用共享 `Map<storeRoot, record> + owners`：后 apply 共享 record/task；仅最后 owner 取消 queued timer；running owner 各自 await 共享 task；成功保留 record 去重，失败/取消按 record 身份删除以允许重试；settle 双向清理 owner 引用。
+6. pre-step 主路径、D5 内层 `decidePreStep`、`agent/turn-stopping` 必须传同一个 lifecycle，`scheduleAutoBuild` 入口用 `isDisposed()` 阻止 stale 异步路径再建库。dispose 后不得迟写成功/失败日志。
+7. privacy 测试与 `scripts/privacy-scan.mjs` 的 Git 子进程只清理**环境副本**中的仓库定位变量，不修改父进程 `process.env`；sidecar 仍写 `<DSH_HOME>/memory-context/`，不写自定义 session 事件。
+
+**在当前 main 上的集成方法：**
+
+- 从最新 main/当前任务分支另建独立 worktree，逐 hunk 移植上述行为；不要 merge 旧 snapshot，不要覆盖 T339 的 `scripts/extract-recovery.mjs` 与 `test/extract-recovery.test.mjs`，不要 reset 或删除其他会话的 dirty/untracked 文件。
+- 版本号不要照搬 0.2.75/0.2.76，也不要与当前 main 的 0.3.3 冲突；运行 `node scripts/version-suggest.mjs`，按本仓 semver 规则选下一个不冲突版本，并在 CHANGELOG/MAINTENANCE/计划表记录兼容改动与选择理由。
+- 保留现有测试并补 T362、T367–T371、D1、loader/privacy 回归：严格同 Promise、queued/running 双 owner、最后 owner 取消、失败重试、成功去重、stale pre-step 不再调度、fresh-tree T310。
+
+**验收命令与通过口径：**
+
+```bash
+node scripts/check.mjs
+node --test
+node scripts/tag-audit.mjs
+node scripts/ledger-check.mjs --full
+node --test --test-name-pattern "T362|T367|T368|T369|T370|T371|零配置自动建库|D1:" test/plugin.test.mjs
+
+LONGMEMORY_WORKTREE=<当前兼容worktree> \
+LONGMEMORY_PROBE_HOME=<全新的tmp隔离home> \
+ELECTRON_RUN_AS_NODE=1 \
+"D:/DeepSeek Harness/Desktop-0.2.2-rc.1/DeepSeek Harness.exe" \
+  tmp/dsh-latest-upgrade/longmemory-rc1-probe.mjs
+```
+
+真实 rc1 探针应达到：`startupError=null`、核心 effect=function、disabled disposers 5→0、`sharedCalls=1`、`sharedFinished=1`、cancel/post-dispose calls=0、严格同 Promise、全部探针 disposers=0。`cleanShutdown=true` **只限探针 fibers**，不冒充完整 Desktop 验收。未适配基线应先复现 `Invalid effect`，适配后再转绿；完整测试、check、engines、syntax/diff 全绿后才正常 push 并开 Draft PR，required `rules` 必须通过。
+
+**升级任务不替你合并 PR，也不修改 live/home/Desktop。** 最终由当前插件 agent 在 PR 正文和 issue #362 写最终 head、测试数、未验项与回滚；真实 archive/pack/install、完整 Desktop/GUI/HMR/长期运行仍需单独验收，不能用注入 `buildStore` 的探针冒充真实 archive。
+
 ### 2.3 数据纪律
 
 - **只增不改**：任何冲突只加 `supersededBy` + `supersededAtSeq`，不删、不改写既有条目。
