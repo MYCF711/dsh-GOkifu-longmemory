@@ -67,3 +67,37 @@ signalHash 不符: 0 条
 node scripts/a2b-holdout.mjs --json > evidence/a2b-holdout.json
 node tmp/t318-compare.mjs
 ```
+
+---
+
+## T320b · 补 `bigramFilter` 的尝试（**前提不成立，如实报告**）
+
+**核对结果：独立实现里没有 `judgeCard`，也没有 `bigramFilter` 参数。**
+
+```
+$ grep -n "bigramFilter|judgeCard" scripts/a2b-independent.mjs
+（无匹配）
+```
+
+- 独立实现调用的是**自己的 `judge()`**（契约 J1–J4 的逐字实现），`df/n` 由 `buildDf(claims)` 自己算；
+- 因此**"给独立实现传 `bigramFilter`"这条修法不存在**——T320 的定位（"独立实现没传 `bigramFilter`"）**是错的**；
+- 两边的 bigram 通道**都做了 IDF 过滤**（主：`buildBigramDf` + `isDiscriminative`；独立：`buildDf` + 同一 `MAX_DF_RATIO = 0.02`）。
+
+**⇒ 3 条差异的真实来源仍未定位**（不在 `related`、不在 `signalHash`、不在 `bigramFilter` 参数）。
+
+## T320b · 最终状态（静止）
+
+| 指标 | 值 |
+|---|---|
+| 主判据（重放冻结信号） | **58/114 = 50.88%** |
+| 独立实现（冻结信号） | **55/114 = 48.25%** |
+| 判定不一致 | **3 条**（全部"主=中、独立=不中"） |
+| `signalHash` 不符 | **0** |
+| 未定位的差异 | **3** |
+
+**剩余 3 条（`ep-c0a5847a` / `ep-bde12afa` / `ep-08da81e8`）候选根因（按可能性排序，均未验证）：**
+1. **`related` 的 `expectedClaimIds` 在 repeat 题上不完整**（考卷只存了部分 id）；
+2. **`contractTokens` vs `discriminativeTokens` 的停用词差异**（主实现丢弃 `'path'`，独立实现也丢弃，但主实现在 `bigramOverlapCount` 里还额外做了 `signalTokensOf` 的过滤）；
+3. **卡面 claim 的 `text` 取值不同**（`store.get('claims', id)` 与主判据用的 `record.text` 可能不是同一字段）。
+
+**判据（知识库 62）**：已定位的两处**都修完**（`signalHash` 22→0；`expectedEpisodes` 已落盘），**剩 3 条属于"实现上不好"但根因未知**。**下一刀必须先做"逐条 diff 3 个 item 的 card 面"**，否则再改都是猜。
