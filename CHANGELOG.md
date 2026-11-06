@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.45（2026-11-06）
+
+### 知识库 67：信息密度与认知负荷（T304）
+**Lost in the Middle（TACL 2023）**：**U 形曲线** ——
+"performance is often **highest when relevant information occurs at the beginning or end** …
+and **significantly degrades when models must access relevant information in the middle**"。
+**长上下文模型也一样**（"even for explicitly long-context models"）⇒ 窗口变大不解决定位问题。
+
+**本仓的卡是首轮注入** ⇒ **天然占"开头"位置 ⇒ 结构上已做对**。
+
+**"多给记忆反而有害"的五种机制**：位置稀释 / 注意力预算 / 上下文挤占 / 噪声命中 / 自相矛盾。
+**共同点：都不体现在"卡变大了"上** ⇒ 只看 token 的验收永远发现不了。
+
+**"多少才够"的判据**：跑 **1/3/5/10 四档命中率**，取**边际收益转负之前**那一点；
+若 3→10 的增量落在噪声区间，**多出的 7 条只是成本**。
+
+**一张卡要证明"帮上了"的四条**：**C1 被引用** · **C2 去掉它结果变差**（关键且最便宜）·
+**C3 不引入负迁移**（≤5%）· **C4 位置不敏感**。
+
+**本仓的真实缺口**：**"3 条"是经验值，没有边际曲线支撑**；**C2（去掉该条是否变差）从未测过**。
+
+### 验证
+`check PASS`（67 篇）。
+
 ## 0.2.44（2026-11-06）
 
 ### 归档幂等性（T303）—— 静态定位 + 机制实证
