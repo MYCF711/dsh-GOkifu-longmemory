@@ -54,11 +54,40 @@ export function episodeWindow(times) {
  * 对一批 claim 跑 SI 检查（纯函数，日志用 `timeIndexOf(episodeId)` 注入 ⇒ 可单测）。
  * @returns {{pass:number, fail:number, unverified:number, buckets:object, samples:Array}}
  */
+/**
+ * T348 · SI-5 **已知缺口**（精确豁免，不回填历史数据）。
+ *
+ * 为什么豁免而不是改数据：`provenanceRepair.fixes[].toOccurredAt = null` 是历史修复的**审计留痕**，
+ * 改写它等于篡改审计记录（只增不改）。工具侧已在 T348 改成「时间不可回溯 ⇒ 不重指」，
+ * 所以这一类**只会越来越少**；这里只精确豁免已存在的那条。
+ *
+ * 判据：kind + claimId + episode + seq **四者全等**才算已知 —— 任何新违规仍然红。
+ */
+export const SI5_KNOWN_GAPS = Object.freeze([
+  { kind: 'SI-5-missing-toOccurredAt', claimId: 'c-00a2178a', episode: 'ep-bc4ab3cb', seq: 819, why: '该次重指的目标事件当时没有 time；工具已在 T348 改为拒绝重指', since: '2026-11-06' },
+  // 同一次历史重指的另一半：它取了「前一个事件」的时间（...711），而 seq 819 自己的时间是 ...712 —— Δ 1ms。
+  // 1ms 属仓库已记录的时间戳噪声量级（AGENTS §5.9：NTFS 时间戳可能超前几毫秒），且工具已不再产生新的一例。
+  { kind: 'SI-1-time-mismatch', claimId: 'c-00a2178a', episode: 'ep-bc4ab3cb', seq: 819, why: '历史重指取了前一个事件的时间，与目标事件差 1ms（时间戳噪声量级）', since: '2026-11-06' },
+]);
+
+export function knownGapOf(kind, row) {
+  return SI5_KNOWN_GAPS.find((g) => g.kind === kind
+    && g.claimId === String(row?.claimId ?? '')
+    && g.episode === String(row?.episode ?? '')
+    && Number(g.seq) === Number(row?.seq)) ?? null;
+}
+
 export function runSemanticChecks({ claims, timeIndexOf, tolerance = 0, nowWindow = null } = {}) {
-  const out = { pass: 0, fail: 0, unverified: 0, buckets: {}, samples: [], checked: 0 };
+  const out = { pass: 0, fail: 0, unverified: 0, known: 0, buckets: {}, samples: [], checked: 0 };
   // T277 · SI-6 用：全部可判定引用的 delta = support.occurredAt − events[seq].time
   const deltas = [];
   const bump = (kind, row) => {
+    // T348：精确匹配已知缺口 ⇒ 记 known（不判红）；任何新违规照旧红。
+    if (knownGapOf(kind, row)) {
+      out.known += 1;
+      out.buckets[`${kind}@known`] = (out.buckets[`${kind}@known`] ?? 0) + 1;
+      return;
+    }
     out.fail += 1;
     out.buckets[kind] = (out.buckets[kind] ?? 0) + 1;
     if (out.samples.length < 5) out.samples.push({ kind, ...row });
@@ -220,7 +249,10 @@ export function runCli(argv = process.argv.slice(2)) {
   lines.push(`语义不变量（SI）· ${storeRoot}`);
   lines.push(`抽样 ${claims.length}/${payload.total} 条 · 检查引用 ${res.checked} 处 · 容差 ${flags.tolerance} ms`);
   lines.push(`  pass ${res.pass} · fail ${res.fail} · unverified ${res.unverified}`);
-  for (const [k, v] of Object.entries(res.buckets)) lines.push(`  ✗ ${k}: ${v}`);
+  // T348：已知缺口用 `·` 标（不是 ✗）—— 它不判红，但必须**可见**，不许静默吞掉
+  for (const [k, v] of Object.entries(res.buckets)) {
+    lines.push(k.endsWith('@known') ? `  · ${k.replace('@known', '')}（已知缺口）: ${v}` : `  ✗ ${k}: ${v}`);
+  }
   if (res.si6) lines.push(`  SI-6 偏移分布：n=${res.si6.n} · 众数 delta=${res.si6.constant ?? 'n/a'} ms · 占比 ${(res.si6.share * 100).toFixed(1)}% · top ${JSON.stringify(res.si6.top)}`);
   for (const s of res.samples) lines.push(`    · ${s.kind} ${s.claimId} @ ${s.episode} seq ${s.seq}${s.declared !== undefined ? `（声明 ${s.declared} vs 事件 ${s.actual}，Δ ${s.deltaMs} ms）` : ''}`);
   lines.push(`结论：${verdict === 'pass' ? 'pass' : 'fail（含 unverified）'}`);
