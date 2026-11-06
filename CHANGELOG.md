@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.41（2026-11-06）
+
+### 知识库 65：变异测试与测试有效性（T299）
+**PIT 原文**：变异测试 = "Faults (or **mutations**) are **automatically seeded**…
+**If your tests fail then the mutation is killed**, if your tests pass then the mutation **lived**." 质量 = **kill 百分比**。
+**覆盖率只证明"跑过"**，不证明"能检出错误"；**分支全覆盖 ≠ 测到**（最极端是"tests with no assertions"）。
+
+**"绿测试也可能是假的"五种形态**：没断言 / 断言过松 / 只测 happy path / 快照过宽 / flaky。
+**共同点：都通过了，但没回答过"改坏了会不会红"。**
+
+**一个测试文件"真的在测东西"的最低四条**：
+**T1 有断言**（返回值/副作用）· **T2 删实现必红**（tombstone）· **T3 改常量必红**（`<`→`<=`）· **T4 可复算**（N≥3 同结果）。
+**落地三式**：`mv` 实现文件 → **只跑该测试文件** → **把红输出贴进 evidence**。
+
+**缺口（teammate 指出）**：tombstone 现在是"人工跑一次"，**没有自动化检查** ——
+和 `mergedInto` 同病：**写在契约里但没每次跑 = 没装**。下一刀：`scripts/tombstone-check.mjs`。
+
+### 验证
+`check PASS`（65 篇）。
+
 ## 0.2.40（2026-11-06）
 
 ### 读侧过期过滤（T298）—— ②③ 生效，① 标 known-limitation
