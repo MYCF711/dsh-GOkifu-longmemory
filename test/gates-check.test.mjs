@@ -34,6 +34,19 @@ import {
 } from '../src/rooms/gates.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
 
+// pre-push 会注入仓库定位变量；临时 git 仓库必须与其隔离，且退出后恢复测试进程。
+function isolateGitRepositoryEnv(t) {
+  const keys = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_QUARANTINE_PATH', 'GIT_NAMESPACE'];
+  const previous = new Map(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+  t.after(() => {
+    for (const key of keys) {
+      const value = previous.get(key);
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+}
+
 const T = Date.UTC(2026, 9, 20, 12, 0, 0);
 
 let tmp;
@@ -235,7 +248,8 @@ function gitAvailable() {
   }
 }
 
-test('R13/闸3: commit —— 真实仓库 HEAD 通过，假 sha 不通过', { skip: !gitAvailable() && '本机没有 git' }, () => {
+test('R13/闸3: commit —— 真实仓库 HEAD 通过，假 sha 不通过', { skip: !gitAvailable() && '本机没有 git' }, (t) => {
+  isolateGitRepositoryEnv(t);
   const ws = freshDir();
   execFileSync('git', ['init', '-q'], { cwd: ws, stdio: 'ignore' });
   writeFileSync(path.join(ws, 'a.txt'), 'hello');

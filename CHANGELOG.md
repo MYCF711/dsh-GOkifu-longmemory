@@ -17,7 +17,7 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
-## 0.2.44-dsh.0（2026-11-06 · 当前源码本地兼容分支，未发布）
+## 0.2.44（2026-11-06 · 当前源码本地兼容分支，未发布）
 
 ### DSH 0.2.2-rc.1 / Cordis 4.1 effect 生命周期（#362）
 
@@ -25,13 +25,16 @@
 - 核心 `apply` 返回真实、幂等的 disposer 并逆序清理事件钩子；旧诊断字段保留为函数属性，不再向 Cordis 返回普通对象。
 - `kifu-loader` 保留现有独立包惰性解析，只移除诊断对象/`coreSpec` 返回并原样转发核心 effect；独立导入与 sidecar 语料实现均保留。
 - `engines.dsh` 按 semver 实测改为 `>=0.2.2-rc.1 <0.3.0-0`。
+- 全量门禁追加修正：版本采用仓库要求的 `0.2.44`；两个临时 git 测试夹具隔离 pre-push 的仓库定位变量并在 `t.after` 恢复，避免 fixture 写入当前分支。
 
 ### 验证
 
 - 迁移前新增 effect 回归为 **1 pass / 2 fail**；迁移后同组 **3/3、exit 0**。
 - `timeout 300 node --test test/kifu-loader.test.mjs test/plugin.test.mjs` 为 **55/55、exit 0**，含既有 T283 独立导入、T282 sidecar 与新增真实 pre-step 回归。
 - 真实 DSH 0.2.2-rc.1 ASAR + Cordis 4.1.0 apply/dispose 探针 **exit 0**：ACTIVE → DISPOSED、核心 disposer=function、disposers 5→0。
-- 完整独立 home headless、GUI/模型 mid-turn、全量套件和真实 pack/install 未在本轮执行。
+- `timeout 300 node --test` 为 **942 tests / 936 pass / 0 fail / 6 skip、exit 0**；`timeout 300 node scripts/check.mjs` 为 **PASS、exit 0**。
+- 模拟 pre-push Git 环境的三文件回归为 **40/40、exit 0**，HEAD 前后相同且无 `a.txt` / `test/a.test.mjs` 残留。
+- 完整独立 home headless、GUI/模型 mid-turn 和真实 pack/install 未在本轮执行。
 
 ## 0.2.43（2026-11-06）
 

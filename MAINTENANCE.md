@@ -10,14 +10,14 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-gokifu-longmemory`（**公开**；main 由 ruleset 保护：必须经 PR + required check `rules`，禁 force push/删除；单机单人，不强制审批） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
-| 当前版本 | `0.2.44-dsh.0`（`compat/dsh-0.2.2-rc.1-current` 本地预发布，未打 tag） |
+| 当前版本 | `0.2.44`（`compat/dsh-0.2.2-rc.1-current-fix` 本地兼容分支，未打 tag） |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
 ## 二、当前状态（2026-11-02 20:40 · 整点巡检）
 
 ```
-分支         compat/dsh-0.2.2-rc.1-current（基点 0.2.43 / 0667bf8，本地提交，不 push）；main 不在本 worktree 改动
+分支         compat/dsh-0.2.2-rc.1-current-fix（201589b 后追加全量门禁修正，本地提交，不 push）；main 不在本 worktree 改动
 里程碑       M7 线上验收：A3 live / A5 跨作用域 0 **已达成**；A6 判据升级为「引文可核」；**擂台已开打**（赢 3 / 输 0 / 不可比 3，主判据 A2 仍不可比）
 插件         **已启用并在宿主里真跑**：`kifu-loader` 别名包挂进 profile，且 `dsh-gokifu-longmemory` 是指向本工作区的**软链**，
              所以源码改动 **下次重启即生效、无需安装步骤**；宿主心跳 `live-stats.jsonl` 累计 11699 次 pre-step / `inject=62` / `failed=0`；
@@ -26,7 +26,8 @@
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | 基线 **923 条**（918 pass / 0 fail / 5 skip）[本] 2026-11-06 07:49；本轮只跑当前源码针对性 **55/55** 与 rc1 apply/dispose 探针，未重跑全套 |
+| 测试 | **942 条**（936 pass / 0 fail / 6 skip）[本] 2026-11-06 13:06 |
+| 本轮兼容验证 | 目标文件 **55/55**、真实 rc1 apply/dispose、模拟 pre-push Git 环境 **40/40** 且 HEAD/fixture 零污染；`node scripts/check.mjs` PASS |
 | 六轴 | A1 **0.00%** · A2 **21.67%** · A3 live · A4 p50 **19.67ms（3 次中位数，单次抖动 ±2ms）**（p50 是抖动量，按量级校验：台账 ≤ max(实测×2, 实测+20ms)） · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-06 07:49 · node scripts/m5-report.mjs` |
 | 语料 | 848 局 / **556 卷** / **claim 1578**（有效期已止 99；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-06 07:49 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
