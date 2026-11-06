@@ -17,10 +17,10 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
-## 0.9.0（2026-11-07）
+## 0.8.6（2026-11-07）
 
 ### 出题改取「因果动作」（T352）—— 隔离实例跑通后暴露的第一个真缺陷
-**版本说明**：`scripts/ablation-live.mjs` 的 `actionPromptAt` 改了取数逻辑（脚本行为变更）⇒ minor 0.9.0。
+**版本说明**：`scripts/ablation-live.mjs` 的 `actionPromptAt` 改了取数逻辑。按 semver 规则「`scripts/**` 行为变更」应升 **minor**，但 `v0.9.0` 这个 tag **已被旧版本线占用**（历史从 0.15.0 一路到 0.178.1，0.9.0 是老线里的一个版本），`release.mjs` 的 tag↔版本一致性闸会红。故本刀落在 **patch 0.8.6**，minor 槽位留给 0.9.x 让位给历史。
 **顺带修一个文件缺陷**：`CHANGELOG.md` 里混进过 **2 个字面 NUL 字节**（`episode\0seq\0rawText` 的转义被写成真字节），
 导致编辑工具把整个文件判成 binary、再也改不动。本轮把它们还原成可见的 `\u0000` 文本，**只动这 2 个字节**，
 其余 5023 行一字未改（`git diff --cached --numstat` = `1 1`）。这是修复不是改写，已发布段落的文字内容保持原样。
