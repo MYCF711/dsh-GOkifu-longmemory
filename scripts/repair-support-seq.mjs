@@ -144,70 +144,75 @@ export function makeLogLoader({ home = defaultHome() } = {}) {
 export const EPISODE_INDEX_CACHE_MAX = 8;
 
 export function planRepairs({ claims, episodes, loadEvents, indexCacheMax = EPISODE_INDEX_CACHE_MAX }) {
+  const list = Array.isArray(claims) ? claims : [];
   const epById = new Map((Array.isArray(episodes) ? episodes : []).map((e) => [String(e?.id ?? ''), e]));
-  const indexCache = new Map();
   const out = { scanned: 0, refs: 0, ok: 0, repair: [], dateSync: [], ambiguous: [], unrepaired: [], skipped: [], unreadable: 0, buckets: { 'multiple-tool': 0, 'echo-only': 0 } };
-  for (const claim of Array.isArray(claims) ? claims : []) {
+
+  // ── T349 · 按局流式：每局日志**只载一次、处理完立刻释放** ──────────────────
+  // 旧实现把「每局全文索引」常驻两份缓存（support 一遍 + dateSync 一遍），
+  // 真库 200+ 局 × 单局 ≈24MB ⇒ 4GB 堆 OOM、即便加 LRU 也会因 claim 顺序跨局而反复抖动（>10 分钟跑不完）。
+  // `indexCacheMax` 保留只为兼容旧调用，现在任何时刻只持 1 局的索引。
+  const byEp = new Map();
+  const slot = (epId) => { let g = byEp.get(epId); if (!g) { g = { support: [], fixes: [] }; byEp.set(epId, g); } return g; };
+  list.forEach((claim, ci) => {
     out.scanned += 1;
     const support = Array.isArray(claim?.support) ? claim.support : [];
     for (let i = 0; i < support.length; i += 1) {
       const ref = support[i];
       if (!ref || typeof ref !== 'object') continue;
       out.refs += 1;
-      const epId = String(ref.episode ?? '');
-      const ep = epById.get(epId) ?? null;
-      let index = indexCache.get(epId);
-      if (index === undefined) {
-        const events = loadEvents(epId, ep);
-        if (!events) { index = null; out.unreadable += 1; }
-        else index = buildEventIndex(events);
-        // T348 · 有界 LRU：Map 保插入序，超容量就淘汰最老的（只影响速度，不影响正确性）
-        if (indexCache.size >= indexCacheMax) {
-          const oldest = indexCache.keys().next().value;
-          if (oldest !== undefined) indexCache.delete(oldest);
-        }
-        indexCache.set(epId, index);
+      slot(String(ref.episode ?? '')).support.push({ ci, i, ref });
+    }
+    const repairs = Array.isArray(claim?.provenanceRepair) ? claim.provenanceRepair : [];
+    for (const p of repairs) {
+      const fixes = Array.isArray(p?.fixes) ? p.fixes : [p];
+      for (const fix of fixes) {
+        if (!fix || !Number.isFinite(Number(fix.to))) continue;
+        const idx = Number(fix.index);
+        if (!Number.isInteger(idx) || idx < 0) continue;
+        const ref = support[idx];
+        if (!ref) continue;
+        slot(String(ref.episode ?? '')).fixes.push({ ci, fix, idx, ref });
       }
+    }
+  });
+
+  for (const [epId, group] of byEp) {
+    let index = null;
+    let events = null;
+    try { events = loadEvents(epId, epById.get(epId) ?? null); } catch { events = null; }
+    if (events) index = buildEventIndex(events);
+    // ① support 引用：ok / repair / ambiguous / unrepaired / skipped
+    for (const { ci, i, ref } of group.support) {
       if (!index) { out.unreadable += 1; continue; }
+      const claim = list[ci];
       const r = locateQuoteSeq({ quote: ref.quote, seq: ref.seq, eventIndex: index });
       if (r.status === 'ok') { out.ok += 1; continue; }
-      const row = { claimId: claim.id, episode: epId, index: i, quote: String(ref.quote ?? '').slice(0, 120), from: r.from, to: r.to, fromOccurredAt: Number.isFinite(Number(ref.occurredAt)) ? Number(ref.occurredAt) : null, toOccurredAt: r.toTime ?? null, candidates: r.candidates.slice(0, 8), candidateCount: r.candidates.length, eventType: r.eventType, distance: r.distance, reason: r.reason, hitTypes: (r.hits ?? []).map((h) => h.type) };
+      const row = { _ci: ci, _i: i, claimId: claim.id, episode: epId, index: i, quote: String(ref.quote ?? '').slice(0, 120), from: r.from, to: r.to, fromOccurredAt: Number.isFinite(Number(ref.occurredAt)) ? Number(ref.occurredAt) : null, toOccurredAt: r.toTime ?? null, candidates: r.candidates.slice(0, 8), candidateCount: r.candidates.length, eventType: r.eventType, distance: r.distance, reason: r.reason, hitTypes: (r.hits ?? []).map((h) => h.type) };
       if (r.status === 'repair') out.repair.push(row);
       else if (r.status === 'ambiguous') { out.ambiguous.push(row); const b = String(r.reason).startsWith('multiple-tool-results') ? 'multiple-tool' : 'echo-only'; out.buckets[b] += 1; }
       else if (r.status === 'unrepaired') out.unrepaired.push(row);
       else out.skipped.push(row);
     }
-  }
-  // T260 · 修既有重指的日期：seq 已重指但 occurredAt 与新事件时间不一致 ⇒ 只同步日期
-  // 性能：按 episode 缓存事件索引（否则每处 fix 都重读一局日志 = O(n×log)，实测跑不完）
-  const syncCache = new Map();
-  for (const claim of Array.isArray(claims) ? claims : []) {
-    const repairs = Array.isArray(claim?.provenanceRepair) ? claim.provenanceRepair : [];
-    if (!repairs.length) continue;
-    for (const p of repairs) {
-      const fixes = Array.isArray(p?.fixes) ? p.fixes : [p];
-      for (const fix of fixes) {
-        if (!fix || !Number.isFinite(Number(fix.to))) continue;
-        const idx = Number(fix.index) ?? -1;
-        const ref = (Array.isArray(claim.support) ? claim.support : [])[idx];
-        if (!ref) continue;
-        const epId = String(ref.episode ?? '');
-        let evIndex = syncCache.get(epId);
-        if (evIndex === undefined) {
-          const ep = epById.get(epId) ?? null;
-          let events = null;
-          try { events = loadEvents(epId, ep); } catch { events = null; }
-          evIndex = events ? buildEventIndex(events) : null;
-          syncCache.set(epId, evIndex);
-        }
-        if (!evIndex) continue;
-        const toTime = evIndex.get(Number(fix.to))?.time ?? null;
-        const declared = Number(ref.occurredAt ?? claim.occurredAt);
-        if (!Number.isFinite(toTime) || !Number.isFinite(declared)) continue;
-        if (Math.abs(toTime - declared) <= 1000) continue;
-        out.dateSync.push({ claimId: claim.id, episode: epId, index: idx, from: Number(ref.seq), to: Number(fix.to), fromOccurredAt: declared, toOccurredAt: toTime, reason: 'occurredAt-out-of-sync' });
-      }
+    // ② T260 · 既有重指的日期同步（seq 已重指但 occurredAt 与新事件时间不一致 ⇒ 只同步日期）
+    for (const { ci, fix, idx, ref } of group.fixes) {
+      if (!index) continue;
+      const claim = list[ci];
+      const toTime = index.get(Number(fix.to))?.time ?? null;
+      const declared = Number(ref.occurredAt ?? claim.occurredAt);
+      if (!Number.isFinite(toTime) || !Number.isFinite(declared)) continue;
+      if (Math.abs(toTime - declared) <= 1000) continue;
+      out.dateSync.push({ _ci: ci, _i: idx, claimId: claim.id, episode: epId, index: idx, from: Number(ref.seq), to: Number(fix.to), fromOccurredAt: declared, toOccurredAt: toTime, reason: 'occurredAt-out-of-sync' });
     }
+    index = null; // 释放本局索引（下一局重新载）
+    events = null;
+  }
+
+  // ③ 稳定回原顺序：旧实现的输出 = claim 顺序，这里按 (claimIndex, supportIndex) 排回去，语义不变
+  const byOrder = (a, b) => (a._ci - b._ci) || (a._i - b._i);
+  for (const k of ['repair', 'dateSync', 'ambiguous', 'unrepaired', 'skipped']) {
+    out[k].sort(byOrder);
+    for (const row of out[k]) { delete row._ci; delete row._i; }
   }
   return out;
 }
@@ -224,8 +229,10 @@ export function applyPlan({ store, plan, apply = false, at = Date.now() }) {
   for (const row of plan.dateSync ?? []) push(row, 'dateSync');
   const changed = [];
   const skippedNoTime = [];
+  // T349 · 旧实现每条 claim 都 `store.list('claims')` 重读全库 ⇒ O(claims²)；这里一次建 Map。
+  const claimById = new Map(store.list('claims').map((e) => [String(e?.id ?? ''), e]));
   for (const [claimId, rows] of byClaim) {
-    const entry = store.list('claims').find((e) => e.id === claimId);
+    const entry = claimById.get(String(claimId));
     if (!entry) continue;
     const record = entry.record;
     const support = Array.isArray(record.support) ? record.support.map((s) => ({ ...s })) : [];

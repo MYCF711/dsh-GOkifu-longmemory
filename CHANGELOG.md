@@ -17,6 +17,19 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.3（2026-11-07）
+
+### 修复工具按局流式（T349）—— 77 秒跑完全库，但**实测确认还不能写进活库**
+**版本说明**：改 `scripts/**` 的实现（性能/内存），输出语义不变 ⇒ patch 0.8.3。
+**性能**：旧实现把每局全文索引**永久缓存两份**（support 一遍 + dateSync 一遍），真库 200+ 局 × ≈24MB ⇒ 4GB OOM；LRU 后仍因 claim 顺序跨局抖动 >10 分钟跑不完。改为**先按 episode 分组再逐局处理**（每局只载一次、处理完释放，任何时刻只持 1 局），再按 `(claimIndex, supportIndex)` 排回原顺序。另修 `applyPlan` 的 O(n²)（每条 claim 都 `store.list` 重读全库）。
+**实测**：真库全量 dry-run **OOM/>10min → 77 秒**；计划 = 1873 claim / 3338 引用 → ok 556 · **可修 1722** · ambiguous 1008 · unrepaired 52。
+**关键结论（副本对照，活库零改动）**：在 `memory-context` 完整副本上 `--apply`（写入 1153 claim / 1751 引用）后全量 SI ——
+- **好**：fail **214 → 134**（−80）、SI-1 时间对齐 **156 → 75**（−81）、pass 3181 → 3262。
+- **不好**：SI-5 **1 → 58**（新 fix 让同一 claim 上 59 条历史遗留 `toOccurredAt=null` 的 fix 进入检查路径，是历史欠账被暴露）、SI-4b **0 → 1**（重指把 support 挪早，`claim.occurredAt` 未同步降到 `min(support)`）。
+⇒ **活库不动**。只有当「fail 下降 **且** 无新增违规类」时才允许对活库 apply（并先备份 claims）。下一刀：修 SI-4b 的 claim 时间同步 + 处理 SI-5 历史欠账。
+**验收**：`test/repair-support-seq.test.mjs` 14/14 全绿（流式重构语义不变）；全量 **1040 条 / 1034 pass / 0 fail**；check PASS。
+证据 `evidence/T349-repair-streaming.md`。
+
 ## 0.8.2（2026-11-06）
 
 ### 重指留痕与修复工具的三个真 bug（T348）
