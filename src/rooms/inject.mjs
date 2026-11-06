@@ -503,6 +503,22 @@ function entryFromClaim(hit, claim, options = {}) {
   // 或 hit 直接点名 claimId 的**旁路**会绕过那道过滤 —— 这里在渲染入口再堵一次。
   // stale / disputed **不在此列**：它们仍进卡并带各自 marker（有信息量）。
   if (claim && claim.state === 'invalidated') return null;
+  // T331（第二道降级门）：**`cost: 0` 不占注入位**。
+  //
+  // 背景：T330 实测 1105 条 antipattern 里只有 0.09% 能机械判出"付过代价"。
+  // 没有代价的失败不该挤掉真正付过代价的 —— 但**保留在库里可查**（只增不改，不删）。
+  //
+  // 关键事实：`cost` **不是 claim 字段**（真库 1578 条里 0 条带它；契约定的是
+  // `scripts/antipattern-cost.mjs` 的 `estimateCost()` 在**读日志时**算）。所以本门只能吃
+  // **预计算索引**（`costIndex: Map<claimId, number>`），绝不在这里读日志：
+  //   · 索引缺失 / 该 id 不在索引里 ⇒ **不过滤**（fail-open，保持今天的行为）；
+  //   · `costIndex.get(id) === 0` ⇒ 从注入面退出；
+  //   · `cost > 0` ⇒ 正常进卡。
+  // 主排序键（tokOverlap）一字不动（T246 排序平台期已证）。
+  if (claim && options.costIndex instanceof Map) {
+    const cost = options.costIndex.get(String(claim.id ?? ''));
+    if (Number.isFinite(cost) && cost === 0) return null;
+  }
   // T298（知识库 64）：**读侧硬过滤** —— stale / 过期不是"降权"，是**不占位**。
   // 为什么必须硬过滤：只降权的话，过期 claim 仍能挤进 top-5，把有效记忆顶掉（V1 的缺口）。
   // 三条纪律：
@@ -639,6 +655,7 @@ function pickClaim(hit, view, options = {}) {
 function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, signal = null, sigIndex = null, allowCrossScopeClass = false,
   now = null,
   preconditionOk = null,
+  costIndex = null,
 }) {
   const entries = [];
   let droppedNoProvenance = 0;
@@ -945,6 +962,8 @@ export function buildMemoryCard({
   now = null,
   // T298：preconditions 重跑回调（返回 true ⇒ 该 claim 可复活）。不传 ⇒ 一律不回活。
   preconditionOk = null,
+  // T331：预计算的 `cost` 索引（claimId → 代价种类数）。不传 ⇒ 不过滤（fail-open）。
+  costIndex = null,
   limit = ENTRY_LIMIT,
   budgetTokens = BUDGET_TOKENS,
   indexPath = null,
@@ -1004,7 +1023,7 @@ export function buildMemoryCard({
     };
   }
 
-  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk });
+  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex });
   // T162a：认「合并节点」。合流（consolidate）会把多条近似 claim 压成一个带 `merge.members` 的节点；
   // 消费侧不认它，合并节点与它的成员就会在同一张卡里重复出现。规则见 collapseMergeNodes 的注释。
   const { entries, stats: collapseStats } = collapseMergeNodes({

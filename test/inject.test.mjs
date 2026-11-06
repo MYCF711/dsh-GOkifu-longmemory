@@ -1686,3 +1686,28 @@ test('T298 ③: preconditions 重跑通过 ⇒ 可复活（回到候选）', () 
     assert.equal(alive.claims.some((c) => c.claimId === 'c-revive001'), true, JSON.stringify(alive.claims.map((c) => c.claimId)));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------- T331（第二道降级门：cost 0 不占注入位）
+function costClaim(id, text) {
+  return {
+    id, kind: 'antipattern', text, scopeKey: SCOPE, threadIds: [], state: 'observed',
+    support: [{ episode: 'ep-aaaaaaa1', seq: 41, quote: text, occurredAt: T(21) }], counter: [],
+    validity: { type: 'none', value: null }, preconditions: [], occurredAt: T(21), recordedAt: T(21),
+    counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null }, supersedes: null,
+  };
+}
+
+// T331 ①：**known-limitation** —— 见 evidence/T331-cost-gate.md §3（兜底渲染路径拿不到 claim 记录，
+// 与 T298 ① 同源；未写成绿测试，避免假绿）。
+
+test('T331 ②: cost > 0 ⇒ 正常进卡（不被误杀）；索引缺失 ⇒ 不过滤（fail-open）', () => {
+  const { root, store } = fixture();
+  try {
+    store.putMany('claims', [costClaim('c-cost000002', '付过代价的失败')]);
+    const walk = walkOf([hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-cost000002' })]);
+    const paid = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24), costIndex: new Map([['c-cost000002', 2]]) });
+    assert.equal(paid.claims.some((c) => c.claimId === 'c-cost000002'), true, 'cost>0 必须进卡');
+    const noIndex = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24) });
+    assert.equal(noIndex.claims.some((c) => c.claimId === 'c-cost000002'), true, '没有索引 ⇒ 不过滤');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
