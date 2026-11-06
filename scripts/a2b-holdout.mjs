@@ -25,6 +25,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import { createStore } from '../src/rooms/persist.mjs';
@@ -400,6 +401,7 @@ export function judgeCard({ card, store, item, minOverlap = 2, bigramFilter = nu
   return {
     itemId: item?.id ?? null,
     at: Number.isFinite(item?.at) ? item.at : null,
+    signalHash: signalHash(item?.signal),
     kind: item?.kind ?? null,
     signalSource: item?.signalSource ?? null,
     episode: item?.episode ?? null,
@@ -457,6 +459,58 @@ export function negativeControl({ store, exam, perItem = 3, signalMode = null } 
     }
   }
   return { n, bridged, tokenHit, bridgeRate: n ? bridged / n : null, tokenRate: n ? tokenHit / n : null, examples };
+}
+
+/**
+ * T318 · 信号哈希（把信号钉进考卷）。
+ * 为什么：T317 定位到"重归档后 37 条 episode 的根任务文本变了"，主判据现场重建 ⇒ 与冻结考卷拿不同信号。
+ * 修法：考卷存 `signalHash`；重放时**只读冻结信号**，并校验哈希——不符就拒绝出数。
+ */
+export function signalHash(text) {
+  return createHash('sha256').update(String(text ?? ''), 'utf8').digest('hex');
+}
+
+/**
+ * 重放**冻结考卷**（只读 exam.results[].signal，不重建 exam）。
+ * 与 `runHoldout` 的区别：信号、expected、at 全部来自考卷，库只用来建卡。
+ * @returns {{n, strictHits, strictRate, wilson, byKind, control, hashMismatch, controlCurrent}}
+ */
+export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache = null } = {}) {
+  const walkCache = cache ?? createWalkCache(store);
+  const items = Array.isArray(exam?.results) ? exam.results : [];
+  const rows = [];
+  const hashMismatch = [];
+  for (const item of items) {
+    const expect = typeof item.signalHash === 'string' ? item.signalHash : null;
+    const actual = signalHash(item.signal);
+    if (expect && expect !== actual) { hashMismatch.push({ itemId: item.itemId, expect: expect.slice(0, 12), actual: actual.slice(0, 12) }); continue; }
+    const at = Number.isFinite(item.at) ? Number(item.at) : Date.now();
+    const signal = signalFromText(item.signal, { at });
+    if (item.scopeKey) signal.scopeKey = item.scopeKey;
+    let card = null;
+    try {
+      const walk = walkFromSignals({ signal, store, scope: item.scopeKey, depth: 2, limit, budgetTokens, cache: walkCache });
+      card = buildMemoryCard({ cache: walkCache, signal, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens });
+    } catch { card = null; }
+    // 冻结考卷只存 expectedClaimIds（没有 expected.episodes）⇒ 必须补齐，否则 related 永远为假（T318 踩过）
+    // 冻结考卷只存 expectedClaimIds ⇒ 两条通道都补上（support 含该局 或 claim id 命中）
+    const expected = item.expected ?? {
+      episodes: [String(item.episode ?? '')],
+      claimIds: Array.isArray(item.expectedClaimIds) ? item.expectedClaimIds.map(String) : [],
+    };
+    const judged = judgeCard({ card, store, item: { ...item, signal: item.signal, at, expected } });
+    rows.push({ itemId: item.itemId, kind: item.kind, episode: item.episode, hitStrict: judged.hitStrict, rendered: judged.rendered, rows: judged.rows });
+  }
+  const strictHits = rows.filter((r) => r.hitStrict).length;
+  const n = rows.length;
+  const byKind = {};
+  for (const r of rows) {
+    const k = r.kind === 'repeat' ? 'repeat/signature' : `${r.kind}`;
+    byKind[k] = byKind[k] ?? { n: 0, strict: 0 };
+    byKind[k].n += 1;
+    if (r.hitStrict) byKind[k].strict += 1;
+  }
+  return { n, strictHits, strictRate: n ? strictHits / n : null, wilson: wilsonInterval(strictHits, n), byKind, hashMismatch, rows };
 }
 
 /** 跑全套考卷（只读）。 */
