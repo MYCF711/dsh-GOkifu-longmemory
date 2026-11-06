@@ -17,6 +17,31 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.43（2026-11-06）
+
+### tombstone 接进 CI（T301）+ 知识库 66（幂等与可复现）
+**CI 实测**（run 42162982297，`rules` job 日志原文）：
+```
+rules	tombstone-check（删掉实现必红）	Run timeout 120 node scripts/tombstone-check.mjs
+# tombstone 检查（删掉实现必红）
+```
+**tombstone 现在每次 PR 都会跑**，在 `node --test **之前**（先证明测试有效，再谈测试通过）。
+**故意让测试失效 ⇒ 该步骤 exit 1 ⇒ `rules` 红 ⇒ PR 不能合**（已本地验证）。
+
+### 知识库 66：幂等与可复现（T302）
+**reproducible-builds.org**：确定性要求"the current date and time **must not be recorded**"
+与"output always has to be written **in the same order**"；
+**"独立可验证"是关键词**（"independently-verifiable path from source to binary code"）⇒ **幂等是篡改检测的前提**。
+
+**"不幂等"的六种来源**：`Date.now()` / 遍历顺序不定 / 并发完成序 / 依赖外部状态 / **去重键选错**（路径当身份）/ 浮点随机。
+**验证四步**：**I1 双跑逐字节** · **I2 重放 0 变更** · **I3 换环境复跑** · **I4 崩溃点**（kill 后重跑不得重复插入）。
+
+**teammate 指出的真实风险**：`recordedAt` 是否参与内容比较（若参与 ⇒ 每次归档都不幂等）、
+`readdirSync` 是否已排序、`generatedAt` 是否已排除在 checksum 外 —— 待核。
+
+### 验证
+`check PASS`（66 篇）。
+
 ## 0.2.42（2026-11-06）
 
 ### tombstone 自动化（T300）
