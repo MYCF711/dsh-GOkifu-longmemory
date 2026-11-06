@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.42（2026-11-06）
+
+### tombstone 自动化（T300）
+**为什么必须自动化**：每个房间都要求 tombstone（`AGENTS.md` §11），**但一直靠人工跑一次** ⇒
+**写在契约里但没每次跑 = 没装**（知识库 65）。
+
+**实测**：
+```
+| src/rooms/walk.mjs → test/walk.test.mjs    | 有效 | exit 1 |
+| src/rooms/claim.mjs → test/claim.test.mjs  | 有效 | exit 1 |
+| src/rooms/persist.mjs → test/persist.test.mjs | 有效 | exit 1 |
+```
+**对照**（证明这些测试本来是绿的）：`walk 34/34 pass` · `claim 18/18 pass`。
+
+**三态**：有效（移走后红）/ **无效**（移走后仍绿 ⇒ **测试没覆盖该房间**，单列 + 退出码非 0）/ 未验证（测试不存在）。
+**硬约束**：`finally` **无条件恢复文件**（含"进程被杀"用例）；`git status src/` 干净。
+
+**踩到并修掉的真坑**：`node --test` **嵌套**跑时子进程继承 `NODE_TEST_CONTEXT` ⇒
+内层把结果走 **IPC 回父进程**，`status` 恒为 0 ⇒ **所有 tombstone 都会被误判「无效」**。
+修法：spawn 时删掉 `NODE_TEST_CONTEXT` / `NODE_OPTIONS`。
+
+### 验证
+5 条测试全绿；`check PASS`（65 篇）。
+
 ## 0.2.41（2026-11-06）
 
 ### 知识库 65：变异测试与测试有效性（T299）
