@@ -1,6 +1,6 @@
 {
   "name": "dsh-gokifu-longmemory",
-  "version": "0.2.40",
+  "version": "0.2.41",
   "private": true,
   "description": "DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜。私有自用，不发 npm。",
   "type": "module",
