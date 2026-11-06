@@ -26,6 +26,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pathToFileURL } from 'node:url';
+// T294：子代理失败归并（复用 T293 的实现，不复制第二份）
+import { appendMergedChild } from './subagent-merge.mjs';
 
 import {
   createStore,
@@ -403,6 +405,7 @@ export async function runArchive(opts = {}) {
   // ---- 3. 子代理归并：depth>0 且父局在语料里 ⇒ folded-into:<父局 id> ----
   const idBySession = new Map(built.map((b) => [b.record.sessionId, b.record.id]));
   let folded = 0;
+  let mergedChildren = 0;
   for (const item of built) {
     const rec = item.record;
     if (includeSubagents) continue;
@@ -413,6 +416,12 @@ export async function runArchive(opts = {}) {
       rec.foldedInto = parentId;
       rec.topics = [];
       folded += 1;
+      // T294：把子局的失败**自动归并**进父局（只增不改；按 from+seq 幂等；跨 scope 不并 → A5 仍 0）
+      const parentRec = built.find((x) => x.record.id === parentId)?.record ?? null;
+      const childFailures = Number(rec.signals?.failures ?? 0);
+      if (parentRec && childFailures > 0 && String(parentRec.scopeKey ?? '') === String(rec.scopeKey ?? '')) {
+        if (appendMergedChild(parentRec, { child: rec.id, failures: childFailures })) mergedChildren += 1;
+      }
     } else if (depth > 0) {
       warnings.push(`${rec.sessionId}: 子代理会话但父局不在语料里 ⇒ 保留 archived（不丢数据）`);
     }
@@ -546,6 +555,7 @@ export async function runArchive(opts = {}) {
       total: episodes.length,
       archived: archived.length,
       folded,
+      mergedChildren, // T294：本次归档**自动归并**进父局的子局数（只增不改、幂等）
       skipped: pairs.length - built.length,
     },
     derived: {

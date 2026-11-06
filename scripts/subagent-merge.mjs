@@ -182,3 +182,19 @@ function main(argv) {
 const invokedDirectly = process.argv[1] ? import.meta.url === pathToFileURLSafe(path.resolve(process.argv[1])) : false;
 function pathToFileURLSafe(p) { return new URL(`file://${p.replace(/\\/g, '/')}`).href; }
 if (invokedDirectly) process.exitCode = main(process.argv.slice(2));
+
+/**
+ * 把一条子局失败归并标记**追加**进父局记录（只增不改；按 `from + seq` 幂等）。
+ * 供 `scripts/archive.mjs` 在归档时调用（T294：接进管线，避免"字段没人写"）。
+ * @returns {boolean} true = 这次真的新增了；false = 已经归并过（重放幂等）
+ */
+export function appendMergedChild(parent, { child, failures = 0, seq = 0, at = Date.now() } = {}) {
+  if (!parent || typeof parent !== 'object') return false;
+  const signals = { ...(parent.signals ?? {}) };
+  const list = Array.isArray(signals.mergedChildren) ? [...signals.mergedChildren] : [];
+  if (list.some((m) => m?.from === child && Number(m?.seq ?? 0) === Number(seq))) return false;
+  list.push({ kind: REPAIR_KIND, from: child, seq: Number(seq), failures: Number(failures ?? 0), at });
+  signals.mergedChildren = list;
+  parent.signals = signals;
+  return true;
+}
