@@ -68,14 +68,14 @@
 ### 2.2.1 DSH 0.2.2-rc.1 / Cordis 4.1 兼容交接（2026-11-06，升级 Lead 写给当前插件 agent）
 
 **由当前正在推进本仓 main 的 agent 自己完成兼容，不要用升级任务的旧快照覆盖当前 main。**
-写入时 main 已到 `90750104` / package `0.3.3`（T339），live 分支仍可能继续移动；开工先重新读 `MAINTENANCE.md`、`package.json`、`git status` 与 `origin/main`，以**版本号更高的当前权威源码**为准，保留 T336–T339 及后续功能。旧 #377、#398 和独立快照只能作实现参考，不能直接当当前 live 的替换输入。
+交接经 PR #411 合入时 main 为 `548aad2` / package `0.3.3`（含 T339），live 分支仍可能继续移动；开工先重新读 `MAINTENANCE.md`、`package.json`、`git status` 与 `origin/main`，以**版本号更高的当前权威源码**为准，保留 T336–T339 及后续功能。旧 #377、#398 和独立快照只能作实现参考，不能直接当当前 live 的替换输入。
 
 **可读的参考实现与证据（只读）：**
 
 - PR `MYCF711/dsh-GOkifu-longmemory#398`，head `38a64ed8ffe35e1bd3ddff7e9d98cddabfbdc1d8`：完整的 rc1 生命周期实现，但 base 仅为 0.2.74，不能合并来覆盖 0.3.x。
 - 独立候选 `b7b2578b0f52e71cad18f774e77bfdabbab4907b`：基于 `1257fe8`（0.3.2）移植，保留 T336/T337，但不含 T338/T339，也只作逐 hunk 参考。
-- 最终生命周期报告：`tmp/dsh-latest-upgrade/longmemory-autobuild-shared-final.md`。
-- 真实探针：`tmp/dsh-latest-upgrade/longmemory-rc1-probe.mjs`；0.3.2 候选预提交日志：`longmemory-0.3.2-rc1-precommit.log`、`longmemory-0.3.2-full-precommit.log`。
+- 最终生命周期报告：`../tmp/dsh-latest-upgrade/longmemory-autobuild-shared-final.md`。
+- 真实探针：`../tmp/dsh-latest-upgrade/longmemory-rc1-probe.mjs`；0.3.2 候选预提交日志：`../tmp/dsh-latest-upgrade/longmemory-0.3.2-rc1-precommit.log`、`../tmp/dsh-latest-upgrade/longmemory-0.3.2-full-precommit.log`。
 
 **必须移植的兼容行为：**
 
@@ -106,10 +106,10 @@ LONGMEMORY_WORKTREE=<当前兼容worktree> \
 LONGMEMORY_PROBE_HOME=<全新的tmp隔离home> \
 ELECTRON_RUN_AS_NODE=1 \
 "D:/DeepSeek Harness/Desktop-0.2.2-rc.1/DeepSeek Harness.exe" \
-  tmp/dsh-latest-upgrade/longmemory-rc1-probe.mjs
+  ../tmp/dsh-latest-upgrade/longmemory-rc1-probe.mjs
 ```
 
-真实 rc1 探针应达到：`startupError=null`、核心 effect=function、disabled disposers 5→0、`sharedCalls=1`、`sharedFinished=1`、cancel/post-dispose calls=0、严格同 Promise、全部探针 disposers=0。`cleanShutdown=true` **只限探针 fibers**，不冒充完整 Desktop 验收。未适配基线应先复现 `Invalid effect`，适配后再转绿；完整测试、check、engines、syntax/diff 全绿后才正常 push 并开 Draft PR，required `rules` 必须通过。
+真实 rc1 探针应达到：`startupError=null`、核心 effect=function、disabled disposers 5→0、`autoBuildSharedCalls=1`、`autoBuildSharedFinished=1`、`autoBuildCancelCalls=0`、`autoBuildPostDisposeCalls=0`、严格同 Promise、全部探针 disposers=0。`cleanShutdown=true` **只限探针 fibers**，不冒充完整 Desktop 验收。未适配基线应先复现 `Invalid effect`，适配后再转绿；完整测试、check、engines、syntax/diff 全绿后才正常 push 并开 Draft PR，required `rules` 必须通过。
 
 **升级任务不替你合并 PR，也不修改 live/home/Desktop。** 最终由当前插件 agent 在 PR 正文和 issue #362 写最终 head、测试数、未验项与回滚；真实 archive/pack/install、完整 Desktop/GUI/HMR/长期运行仍需单独验收，不能用注入 `buildStore` 的探针冒充真实 archive。
 

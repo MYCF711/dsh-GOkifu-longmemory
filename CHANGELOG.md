@@ -17,6 +17,22 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.3.4（2026-11-06）
+
+### DSH 0.2.2-rc.1 / Cordis 4.1 兼容（R14 / #362）—— apply 改函数型 disposer，真实 rc1 探针双向验证
+**根因**：rc1/Cordis 4.1 要求插件 `apply` 返回**函数型 disposer**，旧版返回普通诊断对象 ⇒ `TypeError: Invalid effect`（插件加载即失败）。
+**移植**（自候选 `b7b2578b`，其 base 与 main 在这些文件上零差异，不碰 T339 的 extract-recovery）：
+- `src/plugin.mjs`：`apply` 经 `makeEffect` 返回函数型 disposer（同步置 disposed、逆序 off、严格复用同一 disposePromise）；autoBuild 共享 `Map<storeRoot,record>+owners`；pre-step/D5/turn-stopping 传同一 lifecycle，`isDisposed()` 阻止 stale 调度。
+- `packages/kifu-loader/index.mjs`：`async apply` 原样返回核心 effect 的 Promise（不混 coreSpec）。
+- `scripts/privacy-scan.mjs` 与 privacy 测试：Git 子进程只清理环境副本的仓库定位变量（不改父进程 env）。
+- `package.json` `engines.dsh` → `>=0.2.2-rc.1 <0.3.0-0`。
+**验收**：
+- 全量测试 **1013 条 / 1007 pass / 0 fail**（+9：T362/T367–T371/零配置自动建库等），check PASS。
+- **真实 rc1 探针**（Cordis 4.1.0 真实加载）：适配后 `LONGMEMORY_RC1_PROBE_PASS`（startupError=null、coreEffect=function、disposers 5→0、autoBuildSharedCalls=1/Finished=1、严格同 Promise、cleanShutdown=true）；未适配基线（main 0.3.3）复现 `TypeError: Invalid effect`（探针有判别力）。
+**未验项**：真实 archive/pack/install、完整 Desktop/GUI/HMR/长期运行（按 §2.2.1 仍需单独验收，探针只覆盖 fibers，不冒充）。
+**版本说明**：兼容修复、功能行为不变，故 patch（version-suggest 亦建议 0.3.4）。
+证据 `evidence/T340-rc1-compat.md`；交接 `AGENTS.md` §2.2.1。
+
 ## 0.3.3（2026-11-06）
 
 ### 命令主体恢复（T339）—— F3 测量覆盖率 4.51% → 11.05%
