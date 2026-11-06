@@ -37,7 +37,10 @@ import {
   MAX_DEPTH,
   WALK_DEFAULTS,
   TOKEN_RULE,
+  createWalkCache,
+  compareHits,
 } from '../src/rooms/walk.mjs';
+import { buildMemoryCard, signalFromText } from '../src/rooms/inject.mjs';
 import {
   normalizeScope as gateNormalizeScope,
   isScopeVisible as gateIsScopeVisible,
@@ -1141,4 +1144,53 @@ test('R11 相关度：overlap 全 0 时顺序与改动前完全相同（golden�
   const result = walkFromSignals({ signal: RANK_SIGNAL, store: target, scope: SCOPE, depth: 2, limit: 10, budgetTokens: 100_000 });
   // 两条 claim 文本都不含信号判别词（overlap 全 0）⇒ 走原 tie-break：occurredAt 降序
   assert.deepEqual(claimIds(result), ['c-plain-b', 'c-plain-a']);
+});
+
+// ---------------------------------------------------------------------------
+// 11 · T317：候选排序的**稳定总序**（claimId 二级键）
+// ---------------------------------------------------------------------------
+
+/** 造一份最小 store 视图：两条同局同 seq 的 claim（只用于卡片排序）。 */
+function stableSortFixture() {
+  const target = createStore({ root: path.join(tmp, `stable-${(seq += 1)}`), now: T0 });
+  target.ensureDirs();
+  target.putMany('episodes', [
+    episodeRecord({ id: 'ep-stable', topics: [epTopic(RANK_TOPIC)], failures: 1, at: T0 + 1_000, l0: '稳定排序局' }),
+  ], { at: T0 });
+  target.putMany('topics', [topicRecord(RANK_TOPIC, { episodes: ['ep-stable'] })], { at: T0 });
+  target.putMany('claims', [
+    // 同 kind / 同 occurredAt / 同 seq —— 只有 claimId 不同（文本都含信号判别词 bash）
+    claimRecord({ id: 'c-stable-b', kind: 'antipattern', text: 'bash 稳定 B', support: [{ episode: 'ep-stable', seq: 7, quote: 'q7', occurredAt: T0 + 2_000 }], occurredAt: T0 + 2_000 }),
+    claimRecord({ id: 'c-stable-a', kind: 'antipattern', text: 'bash 稳定 A', support: [{ episode: 'ep-stable', seq: 7, quote: 'q7', occurredAt: T0 + 2_000 }], occurredAt: T0 + 2_000 }),
+  ], { at: T0 });
+  return target;
+}
+
+test('T317 稳定排序：同分候选（同局同 seq）换输入顺序，卡面 claim 顺序不变（claimId 字典序）', () => {
+  const target = stableSortFixture();
+  const cache = createWalkCache(target);
+  const signal = RANK_SIGNAL;
+  const base = walkFromSignals({ signal, store: target, scope: SCOPE, depth: 2, limit: 10, budgetTokens: 100_000, cache });
+  assert.ok(base.hits.length >= 2, '夹具至少两条命中');
+  const build = (hits) => buildMemoryCard({
+    cache, signal, walkResult: { ...base, hits }, store: target, scope: SCOPE, now: T0 + 9_000, limit: 10, budgetTokens: 100_000,
+  }).claims.map((row) => String(row.claimId ?? '')).filter(Boolean);
+  const forward = build(base.hits);
+  const reversed = build([...base.hits].reverse());
+  assert.deepEqual(reversed, forward, '换输入顺序 ⇒ 卡面顺序必须完全相同');
+  // 并且顺序就是 claimId 字典序（确定性，不依赖插入/Map/FS 顺序）
+  assert.deepEqual(forward, [...forward].sort((a, b) => a.localeCompare(b)), '同分时按 claimId 字典序');
+});
+
+test('T317 稳定排序：主排序键不变（tokOverlap 仍是第一键，claimId 只在同分时生效）', () => {
+  // 直接对 compareHits 做白盒断言：overlap 高者胜，即使它的 claimId 字典序更差
+  const high = { _tokOverlap: 5, kind: 'failure', depth: 1, repeat: 1, weight: 1, occurredAt: T0 + 1, episode: 'ep-x', claim: 'c-zzz' };
+  const low = { _tokOverlap: 1, kind: 'failure', depth: 1, repeat: 1, weight: 1, occurredAt: T0 + 2, episode: 'ep-x', claim: 'c-aaa' };
+  assert.ok(compareHits(high, low) < 0, 'tokOverlap 5 必须排在 1 前（主键不变）');
+  assert.ok(compareHits(low, high) > 0, '反序对称');
+  // 同分（overlap 相同、其它键全同）⇒ claimId 字典序
+  const a = { ...high, claim: 'c-aaa' };
+  const b = { ...high, claim: 'c-bbb' };
+  assert.ok(compareHits(a, b) < 0, '同分时 c-aaa 在 c-bbb 前');
+  assert.ok(compareHits(b, a) > 0, '反序对称（总序，无 0 依赖插入序）');
 });
