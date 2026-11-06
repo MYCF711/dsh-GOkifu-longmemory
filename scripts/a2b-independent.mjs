@@ -66,9 +66,14 @@ export function run({ store, examPath = path.join(REPO_ROOT, 'evidence', 'a2b-ho
   const claims = store.list('claims').map((e) => e.record).filter(Boolean);
   const { df, n } = buildDf(claims.map((c) => String(c.text ?? '')));
   const cache = createWalkCache(store);
+  const claimsCount = claims.length;
+  const examClaimsCount = Number.isFinite(exam.claimsCount) ? Number(exam.claimsCount) : null;
+  let missingAt = 0;
   const out = [];
   for (const item of items) {
-    const at = Date.now();
+    // T315：用考卷里**钉死**的 at（缺省才回退到当前时间，并记警告）
+    const at = Number.isFinite(item.at) ? Number(item.at) : Date.now();
+    if (!Number.isFinite(item.at)) missingAt += 1;
     const sig = signalFromText(item.signal, { at });
     if (item.scopeKey) sig.scopeKey = item.scopeKey;
     const walk = walkFromSignals({ signal: sig, store, scope: item.scopeKey, depth: 2, limit, budgetTokens: 500, cache });
@@ -90,7 +95,7 @@ export function run({ store, examPath = path.join(REPO_ROOT, 'evidence', 'a2b-ho
   const mineHits = out.filter((x) => x.mine).length;
   const mainHits = out.filter((x) => x.main).length;
   const disagree = out.filter((x) => x.mine !== x.main);
-  return { n: out.length, mineHits, mainHits, agree: out.length - disagree.length, disagree, rows: out, mainRate: mainHits / out.length, mineRate: mineHits / out.length };
+  return { n: out.length, mineHits, mainHits, claimsCount, examClaimsCount, storeChanged: examClaimsCount !== null && examClaimsCount !== claimsCount, missingAt, agree: out.length - disagree.length, disagree, rows: out, mainRate: mainHits / out.length, mineRate: mineHits / out.length };
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -104,6 +109,7 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`我的实现：严格 ${r.mineHits}/${r.n} = ${pct(r.mineRate)}`);
   console.log(`主判据  ：严格 ${r.mainHits}/${r.n} = ${pct(r.mainRate)}`);
   console.log(`一致 ${r.agree}/${r.n} · 不一致 ${r.disagree.length}`);
+  console.log(`库规模：考卷 ${r.examClaimsCount ?? 'n/a'} vs 当前 ${r.claimsCount}${r.storeChanged ? ' ⇒ **库变了，不是同一次测量**' : '（一致）'} · 缺 at 的题 ${r.missingAt}`);
   for (const d of r.disagree.slice(0, 20)) console.log(`  ✗ ${d.itemId} · 我=${d.mine ? '中' : '不中'} 主=${d.main ? '中' : '不中'} · overlap=${d.overlap} · ${d.episode}`);
   return 0;
 }

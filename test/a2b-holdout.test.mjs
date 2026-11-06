@@ -362,3 +362,16 @@ test('T286 ③ 阈值 0.02 下误判率不高于不过滤（泛词被剔）', ()
   assert.ok(filtered <= raw, `过滤后 ${filtered} 不应高于 ${raw}`);
   assert.equal(filtered, 0, '全泛词 ⇒ 0');
 });
+
+test('T315 可复算三件套：结果带 at、顶层带 claimsCount', async () => {
+  const { runHoldout } = await import('../scripts/a2b-holdout.mjs');
+  assert.equal(typeof runHoldout, 'function');
+  // 结构性断言：judgeCard 的返回值应包含 at（用假 card 跑一条）
+  const { judgeCard } = await import('../scripts/a2b-holdout.mjs');
+  const store = { get: () => ({ support: [{ episode: 'ep-x' }], text: '反代插件' }) };
+  const card = { claims: [{ claimId: 'c-1' }] };
+  const j = judgeCard({ card, store, item: { id: 'i', at: 123, signal: '反代插件', expected: { episodes: ['ep-x'], claimIds: ['c-1'] } } });
+  assert.equal(j.at, 123, 'judgeCard 必须回传钉死的 at');
+  assert.ok(Array.isArray(j.rows) && j.rows.length === 1);
+  for (const k of ['related', 'strict', 'overlap', 'bigram', 'shared', 'episode']) assert.ok(k in j.rows[0], `row 缺字段 ${k}`);
+});
