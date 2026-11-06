@@ -585,6 +585,17 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
   const resolved = resolveSessionScope({ session, store, storeRoot });
   if (typeof session?.id === 'string') LAST_SCOPE.set(session.id, resolved);
   const scope = resolved.scope;
+  // T332：**costIndex 接线** —— 读预计算 sidecar（`<store>/corpus/antipattern-cost.json`），
+  // 交给 `buildMemoryCard` 做 `cost: 0` 降级门。**只读、失败静默**（索引缺失 ⇒ 不过滤，行为不变）。
+  let costIndex = null;
+  try {
+    const costFile = path.join(storeRoot, 'corpus', 'antipattern-cost.json');
+    if (fs.existsSync(costFile)) {
+      const raw = JSON.parse(fs.readFileSync(costFile, 'utf8'));
+      if (raw && raw.costs && typeof raw.costs === 'object') costIndex = new Map(Object.entries(raw.costs));
+    }
+  } catch { costIndex = null; }
+
   const signal = signalFromText(text, { at });
   // T268：采集真实消息语料（**只写盘、不参与判定**；失败静默降级）
   if (config.collectMessages === true) {
@@ -652,6 +663,8 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
     budgetTokens: config.budgetTokens,
     droppedCrossScope: scoped.dropped,
     droppedUnknownScope: scoped.droppedUnknown,
+    // T332：`cost: 0` 降级门（索引缺失 ⇒ null ⇒ 不过滤）
+    costIndex,
   });
   // 闸 3 真核验：只核**这张卡里出现的**条目（≤ limit 条），够用且不会每步扫全库。
   // 每条按它自己的 scopeKey 解析工作区（probeValidity 内部做），失败只记 reason、绝不抛。

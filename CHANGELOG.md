@@ -17,11 +17,11 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
-## 0.2.73（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
+## 0.2.74（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
 
 ### 最新 main 兼容移植与生命周期收尾（#362）
 
-- 初始基点为 `0c1ca27 / 0.2.62`；最终合并 `407d46c / 0.2.72`，保留 main 的知识库 77、antipattern cost、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
+- 初始基点为 `0c1ca27 / 0.2.62`；最终合并 `4235a58 / 0.2.73`，保留 main 的知识库 77、antipattern cost 与同分次序、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
 - 核心 `apply` 返回真实、幂等的 Cordis disposer；loader 保留独立包惰性解析并原样转发 effect；语料保持 `<DSH_HOME>/memory-context/corpus/messages.jsonl`；`engines.dsh=">=0.2.2-rc.1 <0.3.0-0"`。
 - 两个临时 Git 测试夹具与 `privacy-scan.listFilesToScan` 的生产 Git 调用均隔离仓库定位环境变量，确保显式 cwd。
 - `scheduleAutoBuild` 记录每次 apply 的 timer/task：dispose 取消未触发计时器并释放去重标记；已开始建库时等待 task 结束，且不再迟写成功/失败日志；并发及后续重复 dispose 复用同一清理 Promise。
@@ -29,8 +29,31 @@
 
 ### 验证
 
-- `timeout 300 node --test`：**998 tests / 992 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（77 篇）。
+- `timeout 300 node --test`：**1000 tests / 994 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（77 篇）。
 - 真实 rc1 ACTIVE(2)→DISPOSED(4)、核心 effect=function、disposers **5→0**、`cleanShutdown=true`（限探针 fiber），官方 engines evaluator `issue=null`。
+
+## 0.2.73（2026-11-06）
+
+### cost 同分次序（T333）—— 撤硬过滤；主判据不再掉 270→270
+**实测对比**（同一份 40 条样本）：
+| 方案 | 卡上 `cost: 0` | 行数 | 重叠（主判据粗代理） |
+|---|---|---|---|
+| **硬过滤（T332）** | 46 → 2 | 96 → 50 | **270 → 108（掉 60%）** |
+| **同分次序（T333）** | 46 → 46 | 96 → 96 | **270 → 270（一点没掉）** |
+
+**为什么硬过滤是错的**：`cost` 量的是"重试/返工/中断痕迹"，与"文本相关"**正交** ⇒
+**`cost: 0` 不能当硬过滤判据**（被过滤掉的正是与信号重合的那批）。
+
+**修法**：撤掉硬过滤；`buildEntry` 挂 `cost`；`compareEntries` 在主键全同后加
+`((b.cost ?? 0) - (a.cost ?? 0))` ⇒ **主键全同才比 cost**。
+**主排序键（`rank` / `tokOverlap`）一字未动**（T246）。
+
+**新增 2 条 tombstone**：主键不同 ⇒ **不看 cost**；主键全同 ⇒ `cost > 0` 排前，**两条都进卡**。
+
+**未验（如实）**：全量 A2b 未跑；`cost` 索引只覆盖 200/1105 条。
+
+### 验证
+66 条 inject 测试全绿；`check PASS`（77 篇）。
 
 ## 0.2.72（2026-11-06）
 
