@@ -17,6 +17,18 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.51（2026-11-06 · DSH 0.2.2-rc.1 兼容替换分支，未发布）
+
+### 最新 main 上的最小兼容整合（#362）
+
+- 基点为 `a96a0ce / 0.2.50`；完整保留 main 的 ablation、因果记录及此前功能。cherry-pick 期间 main 从 0.2.49 前进到 0.2.50，故本兼容版本号为 0.2.51。
+- 核心 `apply` 返回真实、幂等的 Cordis disposer；loader 保留独立包惰性解析并原样转发 effect；语料保持 `<DSH_HOME>/memory-context/corpus/messages.jsonl`；`engines.dsh=">=0.2.2-rc.1 <0.3.0-0"`。
+- 两个临时 Git 测试夹具隔离 pre-push 仓库定位变量；`privacy-scan.listFilesToScan` 的生产 Git 调用同样清理环境，确保显式 cwd。
+- 冲突仅涉及 `CHANGELOG.md`、`MAINTENANCE.md`、`package.json`：不沿用旧分支重号版本段，保留 main 文档并统一归入本段；适配代码、测试和计划行保留。
+
+### 验证
+
+- `timeout 300 node --test` 为 **952 tests / 946 pass / 0 fail / 6 skip、exit 0**；`timeout 300 node scripts/check.mjs` 为 **PASS、exit 0**。
 ## 0.2.50（2026-11-06）
 
 ### 诚实记录：**第一验收面（不重复踩坑）至今没有直接证据**
