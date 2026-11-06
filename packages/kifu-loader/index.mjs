@@ -49,12 +49,13 @@ export async function loadCore() {
   throw new Error(`kifu-loader: 解析不到核心插件（试过 ${tried.join(' · ')}）；请安装 dsh-gokifu-longmemory 或设置 KIFU_CORE_PATH`);
 }
 
-/** Cordis 入口：把 `tools` 服务交给核心插件。 */
+/**
+ * Cordis 4.1 入口：把 `tools` 服务交给核心插件，并原样转发其 effect/disposer。
+ * 诊断信息不走 apply 返回值；普通对象会被 Cordis 拒绝，函数型清理能力必须保留。
+ */
 export async function apply(ctx, config = {}) {
-  const { mod, spec } = await loadCore();
-  const res = await mod.apply(ctx, config);
-  if (typeof res === 'object' && res !== null) return { ...res, coreSpec: spec };
-  return res;
+  const { mod } = await loadCore();
+  return mod.apply(ctx, config);
 }
 
 export default { name, inject, apply };

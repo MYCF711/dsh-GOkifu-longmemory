@@ -56,6 +56,9 @@ function makeCtx() {
     },
     on: (event, handler) => {
       hooks[event] = handler;
+      return () => {
+        if (hooks[event] === handler) delete hooks[event];
+      };
     },
   };
   return { ctx, hooks, warns };
@@ -388,6 +391,223 @@ test('R16: apply 默认参数 ⇒ 注册钩子且默认开启（无库时沉默�
   assert.equal(typeof hooks[HOOK], 'function');
 });
 
+test('T362: apply 返回严格同 Promise 的 disposer，并同步清理两个事件钩子', async () => {
+  const { ctx, hooks } = makeCtx();
+  const effect = apply(ctx, { enabled: false, shadow: false, autoBuild: false });
+  assert.equal(typeof effect, 'function', 'Cordis 4.1 effect 必须是函数，不能是诊断对象');
+  assert.equal(effect.registered, true, '旧诊断字段作为 disposer 属性保留');
+  assert.equal(effect.config.enabled, false);
+  assert.equal(typeof hooks[HOOK], 'function');
+  assert.equal(typeof hooks['agent/turn-stopping'], 'function');
+  const first = effect();
+  assert.equal(typeof first?.then, 'function', '没有 build 时也必须返回 Promise');
+  assert.equal(hooks[HOOK], undefined, '事件 off 必须在首次调用内同步完成');
+  assert.equal(hooks['agent/turn-stopping'], undefined);
+  const second = effect();
+  assert.strictEqual(second, first, '并发重复 dispose 必须严格复用同一 Promise');
+  await first;
+  assert.strictEqual(effect(), first, '清理完成后仍必须返回同一 Promise');
+});
+
+test('T367: dispose 取消 queued timer、释放同 root，stale hook 不再调度', async () => {
+  const { ctx, hooks } = makeCtx();
+  const { session } = makeSession(tmpdir());
+  let calls = 0;
+  const storeRoot = path.join(tmpdir(), `kifuin-autobuild-cancel-${process.pid}-${Date.now()}`);
+  const config = () => baseConfig({
+    storeRoot,
+    autoBuild: true,
+    deps: { buildStore: async () => { calls += 1; } },
+  });
+  const effect = apply(ctx, config());
+  const original = enterDecision([userMessage('yaml 装不上')]);
+  const payload = { agent: { session }, messages: [userMessage('yaml 装不上')] };
+  await runHook({ hooks, payload, decision: original });
+  const staleHook = hooks[HOOK];
+  const disposing = effect();
+  assert.strictEqual(effect(), disposing);
+  await disposing;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 0, '计时器取消后不得再开始建库');
+  assert.deepEqual(hooks, {}, '两个监听器也必须清理');
+
+  await staleHook(payload, async () => original);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 0, '已捕获的 stale pre-step 也不得在 dispose 后重新调度');
+  assert.strictEqual(effect(), disposing, 'stale hook 之后重复 dispose 仍严格同 Promise');
+
+  const next = makeCtx();
+  const nextEffect = apply(next.ctx, config());
+  await runHook({ hooks: next.hooks, payload, decision: original });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 1, '取消必须释放全局锁，同 root 后续挂载可以重新建库');
+  await nextEffect();
+  assert.deepEqual(next.hooks, {});
+});
+
+test('T368: dispose-during-build 与并发重复调用均等待同一清理', async () => {
+  const { ctx, hooks, warns } = makeCtx();
+  const { session } = makeSession(tmpdir());
+  let calls = 0;
+  let finished = 0;
+  let markStarted;
+  let releaseBuild;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const gate = new Promise((resolve) => { releaseBuild = resolve; });
+  const storeRoot = path.join(tmpdir(), `kifuin-autobuild-dispose-${process.pid}-${Date.now()}`);
+  const effect = apply(ctx, baseConfig({
+    storeRoot,
+    autoBuild: true,
+    deps: {
+      buildStore: async () => {
+        calls += 1;
+        markStarted();
+        await gate;
+        finished += 1;
+      },
+    },
+  }));
+  const original = enterDecision([userMessage('yaml 装不上')]);
+  await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: original });
+  await started;
+  let settled = 0;
+  const first = effect();
+  const second = effect();
+  const disposing = Promise.resolve(first).then(() => { settled += 1; });
+  const repeated = Promise.resolve(second).then(() => { settled += 1; });
+  try {
+    assert.equal(second, first, '并发重复 dispose 必须复用首次清理 Promise');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(settled, 0, 'build 未结束时两次 dispose 都不得提前完成');
+    assert.equal(finished, 0, 'gate 未释放时 build 本身也不得完成');
+  } finally {
+    releaseBuild();
+    await Promise.all([disposing, repeated]);
+  }
+  assert.equal(calls, 1);
+  assert.equal(finished, 1, 'dispose 等待的是真实 build 完成');
+  assert.deepEqual(hooks, {});
+  assert.equal(warns.some((line) => line.includes('记忆库已刷新')), false, 'dispose 后不得迟写成功日志');
+  assert.equal(effect(), first, '清理完成后重复调用仍返回同一 Promise');
+});
+
+test('T369: 双 apply 同 root 共享 queued build，旧 owner dispose 不取消新 owner', { timeout: 3000 }, async () => {
+  const a = makeCtx();
+  const b = makeCtx();
+  const { session } = makeSession(tmpdir());
+  let calls = 0;
+  let laterCalls = 0;
+  let finished = 0;
+  let markStarted;
+  let releaseBuild;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const gate = new Promise((resolve) => { releaseBuild = resolve; });
+  const storeRoot = path.join(tmpdir(), `kifuin-autobuild-shared-queued-${process.pid}-${Date.now()}`);
+  const effectA = apply(a.ctx, baseConfig({
+    storeRoot,
+    autoBuild: true,
+    deps: {
+      buildStore: async () => {
+        calls += 1;
+        markStarted();
+        await gate;
+        finished += 1;
+      },
+    },
+  }));
+  const effectB = apply(b.ctx, baseConfig({
+    storeRoot,
+    autoBuild: true,
+    deps: { buildStore: async () => { laterCalls += 1; } },
+  }));
+  const original = enterDecision([userMessage('yaml 装不上')]);
+  const payload = { agent: { session }, messages: [userMessage('yaml 装不上')] };
+  try {
+    await runHook({ hooks: a.hooks, payload, decision: original });
+    await runHook({ hooks: b.hooks, payload, decision: original });
+
+    const disposingA = effectA();
+    assert.strictEqual(effectA(), disposingA);
+    await disposingA;
+    await started;
+    assert.equal(calls, 1, 'A 退出后 B 仍必须启动共享 queued build');
+    assert.equal(laterCalls, 0, '后到 apply 共享先到 record/task，不另起 build');
+
+    const disposingB = effectB();
+    assert.equal(typeof disposingB?.then, 'function');
+    let settledB = false;
+    const observedB = disposingB.then(() => { settledB = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(settledB, false, 'running build 未完成时 B dispose 必须等待共享 task');
+    assert.equal(finished, 0);
+    releaseBuild();
+    await Promise.all([disposingB, observedB]);
+  } finally {
+    releaseBuild();
+    await Promise.all([effectA(), effectB()]);
+  }
+  assert.equal(calls, 1);
+  assert.equal(laterCalls, 0);
+  assert.equal(finished, 1);
+  assert.deepEqual(a.hooks, {});
+  assert.deepEqual(b.hooks, {});
+});
+
+test('T370: 双 apply 同 root running 时 owner 先后 dispose 都等待共享 task', { timeout: 3000 }, async () => {
+  const a = makeCtx();
+  const b = makeCtx();
+  const { session } = makeSession(tmpdir());
+  let calls = 0;
+  let finished = 0;
+  let markStarted;
+  let releaseBuild;
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const gate = new Promise((resolve) => { releaseBuild = resolve; });
+  const storeRoot = path.join(tmpdir(), `kifuin-autobuild-shared-running-${process.pid}-${Date.now()}`);
+  const buildStore = async () => {
+    calls += 1;
+    markStarted();
+    await gate;
+    finished += 1;
+  };
+  const effectA = apply(a.ctx, baseConfig({ storeRoot, autoBuild: true, deps: { buildStore } }));
+  const effectB = apply(b.ctx, baseConfig({ storeRoot, autoBuild: true, deps: { buildStore } }));
+  const original = enterDecision([userMessage('yaml 装不上')]);
+  const payload = { agent: { session }, messages: [userMessage('yaml 装不上')] };
+  try {
+    await runHook({ hooks: a.hooks, payload, decision: original });
+    await runHook({ hooks: b.hooks, payload, decision: original });
+    await started;
+    assert.equal(calls, 1);
+
+    const disposingA = effectA();
+    let settledA = false;
+    const observedA = disposingA.then(() => { settledA = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(settledA, false, '第一个 running owner dispose 必须等待');
+    assert.equal(finished, 0);
+
+    const disposingB = effectB();
+    assert.equal(typeof disposingB?.then, 'function', '第二个 owner 必须持有同一共享 task');
+    let settledB = false;
+    const observedB = disposingB.then(() => { settledB = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(settledA, false);
+    assert.equal(settledB, false, '后 dispose 的 running owner 也必须等待');
+    assert.equal(finished, 0);
+
+    releaseBuild();
+    await Promise.all([disposingA, disposingB, observedA, observedB]);
+  } finally {
+    releaseBuild();
+    await Promise.all([effectA(), effectB()]);
+  }
+  assert.equal(calls, 1, '两个 running owner 只能共享一次真实 build');
+  assert.equal(finished, 1);
+  assert.deepEqual(a.hooks, {});
+  assert.deepEqual(b.hooks, {});
+});
+
 test('R16: decision.kind !== "enter" ⇒ 原样返回（不碰 messages）', async () => {
   const { ctx, hooks } = makeCtx();
   const { session } = makeSession(tmpdir());
@@ -602,22 +822,60 @@ test('R16: storeRoot 支持 <DSH_HOME> / $DSH_HOME 占位符；无 home 时视�
   }
 });
 
-test('R16: 零配置自动建库 —— 库不存在时后台调 buildStore 一次，本次沉默', async () => {
+test('R16: 零配置自动建库 —— 本次沉默，成功 record 保留去重', async () => {
   const { ctx, hooks, warns } = makeCtx();
   const { session } = makeSession(tmpdir());
   let calls = 0;
   const storeRoot = path.join(tmpdir(), `kifuin-autobuild-${process.pid}-${Date.now()}`);
-  apply(ctx, baseConfig({
+  const effect = apply(ctx, baseConfig({
     storeRoot,
     autoBuild: true,
     deps: { buildStore: async () => { calls += 1; } },
   }));
   const original = enterDecision([userMessage('yaml 装不上')]);
-  const out = await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: original });
+  const payload = { agent: { session }, messages: [userMessage('yaml 装不上')] };
+  const out = await runHook({ hooks, payload, decision: original });
   assert.equal(out, original, '建库期间必须沉默');
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(calls, 1, '后台应当只建一次');
   assert.ok(warns.some((w) => w.includes('记忆库不存在')), warns.join(' | '));
+
+  await runHook({ hooks, payload, decision: original });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 1, '成功 record 必须保留，同 root 再次 pre-step 不重复建库');
+  await effect();
+});
+
+test('T371: autoBuild reject 后删除当前 record，重试成功后去重', async () => {
+  const { ctx, hooks, warns } = makeCtx();
+  const { session } = makeSession(tmpdir());
+  let calls = 0;
+  const storeRoot = path.join(tmpdir(), `kifuin-autobuild-retry-${process.pid}-${Date.now()}`);
+  const effect = apply(ctx, baseConfig({
+    storeRoot,
+    autoBuild: true,
+    deps: {
+      buildStore: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('intentional build reject');
+      },
+    },
+  }));
+  const original = enterDecision([userMessage('yaml 装不上')]);
+  const payload = { agent: { session }, messages: [userMessage('yaml 装不上')] };
+  await runHook({ hooks, payload, decision: original });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 1);
+  assert.equal(warns.filter((line) => line.includes('自动建库失败') && line.includes('intentional build reject')).length, 1);
+
+  await runHook({ hooks, payload, decision: original });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 2, '失败必须释放当前 record，下一次 pre-step 可以重试');
+
+  await runHook({ hooks, payload, decision: original });
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(calls, 2, '重试成功后保留 record，第三次不再建库');
+  await effect();
 });
 
 test('R16: 设置页 schema —— 暴露 storeRoot（记忆库地址）等字段，validate 归一化', async () => {
@@ -658,6 +916,7 @@ test('D1: turn-stopping 在库过期时触发一次刷新，未过期不触发',
   await hooks['agent/turn-stopping']({});
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(calls, 1, '未过期不应刷新');
+  await res();
 });
 
 // D5（2026-11-02，主人批准）：同会话同类失败 ≥N 次 ⇒ 补一次事实卡
@@ -1041,4 +1300,26 @@ test('T282 ② tombstone: 写入只落 store root，**仓库目录里不出现�
 test('T282 ③: 写失败静默降级（返回 false，不抛）', () => {
   const boom = { mkdirSync() { throw new Error('EACCES'); }, appendFileSync() { throw new Error('EACCES'); } };
   assert.equal(appendMessageCorpus('D:/nope-t282', messageCorpusRow({ messages: [{ role: 'user', content: 'x' }] }), { fsImpl: boom }), false);
+});
+
+test('T282 ④: 真实 pre-step 语料只写 <storeRoot>/corpus/messages.jsonl', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    const { session } = makeSession(workspace);
+    apply(ctx, baseConfig({ storeRoot, collectMessages: true, probeValidity: false }));
+    await runHook({
+      hooks,
+      payload: { agent: { session }, messages: [userMessage('yaml 装不上')] },
+      decision: enterDecision([userMessage('yaml 装不上')]),
+    });
+    const corpus = messageCorpusPath(storeRoot);
+    assert.equal(existsSync(corpus), true);
+    const rows = readFileSync(corpus, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].messages.at(-1).text, 'yaml 装不上');
+    assert.equal(existsSync(path.join(workspace, 'evidence', 'T268-messages.jsonl')), false);
+  } finally {
+    cleanup();
+  }
 });
