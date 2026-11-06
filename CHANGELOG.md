@@ -17,6 +17,17 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.5（2026-11-07）
+
+### SI-5 历史欠账文件化（T351）—— 精确豁免，绝不回填
+**版本说明**：`scripts/semantic-check.mjs` 新增「文件化已知缺口」加载 ⇒ patch 0.8.5。
+**问题**：59 条历史 fix 缺 `toOccurredAt`（T238/T260 之前只换 seq、不记时间），只在 `--all` 口径下暴露，采样口径看不见。
+**为什么不回填**：SI-5 判据是 `fixes[].toOccurredAt == support[].occurredAt`；用 support 回填会让不变量**恒真**，等于把闸拆了。
+**做法**：生成 `evidence/si-known-gaps.json`（59 条，含 why/since）入库审计；`knownGapOf` 先查硬编码再查文件，**四元组全等才豁免**（kind+claimId+episode+seq），任何新违规照旧红。
+**验收（--all）**：fail **214 → 156**；SI-5 由 58 ✗ 变为 **59 ·（已知缺口，可见）**；SI-1 156 ✗ 保持不变 —— 那是**真实欠账**，只能靠应用 T350 已验证的重指计划修。
+**测试**：`test/semantic-check.test.mjs` +3（T351 ①②③），其中 ② 是 tombstone（换 claimId/episode/seq/kind 任一即不豁免）。全量 **1043 条 / 1037 pass / 0 fail**；check PASS。
+证据 `evidence/T351-si-known-gaps.md`。
+
 ## 0.8.4（2026-11-07）
 
 ### 重指的 SI-4b 同步 + 已验证的修复计划（T350）
