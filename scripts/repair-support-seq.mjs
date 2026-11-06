@@ -72,18 +72,36 @@ export function locateQuoteSeq({ quote, seq, eventIndex }) {
   const hits = candidates.map((sq) => ({ seq: sq, type: String(eventIndex.get(sq)?.type ?? 'unknown') }));
   if (candidates.length === 1) {
     const to = candidates[0];
-    return { status: 'repair', from: Number.isFinite(from) ? from : null, to, toTime: eventIndex.get(to)?.time ?? null, candidates, hits, eventType: hits[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'quote-not-at-seq' };
+    return { status: 'repair', from: Number.isFinite(from) ? from : null, to, toTime: traceableTimeOf(eventIndex, to).time, candidates, hits, eventType: hits[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'quote-not-at-seq' };
   }
   if (candidates.length > 1) {
     // T257 消歧：原始出处（tool/result）优先于模型回显（assistant/message）
     const tool = hits.filter((h) => /^tool(\/|$)/.test(h.type));
     if (tool.length === 1) {
       const to = tool[0].seq;
-      return { status: 'repair', from: Number.isFinite(from) ? from : null, to, toTime: eventIndex.get(to)?.time ?? null, candidates: tool.map((h) => h.seq), hits, eventType: tool[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'disambiguated-tool-result' };
+      return { status: 'repair', from: Number.isFinite(from) ? from : null, to, toTime: traceableTimeOf(eventIndex, to).time, candidates: tool.map((h) => h.seq), hits, eventType: tool[0].type, distance: Number.isFinite(from) ? to - from : null, reason: 'disambiguated-tool-result' };
     }
     return { status: 'ambiguous', from: Number.isFinite(from) ? from : null, to: null, candidates, hits, eventType: null, distance: null, reason: tool.length > 1 ? `multiple-tool-results:${tool.length}` : 'echo-only' };
   }
   return { status: 'unrepaired', from: Number.isFinite(from) ? from : null, to: null, candidates: [], eventType: null, distance: null, reason: 'quote-not-found' };
+}
+
+/**
+ * T348 · 可回溯时间：重指必须能写进 `provenanceRepair.fixes[].toOccurredAt`（SI-5 硬要求）。
+ * 目标事件自己没有 `time` 时**向前回退**（seq-1 → 更早），与 `src/rooms/extract.mjs` 的 `occurredAtOf` 同语义；
+ * 一路都没有 ⇒ `time:null`，调用方**必须放弃重指**（不可回溯的重指比不重指更糟）。
+ */
+export function traceableTimeOf(eventIndex, seq) {
+  const s = Number(seq);
+  if (!Number.isFinite(s)) return { time: null, source: null };
+  // 注意：`Number(null) === 0` —— 必须直接对原值用 `Number.isFinite`（它不做强制转换）
+  const own = eventIndex.get(s)?.time;
+  if (Number.isFinite(own)) return { time: own, source: 'event' };
+  for (let k = s - 1; k >= 0; k -= 1) {
+    const t = eventIndex.get(k)?.time;
+    if (Number.isFinite(t)) return { time: t, source: 'previous-event' };
+  }
+  return { time: null, source: null };
 }
 
 /** 真实日志读取器：episode → events（找不到返回 null）。 */
@@ -115,7 +133,17 @@ export function makeLogLoader({ home = defaultHome() } = {}) {
  * 生成修复计划（**不写任何东西**）。
  * @returns {{scanned:number, refs:number, ok:number, repair:Array, ambiguous:Array, unrepaired:Array, skipped:Array, unreadable:number}}
  */
-export function planRepairs({ claims, episodes, loadEvents }) {
+/**
+ * T348 · 局级事件索引的有界缓存容量。
+ *
+ * 为什么必须有界：`buildEventIndex` 为每局保留**全文**（`text` + `joined` 两份），
+ * 单局 2.4 万事件 ≈ 24MB；真库 200+ 局 ⇒ 4.8GB ⇒ 旧实现在 4GB 堆上直接
+ * `FATAL ERROR: Ineffective mark-compacts near heap limit`（2026-11-06 实测）。
+ * 有界后峰值 ≈ 容量 × 单局，最坏只是回退重算（慢一点），不会 OOM。
+ */
+export const EPISODE_INDEX_CACHE_MAX = 8;
+
+export function planRepairs({ claims, episodes, loadEvents, indexCacheMax = EPISODE_INDEX_CACHE_MAX }) {
   const epById = new Map((Array.isArray(episodes) ? episodes : []).map((e) => [String(e?.id ?? ''), e]));
   const indexCache = new Map();
   const out = { scanned: 0, refs: 0, ok: 0, repair: [], dateSync: [], ambiguous: [], unrepaired: [], skipped: [], unreadable: 0, buckets: { 'multiple-tool': 0, 'echo-only': 0 } };
@@ -133,6 +161,11 @@ export function planRepairs({ claims, episodes, loadEvents }) {
         const events = loadEvents(epId, ep);
         if (!events) { index = null; out.unreadable += 1; }
         else index = buildEventIndex(events);
+        // T348 · 有界 LRU：Map 保插入序，超容量就淘汰最老的（只影响速度，不影响正确性）
+        if (indexCache.size >= indexCacheMax) {
+          const oldest = indexCache.keys().next().value;
+          if (oldest !== undefined) indexCache.delete(oldest);
+        }
         indexCache.set(epId, index);
       }
       if (!index) { out.unreadable += 1; continue; }
@@ -190,42 +223,48 @@ export function applyPlan({ store, plan, apply = false, at = Date.now() }) {
   // T260 · 只同步日期的行（seq 早已重指）
   for (const row of plan.dateSync ?? []) push(row, 'dateSync');
   const changed = [];
+  const skippedNoTime = [];
   for (const [claimId, rows] of byClaim) {
     const entry = store.list('claims').find((e) => e.id === claimId);
     if (!entry) continue;
     const record = entry.record;
     const support = Array.isArray(record.support) ? record.support.map((s) => ({ ...s })) : [];
-    let touched = false;
+    const applied = [];
     for (const row of rows) {
       const ref = support[row.index];
       if (!ref) continue;
+      // T348：`Number(null)===0` —— 只认真正的有限数值，别把 null 当 0
+      const traceable = row.toOccurredAt !== null && row.toOccurredAt !== undefined
+        && row.toOccurredAt !== '' && Number.isFinite(Number(row.toOccurredAt));
       if (row.kind === 'dateSync') {
+        if (!traceable) continue;
         const declared = Number(ref.occurredAt);
-        if (!Number.isFinite(Number(row.toOccurredAt))) continue;
         if (Math.abs(Number(row.toOccurredAt) - declared) <= 1000) continue;
         ref.occurredAt = Number(row.toOccurredAt);
-        touched = true;
+        applied.push(row);
         continue;
       }
       if (Number(ref.seq) !== Number(row.from)) continue; // 已被别人改过 ⇒ 跳过
+      // T348 · 全有或全无：时间不可回溯 ⇒ **不重指**（否则「指针换了、时间没换」= 自相矛盾，
+      // 且 fixes[].toOccurredAt 只能写 null ⇒ 直接违反 SI-5 重指留痕）。
+      if (!traceable) { skippedNoTime.push({ claimId, index: row.index, from: row.from, to: row.to }); continue; }
       ref.seq = row.to;
-      // T260 · 重指 seq 必须同步 occurredAt = 新事件的 time（否则"指针换了、时间没换"= 自相矛盾）
-      if (Number.isFinite(Number(row.toOccurredAt))) ref.occurredAt = Number(row.toOccurredAt);
-      touched = true;
+      ref.occurredAt = Number(row.toOccurredAt);
+      applied.push(row);
     }
-    if (!touched) continue;
+    if (!applied.length) continue;
     const next = {
       ...record,
       support,
       provenanceRepair: [
         ...(Array.isArray(record.provenanceRepair) ? record.provenanceRepair : []),
-        { at, version: REPAIR_VERSION, fixes: rows.map((r) => ({ from: r.from, to: r.to, fromOccurredAt: Number.isFinite(Number(r.fromOccurredAt)) ? Number(r.fromOccurredAt) : null, toOccurredAt: Number.isFinite(Number(r.toOccurredAt)) ? Number(r.toOccurredAt) : null, reason: r.reason, eventType: r.eventType, index: r.index })), evidenceSeq: rows[0].to },
+        { at, version: REPAIR_VERSION, fixes: applied.map((r) => ({ from: r.from, to: r.to, fromOccurredAt: Number.isFinite(Number(r.fromOccurredAt)) ? Number(r.fromOccurredAt) : null, toOccurredAt: Number(r.toOccurredAt), reason: r.reason, eventType: r.eventType, index: r.index })), evidenceSeq: applied[0].to },
       ],
     };
-    changed.push({ claimId, fixes: rows.length });
+    changed.push({ claimId, fixes: applied.length });
     if (apply) store.put('claims', next, { at });
   }
-  return { changed: changed.length, fixes: changed.reduce((n, c) => n + c.fixes, 0), claims: changed };
+  return { changed: changed.length, fixes: changed.reduce((n, c) => n + c.fixes, 0), claims: changed, skippedNoTime };
 }
 
 export function formatReport(plan, result = null) {

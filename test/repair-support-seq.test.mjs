@@ -15,7 +15,7 @@ import path from 'node:path';
 
 import { createStore } from '../src/rooms/persist.mjs';
 import { runCli } from '../scripts/repair-support-seq.mjs';
-import { locateQuoteSeq, buildEventIndex, planRepairs, applyPlan } from '../scripts/repair-support-seq.mjs';
+import { locateQuoteSeq, buildEventIndex, planRepairs, applyPlan, traceableTimeOf } from '../scripts/repair-support-seq.mjs';
 
 const T0 = 1_700_000_000_000;
 let tmp;
@@ -23,7 +23,8 @@ test.before(() => { tmp = mkdtempSync(path.join(tmpdir(), 'kifu-t238-')); });
 test.after(() => { if (tmp) rmSync(tmp, { recursive: true, force: true }); });
 
 /** 造事件：seq → 文本 + 类型。 */
-const ev = (seq, text, type = 'tool/result') => ({ seq, type, data: { content: [{ type: 'text', text }] } });
+// T348：真实日志每条事件都带 time；重指必须能把它写进 fixes[].toOccurredAt（SI-5 硬要求）
+const ev = (seq, text, type = 'tool/result', time = T0 + seq * 1000) => ({ seq, type, time, data: { content: [{ type: 'text', text }] } });
 
 const INDEX = buildEventIndex([
   ev(10, '思考：这里不该是 3670', 'assistant'),
@@ -212,4 +213,47 @@ test('T260 ③: 幂等 —— 日期同步后再跑第二次 0 变更（dateSync
   assert.equal(p2.repair.length, 0);
   assert.equal(p2.dateSync.length, 0, '日期已同步 ⇒ 不该再有 dateSync');
   assert.equal(applyPlan({ store, plan: p2, apply: true, at: T0 + 2 }).changed, 0);
+});
+
+// ─── T348 · 不可回溯时间 ⇒ 拒绝重指（全有或全无）───
+test('T348 ① traceableTimeOf：事件自己没有 time ⇒ 回退到更早的事件（previous-event）', () => {
+  const idx = buildEventIndex([
+    { seq: 10, type: 'tool/result', time: T0 + 10_000, data: { content: [{ type: 'text', text: 'a' }] } },
+    { seq: 11, type: 'tool/result', data: { content: [{ type: 'text', text: 'b' }] } },
+  ]);
+  assert.deepEqual(traceableTimeOf(idx, 10), { time: T0 + 10_000, source: 'event' });
+  assert.deepEqual(traceableTimeOf(idx, 11), { time: T0 + 10_000, source: 'previous-event' });
+  assert.deepEqual(traceableTimeOf(idx, 999), { time: T0 + 10_000, source: 'previous-event' }, '越界仍回退到最近的有时间事件');
+  // 全库都没有时间 ⇒ 才允许返回 null（调用方必须放弃重指）
+  const noTime = buildEventIndex([{ seq: 10, type: 'tool/result', data: { content: [{ type: 'text', text: 'a' }] } }]);
+  assert.deepEqual(traceableTimeOf(noTime, 10), { time: null, source: null });
+});
+
+test('T348 ② 目标事件无任何可回溯时间 ⇒ 不重指、support 一个字节不动（tombstone）', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifu-t348-'));
+  try {
+    const store = createStore({ root });
+    store.ensureDirs();
+    store.putMany('claims', [{
+      id: 'c-t348', kind: 'antipattern', text: 'fatal: unable to access github.com/MYCF711/dsh-ui',
+      scopeKey: 'w:d:/work/demo', threadIds: [], state: 'observed',
+      support: [{ episode: 'ep-aaaaaaaa', seq: 10, quote: 'fatal: unable to access github.com/MYCF711/dsh-ui', occurredAt: T0 + 10_000 }],
+      counter: [], validity: { type: 'none', value: null }, preconditions: [],
+      occurredAt: T0 + 10_000, recordedAt: T0 + 10_000, validFrom: null, validTo: null,
+      counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null }, supersedes: null,
+    }]);
+    // 目标事件（seq 14）**没有 time**，且更早的事件也没有 ⇒ 时间不可回溯
+    const eventsNoTime = [
+      { seq: 10, type: 'assistant', data: { content: [{ type: 'text', text: '思考' }] } },
+      { seq: 14, type: 'tool/result', data: { content: [{ type: 'text', text: 'fatal: unable to access github.com/MYCF711/dsh-ui' }] } },
+    ];
+    const plan = planRepairs({ claims: store.list('claims').map((e) => e.record), episodes: [{ id: 'ep-aaaaaaaa' }], loadEvents: () => eventsNoTime });
+    const res = applyPlan({ store, plan, apply: true, at: T0 + 99_000 });
+    assert.equal(res.changed, 0, '不可回溯 ⇒ 一条都不许改');
+    assert.equal(res.skippedNoTime.length, 1, '必须记进 skippedNoTime（可见的放弃，不是静默）');
+    const after = store.list('claims').map((e) => e.record).find((c) => c.id === 'c-t348');
+    assert.equal(after.support[0].seq, 10, 'seq 不许动');
+    assert.equal(after.support[0].occurredAt, T0 + 10_000, 'occurredAt 不许动');
+    assert.equal(after.provenanceRepair, undefined, '不许写不可回溯的 provenanceRepair');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

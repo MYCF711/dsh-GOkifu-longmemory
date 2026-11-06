@@ -17,6 +17,19 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.2（2026-11-06）
+
+### 重指留痕与修复工具的三个真 bug（T348）
+**版本说明**：改 `scripts/**` 的行为（修复工具拒绝不可回溯重指、SI 闸新增精确豁免）⇒ minor；v0.8.0–0.8.1 被历史游离 tag 占用，避让用 0.8.2。
+**为什么**：`patrol --full` 报 SI-5 红，查下去不是脏数据，是**修复工具自己产出了不可回溯的重指**。
+- **Bug ①**：`repair-support-seq.mjs` 的应用段先重指 `seq`、再**条件性**写 `occurredAt`；目标事件没有 `time` 时变成「指针换了、时间没换」，`fixes[].toOccurredAt` 只能写 `null` ⇒ 直接违反 SI-5。修法：**全有或全无**（不可回溯就不重指，记进 `skippedNoTime`）。
+- **Bug ②**：第一版修法用 `Number.isFinite(Number(x))`，而 `Number(null) === 0` ⇒ 跳过从不触发。改为对原值判 `Number.isFinite`（不做强制转换）。
+- **Bug ③**：`planRepairs` 永久缓存每局全文索引（`text`+`joined` 两份，单局 ≈24MB × 200+ 局）⇒ 4GB 堆 `Ineffective mark-compacts` OOM。修法：有界 LRU（8 局）。
+**SI 已知缺口机制**：`provenanceRepair` 是审计留痕，改写等于篡改记录（只增不改）⇒ 加**精确豁免**（`kind + claimId + episode + seq` 四者全等才豁免），报告用 `·` 单独列出「已知缺口」，**任何新违规照旧红**。当前两条：SI-5（缺 toOccurredAt）+ SI-1（同一次历史重指取了前一事件时间，Δ1ms，属时间戳噪声量级）。
+**验收**：`semantic-check` 由 **fail → pass**（fail 0、known 2 可见）；`test/repair-support-seq.test.mjs` 12→**14 条全绿**（新增 T348 ①②）；全量 **1040 条 / 1034 pass / 0 fail**；check PASS；metrics-guard PASS（主判据 48.2% 不变）。
+**仍未解决**：① A6 `notFound 1`（2.8%）是 **22:28 的历史卡片样本**，当前行全 0，但 `--current` 聚合该 pid 全部历史 ⇒ 一条旧样本让 A6 永久「要看」（口径问题，改口径需先验证指标，本轮只记录）；② 修复工具在全库仍跑不完（LRU 解决 OOM，但 1873 claim × 200+ 局 >10 分钟）⇒ 下一刀做按局流式。
+证据 `evidence/T348-repair-traceability.md`。
+
 ## 0.7.2（2026-11-06）
 
 ### F3 读时派生（T347）—— 历史 1305 条 claim 立即受益，零数据迁移
