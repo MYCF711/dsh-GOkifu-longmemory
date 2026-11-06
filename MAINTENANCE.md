@@ -26,9 +26,9 @@
 
 | 资产 | 数值 |
 |---|---|
-| 测试 | **1043 条**（1037 pass / 0 fail / 6 skip）[本] 2026-11-07 01:17 |
-| 六轴 | A1 **0.00%** · A2 **20.38%** · A3 live · A4 p50 **29.84ms（3 次中位数，单次抖动 ±2ms）**（p50 是抖动量，按量级校验：台账 ≤ max(实测×2, 实测+20ms)） · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-07 01:17 · node scripts/m5-report.mjs` |
-| 语料 | 1269 局 / **589 卷** / **claim 1873**（有效期已止 129；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-07 01:17 · node scripts/cli.mjs audit + store` |
+| 测试 | **1045 条**（1039 pass / 0 fail / 6 skip）[本] 2026-11-07 02:41 |
+| 六轴 | A1 **0.00%** · A2 **20.46%** · A3 live · A4 p50 **18.53ms（3 次中位数，单次抖动 ±2ms）**（p50 是抖动量，按量级校验：台账 ≤ max(实测×2, 实测+20ms)） · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-07 02:41 · node scripts/m5-report.mjs` |
+| 语料 | 1269 局 / **589 卷** / **claim 1873**（有效期已止 129；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-07 02:41 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
 | 已发布 | **0.15.0 → 0.178.1 → 0.8.5 的 CHANGELOG 段齐全**（0.2.x 起为新里程碑；v0.2.0 是 2026-11-01 的旧 tag）；v0.116.0 见下方缺口说明，v0.117.0 已补发 tag + Release；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：**0.6.3（2026-11-06）有 CHANGELOG 段但无 tag** —— 发版时 `ledger-check --full` 被 `test/sigindex.test.mjs` 的 flaky 红挡住，根因是真实缓存 bug（T346），修好后内容随 **0.6.4** 一并发布；0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。**0.116.0 归入"无 tag"**：原 `v0.116.0` tag 指在 PR 前的分支提交（`046509f`，其 `package.json` 已是 0.117.0）⇒ 版本与内容错位，撤 tag、不补 Release，内容随 0.117.0 同一提交（`4376d5f`）落地；`scripts/release.mjs` 自此加「tag↔版本一致性」闸防复发。 |
 | 证据 | `M6-acceptance.md`、`a2-pair-set.json`（A2 配对冻结集 20 条）、`M7-arena.md`（擂台实测：赢 3 / 输 0 / 不可比 3）、`M7-a2b-misses.md`（A2b 三条失分归因）、`M7-patrol-2026-11-04-0900.md`（整点巡检）、`M7-A6-text-level.md`（A6 文字级前后对照）、`M7-A5-live-clean.md`（A5 补闸后线上复核）、`M7-A5-live-leak.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
