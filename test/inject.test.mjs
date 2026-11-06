@@ -1686,3 +1686,59 @@ test('T298 ③: preconditions 重跑通过 ⇒ 可复活（回到候选）', () 
     assert.equal(alive.claims.some((c) => c.claimId === 'c-revive001'), true, JSON.stringify(alive.claims.map((c) => c.claimId)));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------- T331（第二道降级门：cost 0 不占注入位）
+function costClaim(id, text) {
+  return {
+    id, kind: 'antipattern', text, scopeKey: SCOPE, threadIds: [], state: 'observed',
+    support: [{ episode: 'ep-aaaaaaa1', seq: 41, quote: text, occurredAt: T(21) }], counter: [],
+    validity: { type: 'none', value: null }, preconditions: [], occurredAt: T(21), recordedAt: T(21),
+    counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null }, supersedes: null,
+  };
+}
+
+// T333：**cost 只做同分次序**（不是硬过滤）—— 硬过滤会削掉 60% 相关性（实测）。
+function costClaim2(id, text, seq) {
+  return {
+    id, kind: 'antipattern', text, scopeKey: SCOPE, threadIds: [], state: 'observed',
+    support: [{ episode: 'ep-aaaaaaa1', seq, quote: text, occurredAt: T(21) }], counter: [],
+    validity: { type: 'none', value: null }, preconditions: [], occurredAt: T(21), recordedAt: T(21),
+    counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null }, supersedes: null,
+  };
+}
+
+test('T333 ①: 主键（rank）不同 ⇒ 不看 cost（cost 不能翻主键的顺序）', () => {
+  const { root, store } = fixture();
+  try {
+    store.putMany('claims', [
+      { ...costClaim2('c-rank-fact1', '普通事实条目', 41), kind: 'fact' },
+      { ...costClaim2('c-rank-anti1', '付过代价的教训', 42), kind: 'antipattern' },
+    ]);
+    const walk = walkOf([
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-rank-fact1' }),
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 42, claimId: 'c-rank-anti1' }),
+    ]);
+    // 给"事实"更高代价、给"教训"零代价：主键 rank 说 antipattern 在前，cost 不许翻盘
+    const card = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24), costIndex: new Map([['c-rank-fact1', 9], ['c-rank-anti1', 0]]) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.ok(ids.indexOf('c-rank-anti1') < ids.indexOf('c-rank-fact1'), `rank 必须优先：${JSON.stringify(ids)}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T333 ②: 主键全同 ⇒ cost > 0 排前（同分才比 cost；cost 不再过滤行）', () => {
+  const { root, store } = fixture();
+  try {
+    store.putMany('claims', [costClaim2('c-tie-zero01', '同分条目甲', 41), costClaim2('c-tie-paid01', '同分条目乙', 41)]);
+    const walk = walkOf([
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-tie-zero01' }),
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-tie-paid01' }),
+    ]);
+    const card = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24), costIndex: new Map([['c-tie-zero01', 0], ['c-tie-paid01', 3]]) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.equal(ids.length, 2, '两条都必须进卡（不再硬过滤）');
+    assert.ok(ids.indexOf('c-tie-paid01') < ids.indexOf('c-tie-zero01'), `同分时 cost>0 必须排前：${JSON.stringify(ids)}`);
+    // 没有 costIndex ⇒ 视为 0，不惩罚也不加分
+    const noIndex = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24) });
+    assert.equal(noIndex.claims.length, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
