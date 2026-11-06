@@ -732,7 +732,11 @@ function compareEntries(a, b) {
   return (a.rank - b.rank)
     || ((b.occurredAt ?? 0) - (a.occurredAt ?? 0))
     || (String(a.source.episode) < String(b.source.episode) ? -1 : String(a.source.episode) > String(b.source.episode) ? 1 : 0)
-    || (a.source.seq - b.source.seq);
+    // T317：seq 缺失时 `a-b` 会是 NaN（被 sort 当 0 ⇒ 退回插入序）——先挡住
+    || ((Number.isFinite(a.source.seq) && Number.isFinite(b.source.seq)) ? a.source.seq - b.source.seq : 0)
+    // T317：**最后一级 = claimId 字典序** —— 同局同 seq 的两条 claim 必须可复现，
+    // 不许依赖插入顺序 / Map 迭代序 / 文件系统顺序（T316 剩下的 3 条差异就出在这一级）。
+    || String(a.claimId ?? '').localeCompare(String(b.claimId ?? ''));
 }
 
 // ---------------------------------------------------------------------------
@@ -1211,7 +1215,9 @@ export function degradedWalk({ signal = null, store = null, limit = ENTRY_LIMIT,
 
   hits.sort((a, b) => (rankOf(a.kind) - rankOf(b.kind))
     || ((b.occurredAt ?? 0) - (a.occurredAt ?? 0))
-    || String(a.episode).localeCompare(String(b.episode)));
+    || String(a.episode).localeCompare(String(b.episode))
+    // T317：最后一级 = claimId 字典序（episode 指针没有 claimId，空串排前）—— 稳定排序的总序保证
+    || String(a.claim ?? a.claimId ?? '').localeCompare(String(b.claim ?? b.claimId ?? '')));
 
   if (hits.length > limit) {
     omitted.count = hits.length - limit;
