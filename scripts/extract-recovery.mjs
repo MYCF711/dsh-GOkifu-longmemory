@@ -111,15 +111,80 @@ export function findRecovery(events, fromIndex, { subject = null } = {}) {
 }
 
 /**
+ * T339 · 命令主体恢复（F3 的第二条腿）。
+ *
+ * 背景（T338 诊断）：F3 恢复覆盖率仅 4.51%，根因是 **86.73% 的失败没有文件路径主体**，
+ * `findRecovery` 的「没主体就没恢复」对它们直接放弃；放宽恢复信号实测新增 0（无用）。
+ * 正路：无路径失败大多是「某条命令跑挂了」，主体应是**触发它的那条命令**（不是错误文本里的路径）。
+ *
+ * 关联：`tool/result.data.message.toolCallId` → `tool/call.data.callId`；
+ * 命令主体取自 `tool/call.data.name + arguments`（bash 的 `command`、write/edit 的 `file_path`）。
+ * 恢复 = 后续**同一命令主体**的执行**没有失败**。保留主体约束（命令即主体，不凑数）。
+ * 实测（20 局 / 1575 失败）：文件级 4.51% → 文件级∪命令级 **11.05%**。
+ */
+
+/** tool/call → 命令主体签名（机械、可核）。 */
+export function commandSubjectOf(call) {
+  const name = call?.data?.name;
+  if (!name) return null;
+  let args = {};
+  try { args = JSON.parse(call?.data?.arguments ?? '{}'); } catch { args = {}; }
+  if (name === 'bash') {
+    const cmd = String(args.command ?? '').replace(/\s+/g, ' ').trim();
+    return cmd ? `bash:${cmd}` : null;
+  }
+  const fp = args.file_path ?? args.path ?? null;
+  if (fp) return `${name}:${fp}`;
+  const s = JSON.stringify(args).replace(/\s+/g, ' ');
+  return `${name}:${s.slice(0, 80)}`;
+}
+
+/** 事件 → 命令执行序列 [{subject, seq, index, failed}]。 */
+export function commandRuns(events = []) {
+  const calls = new Map();
+  for (const e of events) if (e?.type === 'tool/call') calls.set(e?.data?.callId, e);
+  const runs = [];
+  for (let i = 0; i < events.length; i += 1) {
+    const e = events[i];
+    if (e?.type !== 'tool/result') continue;
+    const call = calls.get(e?.data?.message?.toolCallId);
+    if (!call) continue;
+    const subject = commandSubjectOf(call);
+    if (!subject) continue;
+    runs.push({ subject, seq: Number(e?.seq), index: i, failed: !!failureLineOf(eventText(e)) });
+  }
+  return runs;
+}
+
+/** 命令级恢复：同主体命令后续有一次成功执行（无失败行）。 */
+export function findCommandRecovery(runs, fromRunIndex) {
+  const cur = runs[fromRunIndex];
+  if (!cur || !cur.failed) return null;
+  for (let j = fromRunIndex + 1; j < runs.length; j += 1) {
+    if (runs[j].subject === cur.subject && !runs[j].failed) {
+      return { seq: runs[j].seq, quote: `同一命令再次执行成功：${cur.subject.slice(0, MAX_QUOTE)}`, kind: 'same-command-success' };
+    }
+  }
+  return null;
+}
+
+/**
  * 单局：列出每条失败 + 它的恢复条件（抓不到 ⇒ unverified）。
  * @returns {Array<{seq:number, quote:string, reason:string, falsifiableWhen:object|null, state:'verified'|'unverified'}>}
  */
 export function extractRecovery({ events = [] } = {}) {
+  // T339：先建命令执行序列（每局一次），失败事件的恢复 = 文件级优先、命令级兜底（并集）。
+  const runs = commandRuns(events);
+  const runIndexBySeq = new Map(runs.map((r, idx) => [r.seq, idx]));
   const out = [];
   for (let i = 0; i < events.length; i += 1) {
     const f = failureOf(events[i]);
     if (!f) continue;
-    const recovery = findRecovery(events, i, { subject: subjectOf(f.quote) });
+    let recovery = findRecovery(events, i, { subject: subjectOf(f.quote) });
+    if (!recovery) {
+      const ri = runIndexBySeq.get(Number(events[i]?.seq));
+      if (ri != null) recovery = findCommandRecovery(runs, ri);
+    }
     out.push({
       seq: f.seq,
       quote: f.quote,

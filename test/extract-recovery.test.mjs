@@ -69,3 +69,51 @@ test('T311b ⑤ 只认后续事件 + 引文非空 + 主体可从错误行取到'
   assert.ok(eventText(ev(1, 'x')).includes('x'));
   assert.deepEqual([...RECOVERY_KINDS], ['same-subject-exit-0']);
 });
+
+// ─── T339 · 命令主体恢复（F3 第二条腿）───
+// 带 type 的真实事件形态：tool/call（callId+name+arguments）与 tool/result（message.toolCallId 回指）。
+const call = (seq, callId, name, args) => ({ type: 'tool/call', seq, time: 1793540000000 + seq, data: { callId, name, arguments: JSON.stringify(args) } });
+const result = (seq, callId, text) => ({ type: 'tool/result', seq, time: 1793540000000 + seq, data: { message: { toolCallId: callId, content: [{ type: 'text', text }] } } });
+
+test('T339 ① 无文件主体的失败，同一命令再次执行成功 ⇒ 命令级恢复（tombstone）', () => {
+  const events = [
+    call(10, 'c1', 'bash', { command: 'node scripts/check.mjs' }),
+    result(11, 'c1', 'Error: unknown job bash-abc'),   // 无文件路径主体 ⇒ 文件级 null
+    call(12, 'c2', 'bash', { command: 'node scripts/check.mjs' }),
+    result(13, 'c2', 'all green\n[exit code: 0]'),      // 同命令成功
+  ];
+  const out = extractRecovery({ events });
+  assert.equal(out.length, 1);
+  assert.equal(out[0].state, 'verified');
+  assert.equal(out[0].falsifiableWhen.kind, 'same-command-success');
+  assert.equal(out[0].falsifiableWhen.seq, 13);
+});
+
+test('T339 ② 有文件主体 ⇒ 文件级优先，不被命令级顶替', () => {
+  const events = [
+    call(10, 'c1', 'bash', { command: 'node app.mjs' }),
+    result(11, 'c1', `Error: Cannot find module "${FILE}"`),  // 有文件主体
+    result(12, 'c1', `fixed ${FILE}\n[exit code: 0]`),          // 文件级恢复
+  ];
+  const out = extractRecovery({ events });
+  assert.equal(out[0].falsifiableWhen.kind, 'same-subject-exit-0');
+});
+
+test('T339 ③ 不同命令的成功 ⇒ 不算恢复（不凑数）', () => {
+  const events = [
+    call(10, 'c1', 'bash', { command: 'node a.mjs' }),
+    result(11, 'c1', 'Error: boom'),
+    call(12, 'c2', 'bash', { command: 'node b.mjs' }),   // 不同命令
+    result(13, 'c2', '[exit code: 0]'),
+  ];
+  const out = extractRecovery({ events });
+  assert.equal(out[0].state, 'unverified');
+  assert.equal(out[0].falsifiableWhen, null);
+});
+
+test('T339 ④ 无 type 的旧形态事件不触发命令级（向后兼容）', () => {
+  // ev() 无 type ⇒ commandRuns 跳过 ⇒ 文件级照常，命令级不介入
+  const events = [ev(10, 'Error: boom'), ev(11, '[exit code: 0]')];
+  const out = extractRecovery({ events });
+  assert.equal(out[0].state, 'unverified');  // 无主体、无 type ⇒ 不恢复
+});
