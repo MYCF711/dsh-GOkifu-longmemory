@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.4（2026-11-07）
+
+### 重指的 SI-4b 同步 + 已验证的修复计划（T350）
+**版本说明**：改 `scripts/repair-support-seq.mjs` 的落盘行为 ⇒ 按 `version-suggest` 取 patch 0.8.4。
+**修了什么**：`applyPlan` 重指 support 后**没有同步 `claim.occurredAt`** —— 重指可能把 support 挪到更早的事件，于是「claim 晚于它的全部证据」（SI-4b）。现在应用后若 `claim.occurredAt > min(support.occurredAt)` 就**降到该 min**（只降不升），并记 `loweredAt`。
+**副本对照（同一批 3338 引用）**：
+| 指标 | 活库基线 | T349 副本 | T350 副本 |
+|---|---|---|---|
+| fail | 214 | 134 | **133** |
+| SI-1 | 156 | 75 | **75**（−81） |
+| SI-5 | 58 | 58 | **58**（不变，历史欠账） |
+| SI-4b | 0 | 1 | **0** |
+⇒ 重指计划在副本上**净减 81 条违规、不新增任何违规类**。同时修正 T349 的证据误读：SI-5 的 58 条在活库**本来就存在**。
+**为什么仍未写进活库**：① 工具**自带安全闸**（`--apply` 指向真库直接拒绝，要求先复制到临时目录），本刀不绕过它；② 合规路径是「副本验证后覆盖 claims/ + manifest.json（1153 文件 + 1.6MB 校验表）」，属大规模覆盖式写入，收益（采样闸本来就 pass）与凌晨对活库动手的风险不成比例 ⇒ 留给一次显式、可审计的操作。
+**已备好**：回滚备份 `tmp/claims-backup-20261107-005523`（1873 文件/8.1MB）；替换 procedure 写在证据里。
+**验收**：`test/repair-support-seq.test.mjs` 14/14 全绿；全量 **1040 条 / 1034 pass / 0 fail**；check PASS；活库 SI **pass** 且 1873 条 claim 未变。
+证据 `evidence/T350-repair-sync.md`。
+
 ## 0.8.3（2026-11-07）
 
 ### 修复工具按局流式（T349）—— 77 秒跑完全库，但**实测确认还不能写进活库**
