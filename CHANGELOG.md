@@ -17,6 +17,22 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.8（2026-11-07）
+
+### 修 `instance-status.mjs` 的 home 解析（T354）—— 双击必挂
+**版本说明**：`scripts/instance-status.mjs` 行为修正 ⇒ patch。
+
+**问题**：脚本用 `%USERPROFILE%\DeepSeek Harness\home` 兜底，但真 home 在**安装盘**（`D:\DeepSeek Harness\home`）。
+双击 `.cmd` 时 `DSH_HOME` 不在环境里（那是应用注入给子进程的），于是自检会去一个不存在的目录、然后报
+「软链缺失 / 记忆库不存在」——**明明装好了也判失败**。
+
+**做法**：与 `scripts/re-enable.mjs` 统一为 `process.env.DSH_HOME || 'D:/DeepSeek Harness/home'`。
+
+**验收**：`env -u DSH_HOME node scripts/instance-status.mjs` → 5 项全 OK、退出码 0（模拟双击）。
+
+**运行时行为未变**：`git diff --stat v0.8.5..v0.8.7 -- src/` 为**空** —— 0.8.6/0.8.7/0.8.8 都只动 `scripts/` 与文档，
+**插件本体（`src/`）与 0.8.5 完全一致**。所以这次重启**不会改变注入行为**，只是让命令行工具与实验脚本跟上。
+
 ## 0.8.7（2026-11-07）
 
 ### 沙箱跑批 + 判定口径修正（T353）—— 让"跑一天样本"变成双击即用
