@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.54（2026-11-06）
+
+### 知识库 70：Goodhart 定律与指标异化（T312）
+**SEP《Measurement in Science》**：**拟合好 ≠ 测对了** ——
+"A good fit between item responses and a statistical model **does not yet determine what the questionnaire is measuring**"；
+效度靠 **construct validation**（不同程序给一致结果）。
+**比值没有经验意义**（"60°C is **twice as hot**"是错的）。
+
+**"数字太好看"的四种来源（本仓今天四次全中）**：
+只考容易题（94.7%）· 用答案当线索（41.67%）· 泛词伪命中（50.88%）· 判据作用域过宽（93.71%）。
+**共同点：都让分子变大、分母没变** ⇒ **"好看"本身就是分母被动的信号**。
+**四次没有一次是产品变好**；**唯一真实提升是"把尺子修对"（+14.04pp）**。
+
+**"一个数字可不可信"的四条判据**：**V1 口径完整** · **V2 负向对照** · **V3 换实现复算** · **V4 分桶报 worst-bucket**。
+**上线门 G1–G5**：写口径 → 负向对照 → 复算 → 分桶 → tombstone，**五道全过才进验收面**。
+
+### 验证
+`check PASS`（70 篇）。
+
 ## 0.2.53（2026-11-06）
 
 ### 恢复条件行级定位（T311b）—— **93.71% → 3.98%**，挤掉 89.73 点水分
