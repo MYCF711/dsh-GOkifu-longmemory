@@ -29,6 +29,12 @@ export const BUDGET_TOKENS = 500;
 export const INDEX_LINE_BUDGET = 60;
 /** 单条文本渲染上限（超预算时「先降表示，不丢来源与日期」：160 → 60 两级）。 */
 export const TEXT_CLIP = 160;
+/**
+ * T345 · F3 尾注的字符上限（**派生内容**，不占正文预算）。
+ * 目的：让模型知道「什么情况算我错」，又不让卡片被条件句撑爆。
+ * 口径：单条 ≤ F3_MAX_CHARS 字符；超了截断并保留规则 id 可追溯。
+ */
+export const F3_MAX_CHARS = 60;
 /** 降表示第二级的单条文本上限。 */
 export const TIGHT_CLIP = 60;
 export const SHADOW_DIR_REL = path.join('evidence', 'shadow');
@@ -337,6 +343,8 @@ function storeView(store, cache = null) {
         level: typeof rec.level === 'string' ? rec.level : null,
         // T162a：合并节点标记（consolidate 写的 merge.members / representative）；没有就 null。
         merge: rec.merge && typeof rec.merge === 'object' ? rec.merge : null,
+        // T345：F3 失效条件（文本派生）。**投影必须带上**，否则卡上永远看不到（2026-11-06 实测踩过）。
+        falsifiableWhen: rec.falsifiableWhen && typeof rec.falsifiableWhen === 'object' ? rec.falsifiableWhen : null,
       };
       view.claims.push(claim);
       if (claim.id) view.claimsById.set(claim.id, claim);
@@ -439,7 +447,7 @@ function stateTokenOf(claim) {
   return state;
 }
 
-function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null }) {
+function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null, falsifiableWhen = null }) {
   // 2026-11-04（0.134.0，线上实测）：seq 是 **1 基**的；`seq: 0` 等于「不知道在哪」，不是合法出处。
   // 当前宿主 60 条引用里就有 2 条落在 seq 0，卡上文字在该局里找不到 ⇒ A6 文字层报 missing。
   // 回到根本规矩：无源不入 —— seq < 1 的条目不进卡（计入 omitted，而不是渲染一条查无实据的行）。
@@ -453,6 +461,10 @@ function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text
     marker,
     // T333：cost 只作**同分次序**（tokOverlap/rank 等主键都相同才比），不参与硬过滤。
     cost: Number.isFinite(cost) ? cost : null,
+    // T345：F3 失效条件是**派生内容**（非逐字），只作坐标后的尾注，绝不混进 rawText（否则 A6 文字层报 missing）。
+    f3: falsifiableWhen && falsifiableWhen.when
+      ? { rule: String(falsifiableWhen.rule ?? ''), when: String(falsifiableWhen.when).slice(0, F3_MAX_CHARS) }
+      : null,
     state: state ?? marker,
     occurredAt,
     date,
@@ -567,6 +579,8 @@ function entryFromClaim(hit, claim, options = {}) {
     occurredAt,
     marker: stateTokenOf(claim),
     cost: Number.isFinite(options?.costIndex?.get?.(String(claim.id ?? ''))) ? options.costIndex.get(String(claim.id ?? '')) : null,
+    // T345：F3 失效条件（文本派生）随 claim 上卡；无该字段的 claim 输出与旧版逐字节一致。
+    falsifiableWhen: claim.falsifiableWhen ?? null,
     ...(crossAllowed ? { prefix: '[跨项目] ' } : {}),
     state: typeof claim.state === 'string' && claim.state ? claim.state : 'observed',
     text,
@@ -902,7 +916,10 @@ export function displayPath(p) {
 function renderEntryLine(entry, clip) {
   const body = clipLine(entry.rawText, clip);
   const flag = entry.crossScope ? ' [跨项目]' : '';
-  return `- [${entry.marker}] ${body}${flag} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})`;
+  // T345：F3 尾注放在**坐标之后**（正文仍是逐字原文，A6 文字层只核正文）。
+  // 无 F3 的条目输出与旧版逐字节一致。
+  const f3 = entry.f3?.when ? ` · ${entry.f3.when}${entry.f3.rule ? ` [${entry.f3.rule}]` : ''}` : '';
+  return `- [${entry.marker}] ${body}${flag} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})${f3}`;
 }
 
 function renderSection({ entries, beyond, droppedProvenance, limit, budgetTokens, clip, withMarkers = true, droppedCrossScope = 0, droppedUnknownScope = 0, scopeKey = null }) {
