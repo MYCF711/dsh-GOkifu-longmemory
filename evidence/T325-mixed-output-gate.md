@@ -18,7 +18,7 @@ antipattern 1105 · 过 A1 门 511
 
 - `c-01b1ecf1` → `file:D:\tmp\magpie-plugins-after-waf.js`
 - `c-03b8df2a` → `file:C:\Users\Administrator\AppData\Local\Temp\asar-tool\read.js`
-- `c-03fba890` → `file:/c/Users/Administrator/.config/magpie/routing/2026-11-02.js`
+- `c-03fba890` → `file:/c<user-home>/.config/magpie/routing/2026-11-02.js`
 - `c-058b22f6` → `file:9ab64333-2300-42ff-8d4f-2f356e442060`
 - `c-05ab0ff2` → `file:http://127.0.0.1:3425/v1/messages`
 - `c-09d1cf52` → `file:ab8c56c4-7b18-49f5-99e0-8796775b1fce`
