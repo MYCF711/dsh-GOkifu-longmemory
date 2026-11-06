@@ -474,7 +474,7 @@ export function signalHash(text) {
  * 与 `runHoldout` 的区别：信号、expected、at 全部来自考卷，库只用来建卡。
  * @returns {{n, strictHits, strictRate, wilson, byKind, control, hashMismatch, controlCurrent}}
  */
-export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache = null } = {}) {
+export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache = null, costIndex = null } = {}) {
   const walkCache = cache ?? createWalkCache(store);
   const items = Array.isArray(exam?.results) ? exam.results : [];
   const rows = [];
@@ -489,7 +489,7 @@ export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache
     let card = null;
     try {
       const walk = walkFromSignals({ signal, store, scope: item.scopeKey, depth: 2, limit, budgetTokens, cache: walkCache });
-      card = buildMemoryCard({ cache: walkCache, signal, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens });
+      card = buildMemoryCard({ cache: walkCache, signal, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens, costIndex });
     } catch { card = null; }
     // 冻结考卷只存 expectedClaimIds（没有 expected.episodes）⇒ 必须补齐，否则 related 永远为假（T318 踩过）
     // 冻结考卷只存 expectedClaimIds ⇒ 两条通道都补上（support 含该局 或 claim id 命中）
@@ -517,7 +517,7 @@ export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache
 }
 
 /** 跑全套考卷（只读）。 */
-export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = null, cache = null, signalMode = null } = {}) {
+export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = null, cache = null, signalMode = null, costIndex = null } = {}) {
   const walkCache = cache ?? createWalkCache(store);
   // T286：**IDF 过滤器必须真的接上** —— `buildBigramDf` 之前定义了却从没被调用，
   // 于是 `bigramFilter` 恒为 null ⇒ 过滤不生效，读数停在"不过滤"的 50.88%（含泛词水分）。
@@ -538,7 +538,7 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
     let card = null;
     try {
       const walk = walkFromSignals({ signal, store, scope: item.scopeKey, depth: 2, limit, budgetTokens, cache: walkCache });
-      card = buildMemoryCard({ cache: walkCache, signal, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens });
+      card = buildMemoryCard({ cache: walkCache, signal, walkResult: walk, store, scope: item.scopeKey, now: at, limit, budgetTokens, costIndex });
     } catch (error) {
       results.push({ itemId: item.id, kind: item.kind, signalSource: item.signalSource, episode: item.episode, error: String(error?.message ?? error), hitStrict: false, hitRelated: false, rendered: 0 });
       continue;
@@ -634,7 +634,15 @@ export async function main(argv = process.argv.slice(2)) {
   const minSignalChars = Number(opt('min-signal', '12'));
   const limit = Number(opt('limit', '5'));
   const exam = buildExam({ store, home, minSignalChars, includeRepeat: !argv.includes('--no-repeat') });
-  const result = runHoldout({ store, exam, limit, now: Date.now() });
+  // T337：镜像线上 plugin.mjs —— 从 sidecar 读 costIndex（缺失 ⇒ null ⇒ 不过滤，行为不变）。
+  // 实测（对照实验，冻结考卷 114 题）：传 vs 不传 Δ=0.00pp、逐题翻转 0 ⇒ 对主判据零影响。
+  const storeRoot = path.resolve(opt('store', path.join(home, 'memory-context')));
+  let costIndex = null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(storeRoot, 'corpus', 'antipattern-cost.json'), 'utf8'));
+    if (raw && raw.costs && typeof raw.costs === 'object') costIndex = new Map(Object.entries(raw.costs));
+  } catch { costIndex = null; }
+  const result = runHoldout({ store, exam, limit, now: Date.now(), costIndex });
   const compare = argv.includes('--compare') ? compareSignalModes({ store, exam, limit }) : null;
   const out = { stats: exam.stats, skipped: exam.skipped.slice(0, 20), ...result, results: argv.includes('--json') ? result.results : undefined };
   if (argv.includes('--json')) { console.log(JSON.stringify(out, null, 2)); return 0; }
