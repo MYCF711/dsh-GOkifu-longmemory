@@ -503,6 +503,19 @@ function entryFromClaim(hit, claim, options = {}) {
   // 或 hit 直接点名 claimId 的**旁路**会绕过那道过滤 —— 这里在渲染入口再堵一次。
   // stale / disputed **不在此列**：它们仍进卡并带各自 marker（有信息量）。
   if (claim && claim.state === 'invalidated') return null;
+  // T298（知识库 64）：**读侧硬过滤** —— stale / 过期不是"降权"，是**不占位**。
+  // 为什么必须硬过滤：只降权的话，过期 claim 仍能挤进 top-5，把有效记忆顶掉（V1 的缺口）。
+  // 三条纪律：
+  //   · 卡上不出现，**库里仍在**（只增不改，可追溯）；
+  //   · **可复活**：preconditions 重跑通过（`options.preconditionOk(claim) === true`）⇒ 回到候选（V2）；
+  //   · 不改 `state` 的写入逻辑，也不改注入形状（golden）。
+  const nowTs = Number.isFinite(options.now) ? Number(options.now) : Date.now();
+  const revived = typeof options.preconditionOk === 'function' ? options.preconditionOk(claim) === true : false;
+  if (!revived) {
+    if (claim?.state === 'stale') return null;
+    const validUntil = Number(claim?.validUntil);
+    if (Number.isFinite(validUntil) && validUntil < nowTs) return null;
+  }
   // 2026-11-04（M4 线上抽查发现）：u:owner 类级 claim 的 support 跨多个工作区，
   // 直接取 support[0] 会把"别项目的失败原文 + ep"渲染进本项目的卡（A5 的实质越界）。
   // 这里只选**同作用域**的 support；同作用域一条都没有 ⇒ 不渲染（返回 null）。
@@ -623,7 +636,10 @@ function pickClaim(hit, view, options = {}) {
  * hits → 候选条目。缺 (episode, seq, occurredAt) 的条目**直接丢**（无源不入、无时不入），
  * 只计数进省略；这样记忆卡本身不会出现「有行没出处」的形态。
  */
-function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, signal = null, sigIndex = null, allowCrossScopeClass = false }) {
+function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, signal = null, sigIndex = null, allowCrossScopeClass = false,
+  now = null,
+  preconditionOk = null,
+}) {
   const entries = [];
   let droppedNoProvenance = 0;
   let droppedNoText = 0;
@@ -646,7 +662,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       continue;
     }
     const entry = claim
-      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal) })
+      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk })
       : entryFromEpisode(hit, view);
     if (entry && scope) {
       const rec = view.episodesById.get(String(hit?.episode ?? ''));
@@ -923,6 +939,8 @@ export function buildMemoryCard({
   store = null,
   scope = null,
   now = null,
+  // T298：preconditions 重跑回调（返回 true ⇒ 该 claim 可复活）。不传 ⇒ 一律不回活。
+  preconditionOk = null,
   limit = ENTRY_LIMIT,
   budgetTokens = BUDGET_TOKENS,
   indexPath = null,
@@ -982,7 +1000,7 @@ export function buildMemoryCard({
     };
   }
 
-  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex });
+  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk });
   // T162a：认「合并节点」。合流（consolidate）会把多条近似 claim 压成一个带 `merge.members` 的节点；
   // 消费侧不认它，合并节点与它的成员就会在同一张卡里重复出现。规则见 collapseMergeNodes 的注释。
   const { entries, stats: collapseStats } = collapseMergeNodes({

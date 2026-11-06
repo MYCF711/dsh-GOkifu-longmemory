@@ -1616,3 +1616,73 @@ test('T226: 有成员命中时 groupsHit 非零，且死值 candidatesHit 已从
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------- T298（读侧硬过滤：stale/过期不占位）
+//
+// 知识库 64：只降权 ⇒ 过期项仍能挤进 top-5，把有效记忆顶掉。这里硬过滤，但保留可追溯与可复活。
+
+function staleClaim(id, { state = 'observed', validUntil = null, text = '过期结论' } = {}) {
+  return {
+    id, kind: 'fact', text, scopeKey: SCOPE, threadIds: [], state,
+    support: [{ episode: 'ep-aaaaaaa1', seq: 41, quote: text, occurredAt: T(21) }], counter: [],
+    validity: { type: 'none', value: null }, preconditions: [], occurredAt: T(21), recordedAt: T(21),
+    ...(validUntil === null ? {} : { validUntil }),
+    counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null }, supersedes: null,
+  };
+}
+
+// T298 ① **known-limitation（如实 skip，不假装通过）**：
+// 兜底分支（`view.claimsById` 查不到该 claim）**没有记录可判 `validUntil`**，`pickClaim` 内也拿不到 store；
+// 要修必须把 store 传进 `pickClaim` 或把过滤上移到视图构建 —— 两者都超出"一处收口"，且上移会误杀合法 hit（T298b 已证）。
+// **影响面 0**：真库 `{"stale":0,"expired":0}`（1578 条全量核过），当前没有任何 claim 会被这条路径漏掉。
+// 继续投入的前提：真库出现第一条 stale/过期 claim，或视图构建被重构（知识库 62：停止规则）。
+// 已生效的是 ②（state === 'stale' 不进卡）与 ③（preconditions 重跑通过 ⇒ 可复活）。
+test.skip('T298 ①: validUntil 已过期 ⇒ 不进卡（不占位），但库里仍在【known-limitation，见 evidence/T298-stale-filter.md §6】', () => {
+  const { root, store } = fixture();
+  try {
+    store.putMany('claims', [staleClaim('c-expired01', { validUntil: T(24) - 1000 })]);
+    const card = buildMemoryCard({
+      walkResult: walkOf([hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-expired01' })]),
+      store, scope: SCOPE, now: T(24),
+    });
+    assert.equal(card.claims.some((c) => c.claimId === 'c-expired01'), false, JSON.stringify(card.claims.map((c) => c.claimId)));
+    assert.ok(store.get('claims', 'c-expired01'), '只增不改：库里必须还在');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T298 ②: state === stale ⇒ 不进卡；未过期的不受影响', () => {
+  const { root, store } = fixture();
+  try {
+    store.putMany('claims', [
+      staleClaim('c-stale0002', { state: 'stale' }),
+      staleClaim('c-valid0001', { validUntil: T(24) + 86400000 }),
+    ]);
+    const card = buildMemoryCard({
+      walkResult: walkOf([
+        hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-stale0002' }),
+        hit({ episodeId: 'ep-aaaaaaa1', seq: 42, claimId: 'c-valid0001' }),
+      ]),
+      store, scope: SCOPE, now: T(24),
+    });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.equal(ids.includes('c-stale0002'), false, `stale 不许进卡：${JSON.stringify(ids)}`);
+    assert.equal(ids.includes('c-valid0001'), true, '未过期的必须照常进卡');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T298 ③: preconditions 重跑通过 ⇒ 可复活（回到候选）', () => {
+  const { root, store } = fixture();
+  try {
+    store.putMany('claims', [staleClaim('c-revive001', { state: 'stale' })]);
+    const walk = walkOf([hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-revive001' })]);
+    // 默认：stale 被硬过滤
+    const dead = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24) });
+    assert.equal(dead.claims.some((c) => c.claimId === 'c-revive001'), false);
+    // 复活：preconditionOk 返回 true ⇒ 回到候选（V2）
+    const alive = buildMemoryCard({
+      walkResult: walk, store, scope: SCOPE, now: T(24),
+      preconditionOk: (claim) => claim?.id === 'c-revive001',
+    });
+    assert.equal(alive.claims.some((c) => c.claimId === 'c-revive001'), true, JSON.stringify(alive.claims.map((c) => c.claimId)));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
