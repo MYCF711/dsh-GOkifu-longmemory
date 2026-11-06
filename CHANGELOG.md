@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.66（2026-11-06）
+
+### 知识库 74：混合输出的判据（T324）
+**GNU make**：**上游成功不抵消下游失败**（"neither can any other that depends on it"）；
+**最阴险：部分写入 + 时间戳新**（"the file is **corrupted** … Yet the **time stamp says that it is now up to date**"
+⇒ **错误被永久固化**，正是"同一个坑重复出现"的机制）。
+
+**"混合输出"四形态**：M1 链式部分失败 · M2 部分测试通过（**fail>0 即失败**）·
+M3 部分文件成功 · M4 忽略型（**退出码不可信，看 stderr 与 status code**）。
+
+**"是不是可复用教训"三判据**：**R1 失败主体明确** · **R2 失败占主导（看最终结论）** · **R3 依赖链可判**。
+**R1+R2 = 真失败；R3 = 可复用**。
+
+**本仓对照**：过 A1 门的 511 条里 **R2 已满足、R1 部分满足、R3 普遍缺失** ⇒ 不可复用。
+**最小修法**：判"段内最终结论" · 强制 X3 依赖链必填 · M4 型强制看 stderr + status code。
+
+### 验证
+`check PASS`（74 篇）。
+
 ## 0.2.65（2026-11-06）
 
 ### A1 门：只有真失败才进 antipattern（T323）—— 排除 53.76% 噪声
