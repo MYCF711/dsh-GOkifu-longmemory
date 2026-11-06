@@ -151,7 +151,9 @@ export function run({ store, examPath = path.join(REPO_ROOT, 'evidence', 'a2b-ho
       if (!id) continue;
       const rec = store.get('claims', id);
       // 契约 §J4：related = support 含该局 **或** claim id 在 expected.claimIds 里（两条都要，缺一条就偏离契约）
-      const supportHit = (Array.isArray(rec?.support) ? rec.support : []).some((s) => String(s?.episode ?? '') === String(item.episode));
+      // T320：优先用考卷钉死的 expectedEpisodes（repeat 题的 prior 局），否则回退该局自身
+      const eps = Array.isArray(item.expectedEpisodes) && item.expectedEpisodes.length ? item.expectedEpisodes.map(String) : [String(item.episode ?? '')];
+      const supportHit = (Array.isArray(rec?.support) ? rec.support : []).some((s) => eps.includes(String(s?.episode ?? '')));
       const idHit = Array.isArray(item.expectedClaimIds) && item.expectedClaimIds.map(String).includes(id);
       const related = supportHit || idHit;
       if (!related) continue;

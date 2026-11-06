@@ -401,7 +401,6 @@ export function judgeCard({ card, store, item, minOverlap = 2, bigramFilter = nu
   return {
     itemId: item?.id ?? null,
     at: Number.isFinite(item?.at) ? item.at : null,
-    signalHash: signalHash(item?.signal),
     kind: item?.kind ?? null,
     signalSource: item?.signalSource ?? null,
     episode: item?.episode ?? null,
@@ -494,8 +493,12 @@ export function replayFrozen({ store, exam, limit = 5, budgetTokens = 500, cache
     } catch { card = null; }
     // 冻结考卷只存 expectedClaimIds（没有 expected.episodes）⇒ 必须补齐，否则 related 永远为假（T318 踩过）
     // 冻结考卷只存 expectedClaimIds ⇒ 两条通道都补上（support 含该局 或 claim id 命中）
+    // T320：优先用考卷里钉死的 expectedEpisodes（repeat 题的 prior 局），否则回退到该局自身
+    const episodes = Array.isArray(item.expectedEpisodes) && item.expectedEpisodes.length
+      ? item.expectedEpisodes.map(String)
+      : [String(item.episode ?? '')];
     const expected = item.expected ?? {
-      episodes: [String(item.episode ?? '')],
+      episodes,
       claimIds: Array.isArray(item.expectedClaimIds) ? item.expectedClaimIds.map(String) : [],
     };
     const judged = judgeCard({ card, store, item: { ...item, signal: item.signal, at, expected } });
@@ -541,7 +544,11 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
       continue;
     }
     // 判分必须用**该路自己的信号**（否则 task 臂会拿 B 的信号判分，口径就串了）
-    results.push(judgeCard({ card, store, item: { ...item, signal: text }, bigramFilter }));
+    const judged = judgeCard({ card, store, item: { ...item, signal: text }, bigramFilter });
+    judged.signal = text;
+    judged.signalHash = signalHash(text);
+    judged.expectedEpisodes = Array.isArray(item?.expected?.episodes) ? item.expected.episodes.map(String) : [];
+    results.push(judged);
   }
   const evaluated = results.filter((r) => !r.error);
   const strictHits = evaluated.filter((r) => r.hitStrict).length;
