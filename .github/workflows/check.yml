@@ -10,5 +10,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
+      # T301：先证明"删掉实现必红"（tombstone 有效），再谈测试通过 —— 顺序不能反。
+      # 失败即红（exit ≠ 0）；120s 超时，不许卡死。
+      - name: tombstone-check（删掉实现必红）
+        run: timeout 120 node scripts/tombstone-check.mjs
       - run: node --test "test/*.test.mjs"   # 只跑 test/ 的用例；tmp/ 里的旧实现副本不该进 CI
       - run: node scripts/check.mjs
