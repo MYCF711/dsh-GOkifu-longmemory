@@ -17,7 +17,9 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
-## 0.3.0（2026-11-06）
+## 0.3.1（2026-11-06）
+
+> **版本号说明**：`version-suggest` 建议 **0.3.0**（minor，改 scripts 行为），但 `v0.3.0`/`v0.4.0` 是 2026-11-01 main 历史重组前的**游离发布**（提交 `2ee935bc` 不在 main 历史上、GitHub Release 仍在，撤公开 Release 风险高故不撤）。为避让已占用 tag 改用 **0.3.1**；本次改动按内容属 minor。
 
 ### cost 重锚定（T336）—— **「付过代价」测量率 0.09% → 9.95%，110 倍**
 **根因**（真库诊断，`tmp/diag-cost3.mjs`，已随刀清理）：antipattern 的 `support.seq` 常锚在
