@@ -6,7 +6,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
-const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || process.env.HOME || '.', 'DeepSeek Harness', 'home');
+// DSH home 的解析必须和 `scripts/re-enable.mjs` 一致：**双击 .cmd 时 `DSH_HOME` 不在环境里**，
+// 而 `%USERPROFILE%\DeepSeek Harness\home` 是错的（真 home 在安装盘，例如 `D:\DeepSeek Harness\home`）。
+const HOME = process.env.DSH_HOME || 'D:/DeepSeek Harness/home';
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 
 const rows = [];
