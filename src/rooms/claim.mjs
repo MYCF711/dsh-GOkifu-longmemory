@@ -668,6 +668,9 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
         preconditions: [],
 
+        // T343：F3 失效条件（文本派生；判不出就不挂，不编）
+        ...(f?.falsifiableWhen ? { falsifiableWhen: f.falsifiableWhen } : {}),
+
       });
 
       if (at < g.representativeAt) {
@@ -677,6 +680,9 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
         g.representativeText = representativeTextFor(g.kind, g.key, rawQuote, opts.maxQuote);
 
       }
+
+      // T343：首条支撑没派生出失效条件、而这条有 ⇒ 只补空（不覆盖已有；只增不改）
+      if (!g.falsifiableWhen && f?.falsifiableWhen) g.falsifiableWhen = f.falsifiableWhen;
 
       addSupport(g, ep, { episode: ep.id, nodeId: f.nodeId, edgeId: f.edgeId, seq: f.seq, quote: clip(rawQuote, opts.maxQuote), occurredAt: at });
 
@@ -1134,6 +1140,9 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
       validity: g.validity,
 
       preconditions,
+
+      // T343：F3 失效条件（文本派生）。判不出的 claim 不带该字段 ⇒ 输出与旧版逐字节一致。
+      ...(g.falsifiableWhen ? { falsifiableWhen: g.falsifiableWhen } : {}),
 
       occurredAt,
 
