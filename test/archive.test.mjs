@@ -386,3 +386,45 @@ test('archive: CLI 真跑 + 默认 store 路径 + 参数解析', async () => {
   const summary = await runArchive({ dataRoot: fixture.root, dryRun: true, now: T_ARCHIVE });
   assert.equal(summary.storeRoot, path.join(path.resolve(fixture.root), 'memory-context'));
 });
+
+// ---------------------------------------------------------------------------
+// T294 · 子代理失败归并**接进归档管线**（知识库 51：不接 = 死字段）
+//   归档时对 depth>0 且父局在语料里的局，自动把失败归并进父局（只增不改、按 from+seq 幂等、跨 scope 不并）。
+// ---------------------------------------------------------------------------
+
+test('T294 appendMergedChild：只增不改 + 按 from+seq 幂等', async () => {
+  const { appendMergedChild } = await import('../scripts/subagent-merge.mjs');
+  const parent = { id: 'ep-parent', signals: { failures: 0 } };
+  assert.equal(appendMergedChild(parent, { child: 'ep-c1', failures: 3, at: 1 }), true);
+  assert.equal(parent.signals.mergedChildren.length, 1);
+  assert.deepEqual(
+    { kind: parent.signals.mergedChildren[0].kind, from: parent.signals.mergedChildren[0].from, seq: parent.signals.mergedChildren[0].seq, failures: parent.signals.mergedChildren[0].failures },
+    { kind: 'subagent-merge', from: 'ep-c1', seq: 0, failures: 3 },
+  );
+  // 重放同一子局 ⇒ 0 变更
+  assert.equal(appendMergedChild(parent, { child: 'ep-c1', failures: 3, at: 2 }), false);
+  assert.equal(parent.signals.mergedChildren.length, 1, '同一条失败只算一次');
+  // 另一个子局 ⇒ 追加
+  assert.equal(appendMergedChild(parent, { child: 'ep-c2', failures: 1, at: 3 }), true);
+  assert.equal(parent.signals.mergedChildren.length, 2);
+  assert.equal(parent.signals.failures, 0, '父局原有字段一个不动（只增不改）');
+});
+
+test('T294 appendMergedChild：父局非法对象 ⇒ 不抛、不写', async () => {
+  const { appendMergedChild } = await import('../scripts/subagent-merge.mjs');
+  assert.equal(appendMergedChild(null, { child: 'ep-c1' }), false);
+  assert.equal(appendMergedChild({}, { child: 'ep-c1', failures: 2 }), true, '空记录也能安全追加');
+});
+
+test('T294 归档管线：depth>0 + 父局同 scope ⇒ 自动归并（mergedChildren 进 stats）', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t294-'));
+  try {
+    const fixture = buildFixture(root);
+    const summary = await runArchive({ dataRoot: fixture.root, dryRun: true, now: T_ARCHIVE });
+    assert.ok(summary.episodes.folded >= 1, '子局被 fold');
+    assert.ok(Number.isFinite(summary.episodes.mergedChildren), 'stats 必须暴露 mergedChildren（否则又是死字段）');
+    assert.equal(summary.episodes.mergedChildren, 0, '无失败 ⇒ 0 条归并（不拿噪声凑数）');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
