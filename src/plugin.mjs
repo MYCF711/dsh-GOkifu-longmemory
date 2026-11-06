@@ -731,36 +731,64 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
  */
 const WALK_CACHES = new Map();
 
-const BUILDING = new Set();
+const BUILDING = new Map();
 
 /** 零配置：库不存在时后台建一次（不阻塞本轮；失败只 warn，不重试风暴）。 */
-function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing', lifecycle = null }) {
-  if (!storeRoot || BUILDING.has(storeRoot) || lifecycle?.isDisposed()) return;
-  BUILDING.add(storeRoot);
+function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing', lifecycle }) {
+  if (!storeRoot || lifecycle.isDisposed()) return;
+
+  const existing = BUILDING.get(storeRoot);
+  if (existing) {
+    if (!existing.settled) {
+      existing.owners.add(lifecycle);
+      lifecycle.builds.add(existing);
+    }
+    return;
+  }
+
   let resolveTask;
-  const task = new Promise((resolve) => { resolveTask = resolve; });
-  const record = { timer: null, task, cancel: null };
-  let settled = false;
+  const record = {
+    timer: null,
+    owners: new Set([lifecycle]),
+    settled: false,
+    task: new Promise((resolve) => { resolveTask = resolve; }),
+    cancel: null,
+  };
+  BUILDING.set(storeRoot, record);
+  lifecycle.builds.add(record);
+
+  const activeOwner = () => [...record.owners].find((owner) => !owner.isDisposed()) ?? null;
+  const detach = (owner) => {
+    record.owners.delete(owner);
+    owner.builds.delete(record);
+  };
+  const deleteIfCurrent = () => {
+    if (BUILDING.get(storeRoot) === record) BUILDING.delete(storeRoot);
+  };
   const settle = () => {
-    if (settled) return;
-    settled = true;
-    lifecycle?.builds.delete(record);
+    if (record.settled) return;
+    record.settled = true;
+    for (const owner of [...record.owners]) detach(owner);
     resolveTask();
   };
-  record.cancel = () => {
-    if (record.timer !== null) {
+
+  record.cancel = (owner) => {
+    detach(owner);
+    if (record.settled) return null;
+    if (record.timer === null) return record.task;
+    if (record.owners.size === 0) {
       clearTimeout(record.timer);
       record.timer = null;
-      BUILDING.delete(storeRoot);
+      deleteIfCurrent();
       settle();
     }
-    return task;
+    return null;
   };
-  lifecycle?.builds.add(record);
+
   const run = async () => {
     record.timer = null;
-    if (lifecycle?.isDisposed()) {
-      BUILDING.delete(storeRoot);
+    if (!activeOwner()) {
+      deleteIfCurrent();
       settle();
       return;
     }
@@ -774,14 +802,17 @@ function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing', li
         if (!dataRoot) throw new Error('没有 DSH_HOME，无法建库');
         await mod.runArchive({ dataRoot, storeRoot, dryRun: false, user: 'owner' });
       }
-      if (!lifecycle?.isDisposed()) warn(ctx, `记忆库已刷新（${reason}）：${storeRoot}`);
+      const owner = activeOwner();
+      if (owner) warn(owner.ctx, `记忆库已刷新（${reason}）：${storeRoot}`);
     } catch (error) {
-      if (!lifecycle?.isDisposed()) warn(ctx, `自动建库失败：${String(error?.message ?? error)}`);
-      BUILDING.delete(storeRoot); // 失败允许下次再试；成功不重试
+      deleteIfCurrent();
+      const owner = activeOwner();
+      if (owner) warn(owner.ctx, `自动建库失败：${String(error?.message ?? error)}`);
     } finally {
       settle();
     }
   };
+
   record.timer = setTimeout(() => { void run(); }, 0);
 }
 
@@ -1101,20 +1132,20 @@ export function apply(ctx, rawConfig = {}) {
   // ctx.on 自己也会把监听器登记到当前 fiber，这里的逆序清理同时支持直接调用与宿主卸载；
   // Cordis 的 disposer 单次执行语义保证两条清理路径可以安全汇合。
   const makeEffect = (registered) => {
-    let disposePromise;
+    let disposePromise = null;
     const dispose = () => {
-      if (disposed) return disposePromise;
+      if (disposePromise) return disposePromise;
       disposed = true;
-      repeatStates.clear();
-      const pending = [];
-      for (const off of disposers.splice(0).reverse()) {
-        const result = off();
-        if (result && typeof result.then === 'function') pending.push(result);
-      }
-      if (pending.length) {
-        disposePromise = Promise.all(pending).then(() => undefined);
-        return disposePromise;
-      }
+      disposePromise = (async () => {
+        repeatStates.clear();
+        const pending = [];
+        for (const off of disposers.splice(0).reverse()) {
+          const result = off();
+          if (result && typeof result.then === 'function') pending.push(result);
+        }
+        await Promise.all(pending);
+      })();
+      return disposePromise;
     };
     Object.defineProperties(dispose, {
       name: { value: name, configurable: true },
@@ -1124,10 +1155,14 @@ export function apply(ctx, rawConfig = {}) {
     });
     return dispose;
   };
-  const lifecycle = { builds: new Set(), isDisposed: () => disposed };
+  const lifecycle = { ctx, builds: new Set(), isDisposed: () => disposed };
   disposers.push(() => {
-    const pending = [...lifecycle.builds].map((record) => record.cancel());
-    if (pending.length) return Promise.all(pending).then(() => undefined);
+    const pending = [];
+    for (const record of [...lifecycle.builds]) {
+      const result = record.cancel(lifecycle);
+      if (result && typeof result.then === 'function') pending.push(result);
+    }
+    return Promise.all(pending).then(() => undefined);
   });
   const listen = (event, handler) => {
     const off = ctx.on(event, handler);

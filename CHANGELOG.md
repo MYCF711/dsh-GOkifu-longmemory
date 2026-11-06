@@ -17,6 +17,20 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.2.76（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
+
+### autoBuild 跨 apply 共享所有权（#362）
+
+- `BUILDING` 从同 root 的 `Set` 改为共享 `Map<storeRoot, record>`；后到的 apply 登记为 owner 并复用同一 record/task，不再因先到实例 dispose 而静默失去 queued build。
+- queued 仅最后 owner dispose 时取消 timer 并删除当前 record；running 时每个 owner 只摘除自己并等待共享 task。成功保留 record 去重，失败/取消按 record 身份删除并允许重试，settle 清空 owner 引用。
+- `makeEffect` 在无 build 时也返回 Promise；并发及清理完成后的重复 dispose 都严格复用同一 Promise，事件 off 仍在首次调用内同步执行。
+- T367 增加 stale pre-step 闸门，T369/T370 覆盖双 apply 的 queued/running 竞争，T371 覆盖 reject 后重试；既有成功去重、D1 与 dispose-during-build 断言同步强化。
+
+### 验证
+
+- targeted **8/8**；完整 `timeout 300 node --test`：**1003 tests / 997 pass / 0 fail / 6 skip，exit 0**；`timeout 300 node scripts/check.mjs` PASS。
+- 真实 rc1 / Cordis 4.1 双 loader fiber：旧 queued owner 退出后共享 build **calls=1 / finished=1**，直接 effect 与 fiber dispose 严格同 Promise 并等待完成；cancel/post-dispose calls 均 0，探针 fibers disposers 全 0。
+
 ## 0.2.75（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
 
 ### 最新 main 兼容移植与生命周期收尾（#362）
