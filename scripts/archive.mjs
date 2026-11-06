@@ -420,7 +420,7 @@ export async function runArchive(opts = {}) {
       const parentRec = built.find((x) => x.record.id === parentId)?.record ?? null;
       const childFailures = Number(rec.signals?.failures ?? 0);
       if (parentRec && childFailures > 0 && String(parentRec.scopeKey ?? '') === String(rec.scopeKey ?? '')) {
-        if (appendMergedChild(parentRec, { child: rec.id, failures: childFailures })) mergedChildren += 1;
+        if (appendMergedChild(parentRec, { child: rec.id, failures: childFailures, at: rec.recordedAt ?? rec.lastEventAt ?? 0 })) mergedChildren += 1;
       }
     } else if (depth > 0) {
       warnings.push(`${rec.sessionId}: 子代理会话但父局不在语料里 ⇒ 保留 archived（不丢数据）`);
