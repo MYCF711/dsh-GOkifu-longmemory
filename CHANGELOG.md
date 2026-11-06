@@ -17,11 +17,11 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
-## 0.2.72（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
+## 0.2.73（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
 
 ### 最新 main 兼容移植与生命周期收尾（#362）
 
-- 初始基点为 `0c1ca27 / 0.2.62`；最终合并 `e7c5e6d / 0.2.71`，保留 main 的知识库 77、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
+- 初始基点为 `0c1ca27 / 0.2.62`；最终合并 `407d46c / 0.2.72`，保留 main 的知识库 77、antipattern cost、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
 - 核心 `apply` 返回真实、幂等的 Cordis disposer；loader 保留独立包惰性解析并原样转发 effect；语料保持 `<DSH_HOME>/memory-context/corpus/messages.jsonl`；`engines.dsh=">=0.2.2-rc.1 <0.3.0-0"`。
 - 两个临时 Git 测试夹具与 `privacy-scan.listFilesToScan` 的生产 Git 调用均隔离仓库定位环境变量，确保显式 cwd。
 - `scheduleAutoBuild` 记录每次 apply 的 timer/task：dispose 取消未触发计时器并释放去重标记；已开始建库时等待 task 结束，且不再迟写成功/失败日志；并发及后续重复 dispose 复用同一清理 Promise。
@@ -29,8 +29,28 @@
 
 ### 验证
 
-- `timeout 300 node --test`：**994 tests / 988 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（77 篇）。
+- `timeout 300 node --test`：**998 tests / 992 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（77 篇）。
 - 真实 rc1 ACTIVE(2)→DISPOSED(4)、核心 effect=function、disposers **5→0**、`cleanShutdown=true`（限探针 fiber），官方 engines evaluator `issue=null`。
+
+## 0.2.72（2026-11-06）
+
+### antipattern 的 cost（T330）—— **只有 0.09% 能机械判出**
+**真数字**：1105 条里只有 **1 条（0.09%）** 能机械判出"付过代价"；
+其余 1104 条是 `cost: 0`（没测到代价）。
+
+**teammate 又自己拦下了一个凑出来的数字**：
+- v1（"后续 8 条里出现任意失败"）：**92.31%** ❌ 假（任何忙碌窗口都能凑出一次失败）；
+- v3（同一路径 **或** 同一错误行签名前 40 字）：**1/1105 = 0.09%** ✅ 可核。
+
+**这与 T310/T327 完全一致**：大部分 antipattern 的 quote 既没有主体、也没有命令 ⇒
+既判不出 X3（依赖链）也判不出 cost（代价）。
+**这进一步解释了为什么"记忆有用"难被观测到**：**大部分"失败记忆"没有可测的代价**。
+
+**teammate 的建议**：**`cost: 0` 应当作 A1 之后**第二道降级门** ——
+1104 条里绝大多数该**从注入面退出**（保留在库里可查，但不再当"值得记的失败"）。
+
+### 验证
+4 条测试全绿；`check PASS`（77 篇）。
 
 ## 0.2.71（2026-11-06）
 
