@@ -10,14 +10,14 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-gokifu-longmemory`（**公开**；main 由 ruleset 保护：必须经 PR + required check `rules`，禁 force push/删除；单机单人，不强制审批） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
-| 当前版本 | `0.2.71`（`compat/dsh-0.2.2-rc.1-0.2.62`，基于 origin/main 0.2.69 / 7a25b24，未打 tag） |
+| 当前版本 | `0.2.71`（`compat/dsh-0.2.2-rc.1-0.2.62`，已合并 origin/main 0.2.70 / 9434a8f，未打 tag） |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
 ## 二、当前状态（2026-11-02 20:40 · 整点巡检）
 
 ```
-分支         compat/dsh-0.2.2-rc.1-0.2.62（基点 origin/main 0.2.69 / 7a25b24；独立 worktree，不改 live）
+分支         compat/dsh-0.2.2-rc.1-0.2.62（已合并 origin/main 0.2.70 / 9434a8f；独立 worktree，不改 live）
 里程碑       M7 线上验收：A3 live / A5 跨作用域 0 **已达成**；A6 判据升级为「引文可核」；**擂台已开打**（赢 3 / 输 0 / 不可比 3，主判据 A2 仍不可比）
 插件         **已启用并在宿主里真跑**：`kifu-loader` 别名包挂进 profile，且 `dsh-gokifu-longmemory` 是指向本工作区的**软链**，
              所以源码改动 **下次重启即生效、无需安装步骤**；宿主心跳 `live-stats.jsonl` 累计 11699 次 pre-step / `inject=62` / `failed=0`；
@@ -27,13 +27,13 @@
 | 资产 | 数值 |
 |---|---|
 | 测试 | **994 条**（988 pass / 0 fail / 6 skip）[本] 2026-11-06 17:21 |
-| 本轮兼容验证 | 基于 origin/main 0.2.69 的完整 `node --test` 与 `check.mjs` 均 exit 0；真实 rc1 ACTIVE→DISPOSED、disposers 5→0、官方 engines evaluator issue=null |
+| 本轮兼容验证 | 合并 origin/main 0.2.70 后的完整 `node --test` 与 `check.mjs` 均 exit 0；真实 rc1 ACTIVE→DISPOSED、disposers 5→0、官方 engines evaluator issue=null |
 | 六轴 | A1 **0.00%** · A2 **21.67%** · A3 live · A4 p50 **19.67ms（3 次中位数，单次抖动 ±2ms）**（p50 是抖动量，按量级校验：台账 ≤ max(实测×2, 实测+20ms)） · A5 **0.00%** · A6 **100.00%** `[本] 2026-11-06 07:49 · node scripts/m5-report.mjs` |
 | 语料 | 848 局 / **556 卷** / **claim 1578**（有效期已止 99；26 条为 0.58 前历史记录，无 `validFrom` 但都有 `occurredAt`，归档不回溯改写）`[本] 2026-11-06 07:49 · node scripts/cli.mjs audit + store` |
 | 当天覆盖 | 18/18（一次性指标，见 `evidence/M6-D1.md`；不在本表维护） |
-| 已发布 | **0.15.0 → 0.178.1 → 0.2.69 的 CHANGELOG 段齐全**（0.2.x 起为新里程碑；v0.2.0 是 2026-11-01 的旧 tag）；v0.116.0 见下方缺口说明，v0.117.0 已补发 tag + Release；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。**0.116.0 归入"无 tag"**：原 `v0.116.0` tag 指在 PR 前的分支提交（`046509f`，其 `package.json` 已是 0.117.0）⇒ 版本与内容错位，撤 tag、不补 Release，内容随 0.117.0 同一提交（`4376d5f`）落地；`scripts/release.mjs` 自此加「tag↔版本一致性」闸防复发。 |
+| 已发布 | **0.15.0 → 0.178.1 → 0.2.70 的 CHANGELOG 段齐全**（0.2.x 起为新里程碑；v0.2.0 是 2026-11-01 的旧 tag）；v0.116.0 见下方缺口说明，v0.117.0 已补发 tag + Release；tag/Release 现状以 `git tag -l 'v*' --sort=v:refname` 与 `gh release list` 为准。**已知历史缺口（0.15.0 起，不回填）**：0.77.3 / 0.78.0 / 0.86.0 / 0.88.0 / 0.97.0 / 0.107.0 有 CHANGELOG 段但无 annotated tag（audit-09 实测；本行不再声称"全部有 tag"）；**全历史另缺 0.14.0**（在 0.15.0 之前，同样不回填）。**0.116.0 归入"无 tag"**：原 `v0.116.0` tag 指在 PR 前的分支提交（`046509f`，其 `package.json` 已是 0.117.0）⇒ 版本与内容错位，撤 tag、不补 Release，内容随 0.117.0 同一提交（`4376d5f`）落地；`scripts/release.mjs` 自此加「tag↔版本一致性」闸防复发。 |
 | 证据 | `M6-acceptance.md`、`a2-pair-set.json`（A2 配对冻结集 20 条）、`M7-arena.md`（擂台实测：赢 3 / 输 0 / 不可比 3）、`M7-a2b-misses.md`（A2b 三条失分归因）、`M7-patrol-2026-11-04-0900.md`（整点巡检）、`M7-A6-text-level.md`（A6 文字级前后对照）、`M7-A5-live-clean.md`（A5 补闸后线上复核）、`M7-A5-live-leak.md`、`M6-D5.md`、`M7-class-topics.md`、`M6-D4-rejected.md`、`M7-N10-adjudications.md`、`M7-N2-deferred.md` |
-| 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG`、`20-RAPTOR`、`21-CRAG`、`22-LongMemEval`、`23-Self-RAG`、`24-MemoRAG`、`25-LLM-Agent-记忆综述`、`26-Reflexion`、`27-Zep-时序知识图`、`28-Mem0`、`29-MemGPT`、`30-GenerativeAgents`、`31-GraphRAG`、`32-A-MEM`、`33-MemoryAgentBench`、`34-Obsolete-Facts`、`35-Mem0-v3-ADD-only`、`36-Letta-MemFS`、`37-AWS-AgentCore-Memory`、`38-Cognee-检索排序`、`39-Cognee-去重与冲突`、`41-Memobase-读侧折叠`、`42-Retrieval-Bottleneck`、`43-Mem0-写入面与删除安全栏`、`44-验收方法论`、`45-配置面陷阱`、`46-三值逻辑与未知传播`、`47-低频能力的上线判据`、`48-派生数据的成本与生命周期`、`49-一条命令的风险面`、`50-判据总表`、`51-死字段与活指标`、`52-溯源链污染与内容寻址`、`53-指标归因与分层`、`54-假阳性与信号来源`、`55-默认关的价值`、`56-考卷污染与裁判失效`、`57-校验通过不等于数据正确`、`58-信号可得性与信息泄漏`、`59-不可改原件的纠错`、`60-时间戳作为一等字段`、`61-负向对照与可证伪性`、`62-停止规则与边际收益`、`63-子代理经验归并`、`64-记忆的陈旧与过期`、`65-变异测试与测试有效性`、`66-幂等与可复现性`、`67-信息密度与认知负荷`、`68-因果推断与AB测试`、`69-为什么失败更值得记`、`70-Goodhart定律与指标异化`、`71-测试工具本身的债`、`72-考卷的三层完整性`、`73-怎么写一条有用的失败教训`、`74-混合输出的判据`、`75-抽取时的信息损失`、`00-索引与机制对照` |
+| 知识库 | `docs/调研/04`（A-MEM/Zep/Mem0）、`05-Sleep-time-Compute`、`06-MemOS`、`07-Letta`、`08-SimpleMem`、`09-Cognee`、`10-MemGPT`、`11-MemoryBank`、`12-LangMem`、`13-MIRIX`、`14-Generative-Agents`、`15-Graphiti`、`16-Mem0 论文`、`17-Hindsight 机制`、`18-CoALA`、`19-HippoRAG`、`20-RAPTOR`、`21-CRAG`、`22-LongMemEval`、`23-Self-RAG`、`24-MemoRAG`、`25-LLM-Agent-记忆综述`、`26-Reflexion`、`27-Zep-时序知识图`、`28-Mem0`、`29-MemGPT`、`30-GenerativeAgents`、`31-GraphRAG`、`32-A-MEM`、`33-MemoryAgentBench`、`34-Obsolete-Facts`、`35-Mem0-v3-ADD-only`、`36-Letta-MemFS`、`37-AWS-AgentCore-Memory`、`38-Cognee-检索排序`、`39-Cognee-去重与冲突`、`41-Memobase-读侧折叠`、`42-Retrieval-Bottleneck`、`43-Mem0-写入面与删除安全栏`、`44-验收方法论`、`45-配置面陷阱`、`46-三值逻辑与未知传播`、`47-低频能力的上线判据`、`48-派生数据的成本与生命周期`、`49-一条命令的风险面`、`50-判据总表`、`51-死字段与活指标`、`52-溯源链污染与内容寻址`、`53-指标归因与分层`、`54-假阳性与信号来源`、`55-默认关的价值`、`56-考卷污染与裁判失效`、`57-校验通过不等于数据正确`、`58-信号可得性与信息泄漏`、`59-不可改原件的纠错`、`60-时间戳作为一等字段`、`61-负向对照与可证伪性`、`62-停止规则与边际收益`、`63-子代理经验归并`、`64-记忆的陈旧与过期`、`65-变异测试与测试有效性`、`66-幂等与可复现性`、`67-信息密度与认知负荷`、`68-因果推断与AB测试`、`69-为什么失败更值得记`、`70-Goodhart定律与指标异化`、`71-测试工具本身的债`、`72-考卷的三层完整性`、`73-怎么写一条有用的失败教训`、`74-混合输出的判据`、`75-抽取时的信息损失`、`76-记忆的信噪比`、`00-索引与机制对照` |
 
 ## 三、下一步（2026-11-02 23:40 修订）
 

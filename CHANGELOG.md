@@ -19,29 +19,36 @@
 
 ## 0.2.71（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
 
-### 生命周期收尾与 fresh-tree 夹具（#362）
+### 最新 main 兼容移植与生命周期收尾（#362）
 
-- `scheduleAutoBuild` 记录每次 apply 的 timer/task：dispose 取消未触发计时器并释放去重标记；已开始建库时等待 task 结束，且不再迟写成功/失败日志；并发及后续重复 dispose 复用同一清理 Promise。
-- 新增 T367/T368 tombstone：旧实现先实测 0/2，修正后连同既有 autoBuild/D1 共 4/4；另证明取消后同 root 可重新调度、并发重复 dispose 等待同一 Promise。
-- T310 测试启动时自建仓库 `tmp/`：在父目录确实不存在的 fresh-tree 条件下 9/9，不再依赖别的测试预先创建。
-
-### 验证
-
-- `timeout 300 node --test`：**994 tests / 988 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（75 篇）。
-- 真实 rc1 ACTIVE(2)→DISPOSED(4)、核心 effect=function、disposers **5→0**、`cleanShutdown=true`（限探针 fiber），官方 engines evaluator `issue=null`。
-
-## 0.2.70（2026-11-06 · DSH 0.2.2-rc.1 兼容分支，未发布）
-
-### 最新 main 上的最小兼容移植（#362）
-
-- 初始基点为 `0c1ca27 / 0.2.62`；未推送提交已跟随到 `7a25b24 / 0.2.69`，保留 main 的知识库 75、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
+- 初始基点为 `0c1ca27 / 0.2.62`；最终合并 `9434a8f / 0.2.70`，保留 main 的知识库 76、混合输出判据与重跑抽取。旧 #377 与 live 均未改写。
 - 核心 `apply` 返回真实、幂等的 Cordis disposer；loader 保留独立包惰性解析并原样转发 effect；语料保持 `<DSH_HOME>/memory-context/corpus/messages.jsonl`；`engines.dsh=">=0.2.2-rc.1 <0.3.0-0"`。
 - 两个临时 Git 测试夹具与 `privacy-scan.listFilesToScan` 的生产 Git 调用均隔离仓库定位环境变量，确保显式 cwd。
-- 仅元数据冲突；保留最新 main 文档，不带入旧 0.2.51 或中间版本号。
+- `scheduleAutoBuild` 记录每次 apply 的 timer/task：dispose 取消未触发计时器并释放去重标记；已开始建库时等待 task 结束，且不再迟写成功/失败日志；并发及后续重复 dispose 复用同一清理 Promise。
+- T367/T368 先实测 0/2，修正后连同既有 autoBuild/D1 共 4/4；另证明取消后同 root 可重新调度、并发重复 dispose 等待同一 Promise。T310 在 `tmp/` 不存在时自建父目录 9/9。
 
 ### 验证
 
-- 最终整合的完整测试与真实 rc1 记录见下一兼容段。
+- `timeout 300 node --test`：**994 tests / 988 pass / 0 fail / 6 skip，exit 0**；`check.mjs` PASS（76 篇）。
+- 真实 rc1 ACTIVE(2)→DISPOSED(4)、核心 effect=function、disposers **5→0**、`cleanShutdown=true`（限探针 fiber），官方 engines evaluator `issue=null`。
+
+## 0.2.70（2026-11-06）
+
+### 知识库 76：记忆的信噪比（T328）
+**PostgreSQL vacuum**：**"多少算太多"是公式，不是感觉**（`base + scale * tuples`，
+**绝对下限 + 相对项 + 上限**三件套）；**追求 0 噪声是错的**（"maintain **steady-state usage**"）。
+
+**"多少算太多"的三档阈值**：
+**绿 ≤10%**（稳态）· **黄 10–30%**（报警 + 停止新增采集）· **红 >30%**（停止注入该类）。
+
+**一条记忆留在库里的门槛**：**R1 有真失败 + R2 有依赖链 = 留库门票**（缺则**遮蔽，不删**）；
+**R3 恢复条件、R4 失效条件只影响排序**，不决定去留。
+
+**本仓对照**：粗算 `noiseRate ≈ 73%` ⇒ **红档**：
+① 停止注入该类 ② 重跑抽取修 N2 ③ 210 条遮蔽保留并标 `missing-target-in-source` ④ **不追求 0 噪声**，先把 R1/R2 补到 ≥90%。
+
+### 验证
+`check PASS`（76 篇）。
 
 ## 0.2.69（2026-11-06）
 
