@@ -149,3 +149,32 @@ test('T352 ② 只有 job_id 的工具（job_output）也要能出题', () => {
   assert.ok(p && p.includes('bash-abc123'), `空参数的题没用，实际：${p}`);
 });
 
+// ─── T353 · 判定必须把「方向」与「显著性」分开说 ───
+test('T353 ① 方向对但未显著 ⇒ 说"未达显著"，不许说"方向相反"', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abl-t353-'));
+  const file = path.join(dir, 'r.jsonl');
+  fs.writeFileSync(file, [
+    JSON.stringify({ taskId: 'X', variant: 'B', recurred: true }),
+    JSON.stringify({ taskId: 'X', variant: 'A', recurred: false }),
+  ].join('\n') + '\n');
+  const s = score({ file });
+  assert.equal(s.discordant.onlyA, 0);
+  assert.equal(s.discordant.onlyB, 1);
+  assert.ok(!/方向相反/.test(s.verdict), `未显著不许说方向相反，实际：${s.verdict}`);
+  assert.ok(/未达显著/.test(s.verdict), `应说明未达显著，实际：${s.verdict}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('T353 ② 两臂都没复发 ⇒ 明说"题可能不复现失败"，不许当成记忆没用', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'abl-t353b-'));
+  const file = path.join(dir, 'r.jsonl');
+  fs.writeFileSync(file, [
+    JSON.stringify({ taskId: 'Y', variant: 'B', recurred: false }),
+    JSON.stringify({ taskId: 'Y', variant: 'A', recurred: false }),
+  ].join('\n') + '\n');
+  const s = score({ file });
+  assert.ok(/无差别/.test(s.verdict), s.verdict);
+  assert.ok(/不复现失败/.test(s.verdict), `要提示"题不复现失败"这个可能，实际：${s.verdict}`);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+

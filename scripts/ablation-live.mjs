@@ -256,14 +256,22 @@ export function score({ file = RESULTS } = {}) {
   const paired = both + onlyA + onlyB + neither;
   const aHits = both + onlyA;
   const bHits = both + onlyB;
+  const mcnemarP = mcnemarExact(onlyA, onlyB);
+  // 判据：B（无记忆）复发更多 ⇒ onlyB > onlyA。
+  // T353：方向与显著性是**两件事**，必须分开说 —— 旧版把「方向对但 p ≥ 0.05」写成
+  // 「方向相反（A 路更多复发）」，会让样本量不足的正常中间态被误读成"记忆有害"。
+  let verdict;
+  if (paired === 0) verdict = '无数据';
+  else if (onlyA === onlyB) verdict = onlyA === 0 ? '无差别（两臂都没复发）⇒ 记忆没起作用，也可能题不复现失败' : '无差别 ⇒ 记忆没起作用';
+  else if (onlyB > onlyA) verdict = mcnemarP < 0.05 ? '**记忆有用**（B 路显著更多复发）' : '方向偏向「记忆有用」，但**未达显著**（样本不足，继续攒）';
+  else verdict = mcnemarP < 0.05 ? '**方向相反**（A 路显著更多复发）⇒ 记忆有害，必须先查卡里写了什么' : '方向偏向「记忆有害」，但**未达显著**（样本不足，先别下结论）';
   return {
     tasks: paired,
     A: { recurred: aHits, n: paired, rate: paired ? aHits / paired : null, wilson: wilson(aHits, paired) },
     B: { recurred: bHits, n: paired, rate: paired ? bHits / paired : null, wilson: wilson(bHits, paired) },
     discordant: { onlyA, onlyB },
-    // 判据：B（无记忆）复发更多 ⇒ onlyB > onlyA
-    mcnemarP: mcnemarExact(onlyA, onlyB),
-    verdict: paired === 0 ? '无数据' : (onlyB > onlyA && mcnemarExact(onlyA, onlyB) < 0.05 ? '**记忆有用**（B 路显著更多复发）' : (onlyA === onlyB ? '无差别 ⇒ 记忆没起作用' : '方向相反（A 路更多复发）')),
+    mcnemarP,
+    verdict,
   };
 }
 
