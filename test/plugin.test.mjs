@@ -56,6 +56,9 @@ function makeCtx() {
     },
     on: (event, handler) => {
       hooks[event] = handler;
+      return () => {
+        if (hooks[event] === handler) delete hooks[event];
+      };
     },
   };
   return { ctx, hooks, warns };
@@ -386,6 +389,20 @@ test('R16: apply 默认参数 ⇒ 注册钩子且默认开启（无库时沉默�
   assert.equal(res.registered, true);
   assert.equal(res.config.enabled, true);
   assert.equal(typeof hooks[HOOK], 'function');
+});
+
+test('T362: apply 返回可重复调用的 disposer，并清理两个事件钩子', () => {
+  const { ctx, hooks } = makeCtx();
+  const effect = apply(ctx, { enabled: false, shadow: false, autoBuild: false });
+  assert.equal(typeof effect, 'function', 'Cordis 4.1 effect 必须是函数，不能是诊断对象');
+  assert.equal(effect.registered, true, '旧诊断字段作为 disposer 属性保留');
+  assert.equal(effect.config.enabled, false);
+  assert.equal(typeof hooks[HOOK], 'function');
+  assert.equal(typeof hooks['agent/turn-stopping'], 'function');
+  effect();
+  assert.equal(hooks[HOOK], undefined);
+  assert.equal(hooks['agent/turn-stopping'], undefined);
+  assert.doesNotThrow(() => effect(), '清理必须幂等');
 });
 
 test('R16: decision.kind !== "enter" ⇒ 原样返回（不碰 messages）', async () => {
@@ -1041,4 +1058,26 @@ test('T282 ② tombstone: 写入只落 store root，**仓库目录里不出现�
 test('T282 ③: 写失败静默降级（返回 false，不抛）', () => {
   const boom = { mkdirSync() { throw new Error('EACCES'); }, appendFileSync() { throw new Error('EACCES'); } };
   assert.equal(appendMessageCorpus('D:/nope-t282', messageCorpusRow({ messages: [{ role: 'user', content: 'x' }] }), { fsImpl: boom }), false);
+});
+
+test('T282 ④: 真实 pre-step 语料只写 <storeRoot>/corpus/messages.jsonl', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    const { session } = makeSession(workspace);
+    apply(ctx, baseConfig({ storeRoot, collectMessages: true, probeValidity: false }));
+    await runHook({
+      hooks,
+      payload: { agent: { session }, messages: [userMessage('yaml 装不上')] },
+      decision: enterDecision([userMessage('yaml 装不上')]),
+    });
+    const corpus = messageCorpusPath(storeRoot);
+    assert.equal(existsSync(corpus), true);
+    const rows = readFileSync(corpus, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].messages.at(-1).text, 'yaml 装不上');
+    assert.equal(existsSync(path.join(workspace, 'evidence', 'T268-messages.jsonl')), false);
+  } finally {
+    cleanup();
+  }
 });

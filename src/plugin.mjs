@@ -1052,10 +1052,41 @@ export function apply(ctx, rawConfig = {}) {
   const config = resolveConfig(rawConfig);
   const injected = new WeakSet(); // 每会话只注入一次（对象身份；WeakSet 不留引用）
   const repeatStates = new Map(); // D5：每个会话的「同类失败计数」
+  const disposers = [];
+  let disposed = false;
+
+  // Cordis 4.1 会把 apply 的返回值当作 effect 收集：普通诊断对象会触发 Invalid effect。
+  // 返回真正的 disposer；旧诊断字段挂成函数属性，仅供现有测试/安装探针读取。
+  // ctx.on 自己也会把监听器登记到当前 fiber，这里的逆序清理同时支持直接调用与宿主卸载；
+  // Cordis 的 disposer 单次执行语义保证两条清理路径可以安全汇合。
+  const makeEffect = (registered) => {
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      repeatStates.clear();
+      const pending = [];
+      for (const off of disposers.splice(0).reverse()) {
+        const result = off();
+        if (result && typeof result.then === 'function') pending.push(result);
+      }
+      if (pending.length) return Promise.all(pending).then(() => undefined);
+    };
+    Object.defineProperties(dispose, {
+      name: { value: name, configurable: true },
+      hook: { value: HOOK },
+      registered: { value: registered },
+      config: { value: config },
+    });
+    return dispose;
+  };
+  const listen = (event, handler) => {
+    const off = ctx.on(event, handler);
+    if (typeof off === 'function') disposers.push(off);
+  };
 
   if (typeof ctx?.on !== 'function') {
     warn(ctx, 'ctx.on 不可用（插件未挂载，宿主行为不变）');
-    return { name, hook: HOOK, registered: false, config };
+    return makeEffect(false);
   }
 
   // 预热：把 walk 需要的四类记录读进内存一次（~0.7s），把成本挪到插件加载，而不是首轮注入。
@@ -1139,7 +1170,7 @@ export function apply(ctx, rawConfig = {}) {
     warn(ctx, `设置接口没注册上：${String(error?.message ?? error)}`);
   }
 
-  ctx.on(HOOK, async (payload, next) => {
+  listen(HOOK, async (payload, next) => {
     const decision = await next();
     try {
       if (!decision || typeof decision !== 'object') return decision;
@@ -1241,7 +1272,7 @@ export function apply(ctx, rawConfig = {}) {
   // D1（2026-11-02）：轮次收尾时增量刷新记忆库——不再只靠手动/首次 autoBuild。
   // 条件：开了 autoArchive、库存在、且 manifest.updatedAt 已超过 autoArchiveMinutes。
   try {
-    ctx.on('agent/turn-stopping', async () => {
+    listen('agent/turn-stopping', async () => {
       try {
         if (!config.autoArchive) return;
         const root = resolveStoreRoot(config);
@@ -1260,7 +1291,7 @@ export function apply(ctx, rawConfig = {}) {
     warn(ctx, `turn-stopping 钩子没挂上：${String(error?.message ?? error)}`);
   }
 
-  return { name, hook: HOOK, registered: true, config };
+  return makeEffect(true);
 }
 
 export function enforceStoreRoot(config = {}) {
