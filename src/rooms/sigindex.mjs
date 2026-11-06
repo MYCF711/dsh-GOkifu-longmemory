@@ -35,7 +35,13 @@ export function loadSignatureIndex(storeRoot) {
 export function writeSignatureIndex(storeRoot, entries, now = Date.now()) {
   fs.mkdirSync(storeRoot, { recursive: true });
   const data = { version: SIG_INDEX_VERSION, builtAt: now, entries };
-  fs.writeFileSync(sigIndexPath(storeRoot), `${JSON.stringify(data)}\n`, 'utf8');
+  const file = sigIndexPath(storeRoot);
+  fs.writeFileSync(file, `${JSON.stringify(data)}\n`, 'utf8');
+  // T346（2026-11-06 实测）：这里**必须**让缓存失效 —— 注释一直写着「写索引时失效」，但代码从没做。
+  // 于是同进程内「重写一份**同样大小**的索引、且落在同一个 mtime 刻度」时，(mtimeMs,size) 两项都没变
+  // ⇒ `loadSignatureIndex` 返回**陈旧数据**。`test/sigindex.test.mjs` 的「重写后必须失效」偶发红就是它
+  // （单独跑必现、全量跑因时序错开而偶过 —— 典型 flaky）。
+  INDEX_CACHE.delete(file);
   return data;
 }
 

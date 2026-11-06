@@ -17,6 +17,17 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.6.4（2026-11-06）
+
+### 签名索引缓存从不失效（T346）—— 卡住发版的 flaky 真因
+**现象**：`node --test test/sigindex.test.mjs` **必现红**（「重写后必须失效」），而全量跑常绿（时序错开）—— 典型 flaky。
+**根因（产品 bug）**：`writeSignatureIndex` 的注释一直写「写索引时失效」，但代码**从没做**。同进程内重写一份**同样大小**的索引、且落在同一 `mtime` 刻度 ⇒ `(mtimeMs, size)` 两项都没变 ⇒ `loadSignatureIndex` 返回**陈旧数据**。
+**修法**：`src/rooms/sigindex.mjs` 落盘后 `INDEX_CACHE.delete(file)`（一行，兑现注释承诺）。
+**回归测试**：`test/sigindex.test.mjs` 新增 **T346** —— 重写同样大小索引后用 `utimesSync` 把 mtime **强压回原值**，断言必须失效（删掉那一行则必红，tombstone）。
+**验收**：sigindex **5/5 pass**（原红转绿）；全量 **1036 条 / 1030 pass / 0 fail**；check PASS。
+**影响面**：只影响「同进程内重写索引后立刻读」；注入读侧行为不变（无索引仍返回 null）。
+证据 `evidence/T346-sigindex-cache.md`。
+
 ## 0.6.3（2026-11-06）
 
 ### F3 失效条件上卡（T345）—— 派生内容与逐字正文严格分离
