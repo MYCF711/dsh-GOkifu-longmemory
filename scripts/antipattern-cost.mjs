@@ -128,6 +128,18 @@ async function main(argv = process.argv.slice(2)) {
   const avgSteps = withSteps.length ? withSteps.reduce((n, r) => n + r.steps, 0) / withSteps.length : null;
   const stats = { antipatterns: anti.length, measured: rows.length, paid, unmeasured: rows.length - paid, rate: rows.length ? paid / rows.length : null, kinds, avgSteps };
 
+  // T332：**预计算索引**（`<store>/corpus/antipattern-cost.json`），供注入侧 O(1) 查。
+  // 守卫：只许写到 `tmp/` 或 store 的 `corpus/` 下（不写仓库、不改 claim）。
+  if (argv.includes('--write-index')) {
+    const target = path.resolve(opt(argv, 'index', path.join(storeRoot, 'corpus', 'antipattern-cost.json')));
+    const okTarget = target.includes(`${path.sep}tmp${path.sep}`) || target.includes(`${path.sep}corpus${path.sep}`);
+    if (!okTarget) { console.error(`拒绝写：${target}（只许 tmp/ 或 <store>/corpus/）`); return 2; }
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const costs = {};
+    for (const r of rows) costs[r.id] = r.cost;
+    fs.writeFileSync(target, JSON.stringify({ version: 1, generatedAt: new Date().toISOString(), source: storeRoot, count: rows.length, costs }, null, 2) + String.fromCharCode(10));
+    console.error(`已写索引：${target}（${rows.length} 条）`);
+  }
   if (argv.includes('--json')) console.log(JSON.stringify({ stats, rows }, null, 2));
   else {
     console.log('antipattern 的 cost（T3 付过代价）· 只读');

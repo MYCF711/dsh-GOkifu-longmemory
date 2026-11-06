@@ -439,7 +439,7 @@ function stateTokenOf(claim) {
   return state;
 }
 
-function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null }) {
+function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null }) {
   // 2026-11-04（0.134.0，线上实测）：seq 是 **1 基**的；`seq: 0` 等于「不知道在哪」，不是合法出处。
   // 当前宿主 60 条引用里就有 2 条落在 seq 0，卡上文字在该局里找不到 ⇒ A6 文字层报 missing。
   // 回到根本规矩：无源不入 —— seq < 1 的条目不进卡（计入 omitted，而不是渲染一条查无实据的行）。
@@ -451,6 +451,8 @@ function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text
     rawText,
     kind,
     marker,
+    // T333：cost 只作**同分次序**（tokOverlap/rank 等主键都相同才比），不参与硬过滤。
+    cost: Number.isFinite(cost) ? cost : null,
     state: state ?? marker,
     occurredAt,
     date,
@@ -503,34 +505,15 @@ function entryFromClaim(hit, claim, options = {}) {
   // 或 hit 直接点名 claimId 的**旁路**会绕过那道过滤 —— 这里在渲染入口再堵一次。
   // stale / disputed **不在此列**：它们仍进卡并带各自 marker（有信息量）。
   if (claim && claim.state === 'invalidated') return null;
-  // T331（第二道降级门）：**`cost: 0` 不占注入位**。
-  //
-  // 背景：T330 实测 1105 条 antipattern 里只有 0.09% 能机械判出"付过代价"。
-  // 没有代价的失败不该挤掉真正付过代价的 —— 但**保留在库里可查**（只增不改，不删）。
-  //
-  // 关键事实：`cost` **不是 claim 字段**（真库 1578 条里 0 条带它；契约定的是
-  // `scripts/antipattern-cost.mjs` 的 `estimateCost()` 在**读日志时**算）。所以本门只能吃
-  // **预计算索引**（`costIndex: Map<claimId, number>`），绝不在这里读日志：
-  //   · 索引缺失 / 该 id 不在索引里 ⇒ **不过滤**（fail-open，保持今天的行为）；
-  //   · `costIndex.get(id) === 0` ⇒ 从注入面退出；
-  //   · `cost > 0` ⇒ 正常进卡。
-  // 主排序键（tokOverlap）一字不动（T246 排序平台期已证）。
-  if (claim && options.costIndex instanceof Map) {
-    const cost = options.costIndex.get(String(claim.id ?? ''));
-    if (Number.isFinite(cost) && cost === 0) return null;
-  }
-  // T298（知识库 64）：**读侧硬过滤** —— stale / 过期不是"降权"，是**不占位**。
-  // 为什么必须硬过滤：只降权的话，过期 claim 仍能挤进 top-5，把有效记忆顶掉（V1 的缺口）。
-  // 三条纪律：
-  //   · 卡上不出现，**库里仍在**（只增不改，可追溯）；
-  //   · **可复活**：preconditions 重跑通过（`options.preconditionOk(claim) === true`）⇒ 回到候选（V2）；
-  //   · 不改 `state` 的写入逻辑，也不改注入形状（golden）。
-  const nowTs = Number.isFinite(options.now) ? Number(options.now) : Date.now();
-  const revived = typeof options.preconditionOk === 'function' ? options.preconditionOk(claim) === true : false;
-  if (!revived) {
-    if (claim?.state === 'stale') return null;
-    const validUntil = Number(claim?.validUntil);
-    if (Number.isFinite(validUntil) && validUntil < nowTs) return null;
+  // T298（知识库 64）：stale / `validUntil` 过期 **不占位**；preconditions 重跑通过 ⇒ 可复活。
+  if (claim) {
+    const revived = typeof options.preconditionOk === 'function' ? options.preconditionOk(claim) === true : false;
+    if (!revived) {
+      if (claim.state === 'stale') return null;
+      const vu = Number(claim.validUntil);
+      const nowTs = Number.isFinite(options.now) ? Number(options.now) : Date.now();
+      if (Number.isFinite(vu) && vu < nowTs) return null;
+    }
   }
   // 2026-11-04（M4 线上抽查发现）：u:owner 类级 claim 的 support 跨多个工作区，
   // 直接取 support[0] 会把"别项目的失败原文 + ep"渲染进本项目的卡（A5 的实质越界）。
@@ -583,6 +566,7 @@ function entryFromClaim(hit, claim, options = {}) {
     seq,
     occurredAt,
     marker: stateTokenOf(claim),
+    cost: Number.isFinite(options?.costIndex?.get?.(String(claim.id ?? ''))) ? options.costIndex.get(String(claim.id ?? '')) : null,
     ...(crossAllowed ? { prefix: '[跨项目] ' } : {}),
     state: typeof claim.state === 'string' && claim.state ? claim.state : 'observed',
     text,
@@ -679,7 +663,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       continue;
     }
     const entry = claim
-      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk })
+      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex })
       : entryFromEpisode(hit, view);
     if (entry && scope) {
       const rec = view.episodesById.get(String(hit?.episode ?? ''));
@@ -751,6 +735,9 @@ function compareEntries(a, b) {
     || (String(a.source.episode) < String(b.source.episode) ? -1 : String(a.source.episode) > String(b.source.episode) ? 1 : 0)
     // T317：seq 缺失时 `a-b` 会是 NaN（被 sort 当 0 ⇒ 退回插入序）——先挡住
     || ((Number.isFinite(a.source.seq) && Number.isFinite(b.source.seq)) ? a.source.seq - b.source.seq : 0)
+    // T333：**同分次序** —— 上面的主键（rank / occurredAt / episode / seq）全部相同，才比 cost：
+    // 付过代价（cost > 0）排在没有代价（0 / 缺失）之前。缺 costIndex ⇒ 视为 0（不加分、不惩罚）。
+    || ((Number.isFinite(b.cost) ? b.cost : 0) - (Number.isFinite(a.cost) ? a.cost : 0))
     // T317：**最后一级 = claimId 字典序** —— 同局同 seq 的两条 claim 必须可复现，
     // 不许依赖插入顺序 / Map 迭代序 / 文件系统顺序（T316 剩下的 3 条差异就出在这一级）。
     || String(a.claimId ?? '').localeCompare(String(b.claimId ?? ''));

@@ -1697,17 +1697,48 @@ function costClaim(id, text) {
   };
 }
 
-// T331 ①：**known-limitation** —— 见 evidence/T331-cost-gate.md §3（兜底渲染路径拿不到 claim 记录，
-// 与 T298 ① 同源；未写成绿测试，避免假绿）。
+// T333：**cost 只做同分次序**（不是硬过滤）—— 硬过滤会削掉 60% 相关性（实测）。
+function costClaim2(id, text, seq) {
+  return {
+    id, kind: 'antipattern', text, scopeKey: SCOPE, threadIds: [], state: 'observed',
+    support: [{ episode: 'ep-aaaaaaa1', seq, quote: text, occurredAt: T(21) }], counter: [],
+    validity: { type: 'none', value: null }, preconditions: [], occurredAt: T(21), recordedAt: T(21),
+    counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null }, supersedes: null,
+  };
+}
 
-test('T331 ②: cost > 0 ⇒ 正常进卡（不被误杀）；索引缺失 ⇒ 不过滤（fail-open）', () => {
+test('T333 ①: 主键（rank）不同 ⇒ 不看 cost（cost 不能翻主键的顺序）', () => {
   const { root, store } = fixture();
   try {
-    store.putMany('claims', [costClaim('c-cost000002', '付过代价的失败')]);
-    const walk = walkOf([hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-cost000002' })]);
-    const paid = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24), costIndex: new Map([['c-cost000002', 2]]) });
-    assert.equal(paid.claims.some((c) => c.claimId === 'c-cost000002'), true, 'cost>0 必须进卡');
+    store.putMany('claims', [
+      { ...costClaim2('c-rank-fact1', '普通事实条目', 41), kind: 'fact' },
+      { ...costClaim2('c-rank-anti1', '付过代价的教训', 42), kind: 'antipattern' },
+    ]);
+    const walk = walkOf([
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-rank-fact1' }),
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 42, claimId: 'c-rank-anti1' }),
+    ]);
+    // 给"事实"更高代价、给"教训"零代价：主键 rank 说 antipattern 在前，cost 不许翻盘
+    const card = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24), costIndex: new Map([['c-rank-fact1', 9], ['c-rank-anti1', 0]]) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.ok(ids.indexOf('c-rank-anti1') < ids.indexOf('c-rank-fact1'), `rank 必须优先：${JSON.stringify(ids)}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T333 ②: 主键全同 ⇒ cost > 0 排前（同分才比 cost；cost 不再过滤行）', () => {
+  const { root, store } = fixture();
+  try {
+    store.putMany('claims', [costClaim2('c-tie-zero01', '同分条目甲', 41), costClaim2('c-tie-paid01', '同分条目乙', 41)]);
+    const walk = walkOf([
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-tie-zero01' }),
+      hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-tie-paid01' }),
+    ]);
+    const card = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24), costIndex: new Map([['c-tie-zero01', 0], ['c-tie-paid01', 3]]) });
+    const ids = card.claims.map((c) => c.claimId);
+    assert.equal(ids.length, 2, '两条都必须进卡（不再硬过滤）');
+    assert.ok(ids.indexOf('c-tie-paid01') < ids.indexOf('c-tie-zero01'), `同分时 cost>0 必须排前：${JSON.stringify(ids)}`);
+    // 没有 costIndex ⇒ 视为 0，不惩罚也不加分
     const noIndex = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24) });
-    assert.equal(noIndex.claims.some((c) => c.claimId === 'c-cost000002'), true, '没有索引 ⇒ 不过滤');
+    assert.equal(noIndex.claims.length, 2);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
