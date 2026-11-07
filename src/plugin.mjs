@@ -1325,6 +1325,12 @@ export function apply(ctx, rawConfig = {}) {
             digest: result.digest ?? null,
             tokens: result.card?.tokens ?? null,
             section: String(result.card.section),
+            // T365：**留样必须带信号**，否则"这张卡是否该注入"**无法审计**。
+            // 没有信号 ⇒ "不相关时沉默"这条原则**根本无法验证**（只能看到卡，看不到为什么给）。
+            // 只留前 160 字符（信号可能很长），足够判"内容是否相关"。
+            // 注意作用域：这里是**外层**（不是 decidePreStep 内部），没有局部 `text`；
+            // 必须用同文件的 `lastUserText(payload?.messages)` 现取（它就是 decidePreStep 用的那一条）。
+            signalPreview: String(lastUserText(payload?.messages) ?? '').slice(0, 160),
           });
         }
         appendLiveStats(storeRootForStats, {
