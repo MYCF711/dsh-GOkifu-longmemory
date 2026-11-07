@@ -10,14 +10,14 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-gokifu-longmemory`（**公开**；main 由 ruleset 保护：必须经 PR + required check `rules`，禁 force push/删除；单机单人，不强制审批） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
-| 当前版本 | `0.8.37` |
+| 当前版本 | `0.8.38` |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 
 ## 二、当前状态（2026-11-02 20:40 · 整点巡检）
 
 ```
-分支         main = 0.8.37；功能分支 → PR → CI → 合并 → release（--require-ci）
+分支         main = 0.8.38；功能分支 → PR → CI → 合并 → release（--require-ci）
 里程碑       M7 线上验收：A3 live / A5 跨作用域 0 **已达成**；A6 判据升级为「引文可核」；**擂台已开打**（赢 3 / 输 0 / 不可比 3，主判据 A2 仍不可比）
 插件         **已启用并在宿主里真跑**：`kifu-loader` 别名包挂进 profile，且 `dsh-gokifu-longmemory` 是指向本工作区的**软链**，
              所以源码改动 **下次重启即生效、无需安装步骤**；宿主心跳 `live-stats.jsonl` 累计 11699 次 pre-step / `inject=62` / `failed=0`；
