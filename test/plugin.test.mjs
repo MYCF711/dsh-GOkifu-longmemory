@@ -931,6 +931,7 @@ test('D5: 同类失败第二次出现才触发，且每会话只补一次', asyn
     repeatHint: true,
     repeatHintAfter: 2,
     repeatHintMax: 1,
+    abstainIrrelevant: false, // D5 测的是'重复触发'，与相关性判据无关；占位文本'boom'会被 abstain 拒掉（正确行为，但与本测试无关）
     createUserMessage: (m) => ({ role: 'user', content: [{ type: 'text', text: `CARD:${m.content[0].text}` }] }),
     deps: {
       createStore: () => ({ list: () => [], get: () => null }),

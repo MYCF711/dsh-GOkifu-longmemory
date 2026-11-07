@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.39（2026-11-07）
+
+### abstain 在可靠输入上默认开启（含"默认开启"的正确写法）
+**abstain 在判据可靠的输入上默认开启**（不再默认关）—— "不相关时沉默"这条原则**真正生效**。
+**依据**（T366e 实测）：在判据可靠的输入上**误杀率 = 0**（2 条被拒全部正确拒绝），三条重开条件全满足。
+
+**实现**：在 `DEFAULT_CONFIG` 里 `abstainIrrelevant: true`，并注册进 `sanitizeConfig`（布尔键）。
+**两层保护**：① `hasReliableHandle(text)`（只在判据可靠的输入上启用）；② `abstainIrrelevant: false` 可显式关掉。
+
+**我踩到的配置陷阱（知识库 45 的新案例）**：
+一开始写 `config.abstainIrrelevant !== false` 做默认开启 —— **D5 测试当场红了**。
+**根因**：`undefined !== false` = **true**，**把"未设置"当成"开启"**。
+**正确的"默认开启"写法是在 `DEFAULT_CONFIG` 里设 `true`**（未设置时有明确默认值），**而不是 `!== false`**。
+
+**验证**：D5 测试显式 `abstainIrrelevant: false`（它测"重复触发"，与相关性无关）；
+sanitizeConfig 注册布尔键；**68 条 plugin+abstain 测试全绿**；**1064 条全量测试全绿**；`check PASS`。
+
+**这一刀的完整线**：误杀实证（33%）→ 跨语言修复（0）→ 完整验证（重开条件全满足）→ **默认开启**。
 ## 0.8.38（2026-11-07）
 
 ### 精化 + 跨语言修复后，abstain 在可靠输入上**误杀率 = 0**（完整验证）

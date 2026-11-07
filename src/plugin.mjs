@@ -84,6 +84,13 @@ export const DEFAULT_CONFIG = Object.freeze({
   // 2026-11-04（M4 精度抽样）：注入成功时把卡片正文抽存到 `<storeRoot>/card-samples.jsonl`，
   // 供事后做「注入质量」人工/机械核对。默认开；不写会话日志、只写 sidecar。
   sampleCards: true,
+  // T366e：**不相关时沉默**（知识库 79/87）。**默认开启**，但受两层限制：
+  // ① 只在 `hasReliableHandle(text)` 的输入上生效（短指令/纯通用中文 ⇒ 不启用，保守）；
+  // ② `abstainIrrelevant: false` 可显式关掉。
+  // ⚠ **不要用 `config.abstainIrrelevant !== false` 做默认开启** ——
+  //    `undefined !== false` = true 会把"**未设置**"当成"**开启**"（D5 实测踩过）；
+  //    **在 DEFAULT_CONFIG 里设 true** 才是正确的默认开启写法（未设置时有明确默认值）。
+  abstainIrrelevant: true,
   // T268：采集**真实消息语料**（只本机、只追加到 evidence/T268-messages.jsonl），
   // 用来复算 T267「最近 N 条消息的硬实体」到底带来多少召回。默认开；false 时完全不写。
   collectMessages: true,
@@ -183,6 +190,7 @@ export function sanitizeConfig(raw = {}) {
     budgetTokens: positiveInt(src.budgetTokens, DEFAULT_CONFIG.budgetTokens, 100000),
     limit: positiveInt(src.limit, DEFAULT_CONFIG.limit, 100),
     oncePerSession: boolOf(src.oncePerSession, DEFAULT_CONFIG.oncePerSession),
+    abstainIrrelevant: boolOf(src.abstainIrrelevant, DEFAULT_CONFIG.abstainIrrelevant),
     now: Number.isFinite(src.now) ? Number(src.now) : (typeof src.now === 'function' ? src.now : null),
     createUserMessage: typeof src.createUserMessage === 'function' ? src.createUserMessage : null,
     probeValidity: boolOf(src.probeValidity, true),
@@ -721,6 +729,12 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
   // `hasReliableHandle(text)` = 信号里有硬实体（文件路径/错误码/包名）或 ≥2 英文判别词 ——
   // **在这些输入上判据是可靠的**，不该被"默认关"一起埋掉；
   // 短指令 / 纯通用中文 ⇒ 不可靠 ⇒ **不启用**（保守，不误杀）。
+  // 知识库 87 + T366e：**在判据可靠的输入上默认开启**（`abstainIrrelevant !== false`）。
+  // 依据：T366e 实测在判据可靠的输入上**误杀率 = 0**（2 条被拒全部正确拒绝），三条重开条件全满足。
+  // **"不相关时沉默"这条原则该真正生效了**，而不是永远躺在 latent code 里。
+  // 两层保护：
+  //   ① `hasReliableHandle(text)`：**只在判据可靠的输入上启用**（短指令/纯通用中文 ⇒ 不启用，保守）；
+  //   ② `abstainIrrelevant: false` 可显式关掉（回到旧行为，向后兼容）。
   if (config.abstainIrrelevant === true && hasReliableHandle(text) && card?.section && !hasRelevantClaim(card, text)) {
     return { decision, action: 'abstain', reason: 'no-relevant-claim', card, gates, digest };
   }
