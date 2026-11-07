@@ -1,13 +1,21 @@
 #!/usr/bin/env node
 // 指标护栏（本机跑，CI 无语料）：把六轴与 A2b 的关键值钉成门槛，低于门槛直接退出 1。
 //
-// 用法：node scripts/metrics-guard.mjs [--strict 0.65] [--json]
+// 用法：node scripts/metrics-guard.mjs [--strict 0.65] [--workspace <dir>] [--json]
 // 依赖：本机 $DSH_HOME 的语料与 memory-context（CI 上不跑，入 PR 时用 check.mjs 的结构检查兜底）。
 //
 // **层级（T236b，2026-11-05 主人改判）**：
 //   主判据   = **A2b（召回相关度）** —— 第一门槛：失败立刻红，**排在 A1 之前**（输出顺序也按这层）。
 //   约束条件 = A1 负迁移 / A5 越界 / A6 溯源 / A4 p50 —— 任一越界即红。
 //   下游参考 = **repeatFailureRate（V1）** —— 仍打印，**不参与 exit code**。
+//
+// **T7：A1 有两条并列的轴（stale | opposite），不是替换**：
+//   · `A1`（staleTransferRate）—— 原判据，口径与门槛（≤5%）一字不动；
+//   · `A1.opposite`（反向记忆率）—— 新增，同样 ≤5%；**只有"通电"（可判率 ≥30% 且线上有正样本）
+//     才参与 exit code**。线上 0 次触发时它是 0/0（精确率无样本），拿它当通过就是假绿 —— 打印"未通电"。
+//   · 缺轴 ⇒ 红（tombstone：把 `A1.opposite` 那条统计删掉，本闸必须红）。
+//   `--workspace <dir>`：m5-report 的 workspace scope（worktree 并行时用主工作区，避免 scope 不匹配
+//   把 A5/A6 判成 not-consumed）。默认仍是当前目录（行为不变）。
 //
 // 为什么这样分层：主人 2026-11-05 裁定「应该要保证召回相关度，下沉是 GOkifu 上下文压缩插件的事，
 // 不踩坑是上下文压缩该保证的事情」。把**下游结果**当源头验收面就是**指标不可归因**：
@@ -59,6 +67,10 @@ export const HOLDOUT_BASELINE = Object.freeze({
 
 const LIMITS = {
   a1Max: 0.05,
+  // T7：A1 的第二条轴（反向记忆率）与 stale **并列**，同一个 5% 硬上限。
+  // 但只有"通电"（`detail.usableForDecision` = 可判率 ≥30% 且线上有正样本）才参与 exit code ——
+  // 线上 0 次触发时它是 0/0，不能当通过（见文件头）。
+  a1OppositeMax: 0.05,
   a5Max: 0,
   a6Min: 1,
   a4p50MaxMs: 50,
@@ -91,6 +103,19 @@ export function judge(report, limits = LIMITS, a2bOverride = null) {
   const a5 = axes.A5?.value;
   const a6 = axes.A6?.value;
   const a4 = axes.A4?.value;
+  // T7：A1 的第二条轴（反向记忆率）。与 A1.stale **并列**，不是替换 —— 两个都要读、都要打印。
+  const a1OppositeAxis = axes['A1.opposite'] ?? null;
+  // 只有**带 T7 契约标记**（`a1Axes`）的报告才强制要求这条轴：旧快照 / 单测夹具没有这个字段，
+  // 拿新契约去卡旧报告会造成假红（而 lib 的真实报告一定带它 —— m5-report 的 `runM5Body` 写死）。
+  const a1OppositeRequired = Array.isArray(report?.a1Axes) && report.a1Axes.includes('A1.opposite');
+  const a1Opposite = a1OppositeAxis?.value;
+  const a1OppositeDetail = a1OppositeAxis?.detail ?? null;
+  const a1OppositeN = Number.isFinite(a1OppositeDetail?.total)
+    ? a1OppositeDetail.total
+    : (Number.isFinite(a1OppositeAxis?.n) ? a1OppositeAxis.n : null);
+  const a1OppositeDecidability = Number.isFinite(a1OppositeDetail?.decidability) ? a1OppositeDetail.decidability : null;
+  // "通电" = 可判率达标**且**线上有正样本（`polarityReport` 三件套之外的额外一条，见文件头）
+  const a1OppositeDecisionGrade = Boolean(a1OppositeDetail?.usableForDecision);
   const recall = axes.A2?.detail?.injectionRecall ?? {};
   // T242：默认来源仍是 m5（旧口径）；调用方给了考卷结果就以考卷为准。
   const strict = a2bOverride && Number.isFinite(a2bOverride.strict) ? a2bOverride.strict : recall.recallSpecific;
@@ -111,6 +136,17 @@ export function judge(report, limits = LIMITS, a2bOverride = null) {
   // ── 约束条件：A1 / A5 / A6 / A4 ────────────────────────────────────────
   const constraints = [];
   if (!Number.isFinite(a1) || a1 > limits.a1Max) constraints.push(`A1 负迁移 ${a1} > ${limits.a1Max}`);
+  // T7：A1.opposite —— 与 A1 并列的第二条负迁移轴。
+  // ① 缺轴 ⇒ 红（tombstone：删掉这条统计，本闸必须红）；
+  // ② 无值 ⇒ 红（没算出来 ≠ 通过，与 A1 同一条纪律）；
+  // ③ 只有"通电"（可判率达标 + 有正样本）时才拿 5% 卡它 —— 0/0 的 0% 不是通过，是没通电。
+  if (a1OppositeRequired) {
+    if (!a1OppositeAxis) constraints.push('A1.opposite 反向记忆率缺失（tombstone：轴统计被删）');
+    else if (!Number.isFinite(a1Opposite)) constraints.push(`A1.opposite 反向记忆率无值（n=${a1OppositeN ?? 'null'}；没算出来 ≠ 通过）`);
+    else if (a1OppositeDecisionGrade && a1Opposite > limits.a1OppositeMax) {
+      constraints.push(`A1.opposite 反向记忆率 ${a1Opposite} > ${limits.a1OppositeMax}（可判率 ${a1OppositeDecidability}）`);
+    }
+  }
   // A1=0 但覆盖率 0 ⇒ 空转：不判失败，但必须显式标注（2026-11-02 审计 P1-5）
   if (!Number.isFinite(a5) || a5 > limits.a5Max) constraints.push(`A5 越界 ${a5} != 0`);
   if (!Number.isFinite(a6) || a6 < limits.a6Min) constraints.push(`A6 溯源 ${a6} < ${limits.a6Min}`);
@@ -130,6 +166,11 @@ export function judge(report, limits = LIMITS, a2bOverride = null) {
       a1,
       a1Vacuous,
       a1Coverage,
+      // T7：A1 的两条并列轴（stale 在上面，opposite 在这里）
+      a1Opposite,
+      a1OppositeN,
+      a1OppositeDecidability,
+      a1OppositeDecisionGrade,
       a5,
       a6,
       p50,
@@ -192,13 +233,20 @@ if (invokedDirectly) {
   const holdoutPath = holdoutIdx >= 0 && argv[holdoutIdx + 1]
     ? argv[holdoutIdx + 1]
     : (process.env.KIFU_A2B_HOLDOUT || DEFAULT_HOLDOUT_PATH);
+  // T7：worktree 并行时 cwd 的 scope 与库里的主工作区对不上（A5/A6 会落 not-consumed 假红）。
+  // `--workspace <dir>`（或 KIFU_M5_WORKSPACE）转发给 m5-report；**不给就仍是当前目录**（默认行为不变）。
+  const workspaceIdx = argv.indexOf('--workspace');
+  const workspaceFlag = workspaceIdx >= 0 ? String(argv[workspaceIdx + 1] ?? '').trim() : '';
+  const m5Workspace = workspaceFlag || String(process.env.KIFU_M5_WORKSPACE ?? '').trim();
+  const m5Args = [path.join(REPO, 'scripts/m5-report.mjs'), '--json'];
+  if (m5Workspace) m5Args.push('--workspace', path.resolve(m5Workspace));
   // 2026-11-04：本机实测过 m5 --json **间歇性静默死亡**（一次 patrol 里报 "Command failed"，重跑又正常）。
   // 原实现把 m5 的 stderr 吞了、把 JSON.parse 失败和子进程失败混成一句 "采集失败"，等于把可诊断信息丢掉。
   // 现在：分别记 exitCode / stderr / stdout 尾部，落 tmp/m5-raw.json 供事后看；只对"exit≠0 且 stderr 为空"
   // 这种静默死亡重试一次（重试很贵，别对真错误反复跑）。
   const collect = async () => {
     const r = await new Promise((resolve) => {
-      const child = spawn(process.execPath, [path.join(REPO, 'scripts/m5-report.mjs'), '--json'], { cwd: REPO, env: process.env });
+      const child = spawn(process.execPath, m5Args, { cwd: REPO, env: process.env });
       let stdout = '';
       let stderr = '';
       child.stdout.on('data', (d) => { stdout += d; });
@@ -259,6 +307,8 @@ if (invokedDirectly) {
     console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'}`);
     console.log(`  主判据 · A2b 召回相关度（sampleSource=${out.values.sampleSource}，n=${out.values.a2bN}）：严格=${pct(out.values.a2bStrict)} 覆盖=${pct(out.values.a2bCover)}`);
     console.log(`  约束条件 · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A4.p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
+    // T7：A1 的两条并列轴（stale 在上面那一行，opposite 在这里）。"未通电"必须显式打出来 —— 别把 0/0 当通过。
+    console.log(`  A1 两轴 · A1.stale=${pct(out.values.a1)} A1.opposite=${pct(out.values.a1Opposite)}（可判率 ${pct(out.values.a1OppositeDecidability)}，n=${out.values.a1OppositeN ?? 'null'}，${out.values.a1OppositeDecisionGrade ? '已通电·参与 exit code' : '未通电·不参与 exit code（0 次触发 ≠ 无反向记忆）'}）`);
     console.log(`  下游参考 · repeatFailureRate=${pct(out.values.repeatFailureRate)}（V1 · 不参与 exit code）`);
     for (const f of verdict.fails) console.error(`ERR ${f}`);
   }

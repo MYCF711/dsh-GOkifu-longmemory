@@ -5,8 +5,11 @@
 // 职责：把 M5 的六个对裁判据跑成**一份可复算的报告**：A1 负迁移 / A2 收益 / A3 可靠性 /
 //       A4 延迟与成本 / A5 作用域 / A6 可回溯。每轴输出
 //       `{value, unit, n, status: measured|not-live|not-consumed, caveat}`。
+//       **A1 有两条并列的轴**（T7）：`A1`（staleTransferRate，记忆过期了还在用）与
+//       `A1.opposite`（反向记忆率，记忆与当前信号方向相反）。两个轴都是 ≤5%，**不是替换**。
 // 复用（**不重写口径**）：
 //   A1 ← `scripts/eval.mjs` 的 `runH1`（staleTransferRate + validityCoverage）
+//   A1.opposite ← `src/rooms/abstain.mjs` 的 `detectPolarity` / `polarityReport`（三件套：率 / 可判率 / 是否可用于决策）
 //   A2 ← `scripts/eval.mjs` 的 `runEval`（LOO repeatFailureRate，both 口径；1σ = sqrt(p(1-p)/n)）
 //   A4/A5/A6 ← R11 walk → R12 buildMemoryCard → R13 runGates（与插件热路径同一条链）
 // 纪律：
@@ -30,7 +33,8 @@ import { createStore } from '../src/rooms/persist.mjs';
 import { walkFromSignals, createWalkCache, isScopeVisible, normalizeScopeKey } from '../src/rooms/walk.mjs';
 import { errorClassKeyOf } from '../src/rooms/topic.mjs';
 import { buildMemoryCard, signalFromText, scopeKeyFromPath, PROVENANCE_LINE_RE } from '../src/rooms/inject.mjs';
-import { runGates } from '../src/rooms/gates.mjs';
+import { runGates, workspaceOf } from '../src/rooms/gates.mjs';
+import { detectPolarity, polarityReport, polarityScorecard } from '../src/rooms/abstain.mjs';
 
 export const M5_VERSION = 1;
 export const AXIS_IDS = Object.freeze(['A1', 'A2', 'A3', 'A4', 'A5', 'A6']);
@@ -44,6 +48,18 @@ export const AXIS_TITLES = Object.freeze({
 });
 /** 每条轴允许的状态；`measured` 才有真实数字，`not-live` = 能力在但没上线，`not-consumed` = 没数据。 */
 export const AXIS_STATUSES = Object.freeze(['measured', 'not-live', 'not-consumed', 'live', 'live-idle']);
+
+// T7：A1 的**两条并列轴**。`A1`（stale）的口径与数值**一字不动**；`A1.opposite` 是新增的第二条。
+export const A1_STALE_AXIS_ID = 'A1';
+export const A1_OPPOSITE_AXIS_ID = 'A1.opposite';
+/** 两条轴并列时的固定顺序（渲染与 metrics-guard 都按它读）。 */
+export const A1_AXIS_IDS = Object.freeze([A1_STALE_AXIS_ID, A1_OPPOSITE_AXIS_ID]);
+/** 可判率下限（与 `polarityReport` 默认同源）：低于它 ⇒ **不可用于决策**。 */
+export const A1_OPPOSITE_DECIDABILITY_FLOOR = 0.30;
+/** `opposite` 精确率下限（与 `polarityReport` 默认同源）。 */
+export const A1_OPPOSITE_PRECISION_FLOOR = 0.80;
+/** 负迁移硬上限：与 `A1`（stale）**同一个 5%**，不是各算各的。 */
+export const A1_OPPOSITE_MAX = 0.05;
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -184,6 +200,203 @@ export async function measureA1({ storeRoot, workspace, now, signals, crossScope
     status: measured ? 'measured' : 'not-consumed',
     caveat: parts.join('；'),
     detail,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// A1b · 反向记忆（opposite）—— 与 A1.stale **并列**的第二条负迁移轴（T7）
+//
+// 与 A1 的分工：A1 测"记忆**过期**了还在用"；A1.opposite 测"记忆与当前信号**方向相反**"。
+// 两条都是负迁移、硬上限都是 5%，**不是替换关系** —— A1 的口径与数值一字不动。
+//
+// 口径（与 `runH1` 同一条信号构造，只把 stale 判定换成方向判定）：
+//   · 信号集 = 主题库 df 降序前 N 个（`${key} 相关的问题`）+ **每条带 validity 的条目用自己的文本**；
+//   · 分母 = 被注入的 **(信号, claim) 行**（卡片里带 `claimId` 的渲染行）；
+//   · 分子 = 其中 `detectPolarity` 判为 `opposite` 的行；
+//   · 可判率 = (`same` + `opposite`) / 分母 —— 知识库 83：任何"率"必须**同时报可判率**。
+//
+// 为什么按"对"而不是按 claimId 去重：方向是**信号×claim**的属性（同一条 claim 对 A 反向、对 B 同向）。
+// 按 claimId 去重会把"只在一条信号上可判"抬成可判率 72.2%（实测 182/252），那是口径幻觉；
+// 去重后的数只作为 `detail.claimLevel` 的对照，不进主值。
+//
+// ⚠ 这个轴的线上值**必然是 0**（T6 实测 2354 条真实卡行里 `[semantic]`/`[disputed]`/`[stale]` 各 0 次）：
+//   0% 是"没触发"，**不是**"没有反向记忆"。精确率在线上是 0/0（无正样本）⇒ **仪表未通电**，
+//   `usableForDecision` 因此被额外要求"有正样本"这一条（见下）。
+// ---------------------------------------------------------------------------
+
+/** 读 T2 的标注集（`evidence/label-set.json`，135 对人工标注），跑一遍 `polarityScorecard` 作**校准**。
+ *  这是唯一带人工金标的集合；线上没有金标，精确率只能由它提供。 */
+function readLabelSetCalibration() {
+  const file = path.join(REPO_ROOT, 'evidence', 'label-set.json');
+  if (!fs.existsSync(file)) return null;
+  try {
+    const set = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const scorecard = polarityScorecard(set.pairs);
+    return {
+      n: Array.isArray(set.pairs) ? set.pairs.length : null,
+      counts: scorecard.counts,
+      report: scorecard.report,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 测 A1.opposite（反向记忆率）。
+ * @param {{storeRoot:string, workspace:string, now?:number, signals?:number,
+ *          cache?:object|null, hasStore?:boolean|null}} opts
+ */
+export async function measureA1Opposite({ storeRoot, workspace, now, signals, cache = null, hasStore = null } = {}) {
+  const storeRootAbs = path.resolve(storeRoot ?? path.join(process.env.DSH_HOME ?? '', 'memory-context'));
+  const workspaceAbs = path.resolve(workspace ?? process.cwd());
+  const storeExists = hasStore === null
+    ? (fs.existsSync(path.join(storeRootAbs, 'manifest.json')) || fs.existsSync(path.join(storeRootAbs, 'episodes')))
+    : Boolean(hasStore);
+  if (!storeExists) {
+    return axis({
+      value: null,
+      unit: 'rate',
+      n: 0,
+      status: 'not-consumed',
+      caveat: '没有记忆库 ⇒ 没有卡片行可判方向，不写 0',
+    });
+  }
+  const store = createStore({ root: storeRootAbs });
+  const read = (kind) => {
+    try {
+      return store.list(kind).map((x) => x?.record).filter((r) => r && typeof r === 'object');
+    } catch {
+      return [];
+    }
+  };
+  const claims = read('claims');
+  const joseki = read('joseki');
+  const topicsAll = read('topics');
+  const want = Number.isFinite(signals) ? Math.max(1, Math.floor(signals)) : 36;
+  const scope = scopeKeyFromPath(workspaceAbs);
+  // 信号集：与 runH1 逐字同构（主题 df 降序 + 每条带 validity 的条目）
+  const sortedTopics = [...topicsAll].sort((a, b) => ((b.df ?? 0) - (a.df ?? 0)) || String(a.key ?? '').localeCompare(String(b.key ?? '')));
+  const specs = [];
+  const seen = new Set();
+  for (const topic of sortedTopics) {
+    const key = String(topic.key ?? '');
+    if (key.length < 3 || seen.has(key)) continue;
+    seen.add(key);
+    specs.push({ kind: 'topic', text: `${key} 相关的问题`, scopeKey: scope });
+    if (specs.length >= want) break;
+  }
+  let validitySignals = 0;
+  for (const record of [...claims, ...joseki]) {
+    const type = typeof record?.validity?.type === 'string' ? record.validity.type : 'none';
+    if (type === 'none') continue;
+    const text = typeof record.text === 'string' && record.text.trim() !== ''
+      ? record.text.trim()
+      : (typeof record.title === 'string' ? record.title : '');
+    if (!text) continue;
+    const recordWorkspace = workspaceOf(record, workspaceAbs);
+    specs.push({
+      kind: 'validity',
+      text,
+      scopeKey: recordWorkspace ? `w:${String(recordWorkspace).replace(/\\/g, '/')}` : scope,
+    });
+    validitySignals += 1;
+  }
+  const walkCache = cache ?? createWalkCache(store);
+  const counts = { same: 0, opposite: 0, unclear: 0 };
+  const rank = { unclear: 0, same: 1, opposite: 2 };
+  const perClaim = new Map(); // claimId -> 最强方向（只作去重对照，不进主值）
+  const samples = [];
+  let rows = 0;
+  let cardsWithContent = 0;
+  for (const spec of specs) {
+    const signal = signalFromText(spec.text, { at: now });
+    signal.scopeKey = spec.scopeKey;
+    const walk = walkFromSignals({ signal, store, scope: spec.scopeKey, depth: 2, limit: 5, budgetTokens: 500, cache: walkCache });
+    const card = buildMemoryCard({ signal, walkResult: walk, store, scope: spec.scopeKey, now, limit: 5, budgetTokens: 500, cache: walkCache });
+    const cardRows = (card?.claims ?? []).filter((c) => typeof c?.claimId === 'string');
+    if (cardRows.length > 0) cardsWithContent += 1;
+    for (const row of cardRows) {
+      const record = store.get('claims', row.claimId);
+      const text = String(record?.text ?? '');
+      if (!text) continue; // 没有正文就判不了方向（不猜）
+      rows += 1;
+      const polarity = detectPolarity(spec.text, text);
+      counts[polarity] += 1;
+      const prev = perClaim.get(row.claimId);
+      if (prev === undefined || rank[polarity] > rank[prev]) perClaim.set(row.claimId, polarity);
+      if (polarity === 'opposite' && samples.length < 5) {
+        samples.push({ signal: spec.text.slice(0, 120), claim: text.slice(0, 160), claimId: row.claimId, kind: spec.kind });
+      }
+    }
+  }
+  const total = counts.same + counts.opposite + counts.unclear;
+  // 三件套（率 / 可判率 / 是否可用于决策）由 `polarityReport` 统一产出，不在这里重写口径。
+  const polarity = polarityReport(counts, {
+    decidabilityFloor: A1_OPPOSITE_DECIDABILITY_FLOOR,
+    precisionFloor: A1_OPPOSITE_PRECISION_FLOOR,
+  });
+  const claimCounts = { same: 0, opposite: 0, unclear: 0 };
+  for (const p of perClaim.values()) claimCounts[p] += 1;
+  const claimTotal = perClaim.size;
+  const calibration = readLabelSetCalibration();
+  // **最终**判据 = `polarityReport` 的三件套 **且** 线上有正样本（`opposite > 0`）。
+  // 为什么加后一条：线上 0 次触发时 opposite 精确率是 0/0 —— 0% 是"没触发"，
+  // 拿它说"没有反向记忆"就是负迁移考核里最危险的那种假绿（T6 的 [disputed]=0 已经证明线上走不到这一支）。
+  const usableForDecision = Boolean(polarity.usableForDecision && counts.opposite > 0);
+  const decisionReason = total === 0
+    ? '没有可判的渲染行（卡片全空）'
+    : counts.opposite === 0
+      ? '线上 0 次触发 ⇒ opposite 精确率无样本（0/0）；0% 是"没触发"不是"没有反向记忆"（仪表未通电）'
+      : (!polarity.usableForDecision
+        ? `可判率 ${pct(polarity.decidability)} < ${(A1_OPPOSITE_DECIDABILITY_FLOOR * 100).toFixed(0)}% 下限 ⇒ 不可用于决策`
+        : '有正样本且可判率达标 ⇒ 可用于决策');
+  const caveatParts = [
+    `与 A1.stale **并列**的第二条负迁移轴（两个都是 ≤${(A1_OPPOSITE_MAX * 100).toFixed(0)}%，不是替换）`,
+    `反向记忆率 ${pct(polarity.oppositeRate)}（${counts.opposite}/${total} 对）· 可判率 ${pct(polarity.decidability)}（${polarity.decidable}/${total}）· ${usableForDecision ? '可用于决策' : '**不可用于决策**'}（${decisionReason}）`,
+    `**无触发 ≠ 无反向记忆**：T6 实测线上 2354 条真实卡行里 [semantic]/[disputed]/[stale] 各 0 次 ⇒ 本轴线上值必为 0（${counts.opposite}/${total}），不能当成"没有反向记忆"的证据`,
+    `校准集（evidence/label-set.json，${calibration?.n ?? '缺'} 对人工标注）可判率 ${calibration && Number.isFinite(calibration.report?.decidability) ? pct(calibration.report.decidability) : 'n/a'} · opposite 精确率 ${calibration && Number.isFinite(calibration.report?.precision?.opposite) ? pct(calibration.report.precision.opposite) : 'n/a'}（小样本，Wilson 95% 下界约 34%）`,
+    `去重对照：按 claimId 去重后 ${claimCounts.opposite}/${claimTotal}（可判率 ${pct(claimTotal ? (claimCounts.same + claimCounts.opposite) / claimTotal : null)}）—— 方向是"信号×claim 对"的属性，去重会抬高可判率，故主口径按对`,
+    `信号 ${specs.length} 条（主题 ${specs.length - validitySignals} + 带 validity ${validitySignals}）`,
+  ];
+  return axis({
+    value: total > 0 ? polarity.oppositeRate : null,
+    unit: 'rate',
+    n: total,
+    status: total > 0 ? 'measured' : 'not-consumed',
+    caveat: caveatParts.join('；'),
+    detail: {
+      axis: A1_OPPOSITE_AXIS_ID,
+      pairedWith: A1_STALE_AXIS_ID,
+      units: '被注入的 (信号, claim) 渲染行；不是 claimId 去重',
+      same: counts.same,
+      opposite: counts.opposite,
+      unclear: counts.unclear,
+      total,
+      oppositeRate: polarity.oppositeRate,
+      decidable: polarity.decidable,
+      decidability: polarity.decidability,
+      usableForDecision,
+      // polarityReport 的原始三件套（未叠加"必须已有正样本"这一条）—— 两个都留，便于复核
+      polarityReport: polarity,
+      decisionGate: 'polarityReport.usableForDecision && opposite > 0',
+      decisionReason,
+      claimLevel: {
+        same: claimCounts.same,
+        opposite: claimCounts.opposite,
+        unclear: claimCounts.unclear,
+        total: claimTotal,
+        oppositeRate: claimTotal ? claimCounts.opposite / claimTotal : null,
+        decidability: claimTotal ? (claimCounts.same + claimCounts.opposite) / claimTotal : null,
+      },
+      calibration,
+      signals: specs.length,
+      topicSignals: specs.length - validitySignals,
+      validitySignals,
+      cardsWithContent,
+      samples,
+      hardCap: A1_OPPOSITE_MAX,
+    },
   });
 }
 
@@ -819,6 +1032,15 @@ async function runM5Body(opts) {
       signals: h1Signals,
       crossScopeLeakRate: a5.value,
     }),
+    // T7：A1 的第二条轴（反向记忆率），紧挨着 A1 放 —— 两条并列、不是替换。
+    // 没有记忆库时同样落 `not-consumed`（value=null），**不写 0**。
+    [A1_OPPOSITE_AXIS_ID]: await measureA1Opposite({
+      storeRoot,
+      workspace,
+      now,
+      signals: h1Signals,
+      hasStore,
+    }),
     A2: await measureA2({ dataRoot, storeRoot, now, holdoutExam: opts.holdoutExam ?? null }),
     A3: measureA3({ repoRoot: opts.repoRoot ?? REPO_ROOT, liveAttempts: opts.liveAttempts ?? 0, liveStats: readLiveStats(storeRoot) }),
     A4: measureA4({ pipeline }),
@@ -849,6 +1071,9 @@ async function runM5Body(opts) {
     },
     axes,
     order: [...AXIS_IDS],
+    // T7：A1 的两条并列轴（stale / opposite）。`order` 仍是六轴（A1–A6），
+    // 这里单列是因为 A1 一个 id 下挂着两条口径不同的负迁移轴。
+    a1Axes: [...A1_AXIS_IDS],
     pipeline: {
       coldCacheMs: pipeline.coldCacheMs,
       gatesFailed: pipeline.gatesFailed,
@@ -887,6 +1112,13 @@ export function formatM5Report(report) {
     lines.push(`${id}  ${`${AXIS_TITLES[id]}`.padEnd(24)} ${String(shown).padEnd(9)} ${String(a.n).padStart(4)}   ${STATUS_LABEL[a.status]}`);
     lines.push(`    ${a.caveat}`);
   }
+  // T7：A1 的两条并列轴 —— 单独一块，A1 上面那行一字不动（逐字节保持）。
+  const a1o = report.axes[A1_OPPOSITE_AXIS_ID];
+  lines.push('');
+  lines.push(`A1 负迁移 · 两轴并列（stale | opposite，两个都是 ≤${(A1_OPPOSITE_MAX * 100).toFixed(0)}%，不是替换）：`);
+  lines.push(`  A1.stale    ${pct(report.axes[A1_STALE_AXIS_ID]?.value).padEnd(9)} ${String(report.axes[A1_STALE_AXIS_ID]?.n ?? 0).padStart(4)}   ${STATUS_LABEL[report.axes[A1_STALE_AXIS_ID]?.status] ?? ''}`);
+  lines.push(`  A1.opposite ${pct(a1o?.value).padEnd(9)} ${String(a1o?.n ?? 0).padStart(4)}   可判率 ${pct(Number.isFinite(a1o?.detail?.decidability) ? a1o.detail.decidability : null)} · ${a1o?.detail?.usableForDecision ? '可用于决策' : '**不可用于决策**'}`);
+  lines.push(`    ${a1o?.caveat ?? '（缺少 A1.opposite 轴）'}`);
   lines.push('');
   lines.push(`耗时 ${report.elapsedMs} ms · 写入 0（只读；唯一写入口是 --evidence）`);
   return lines.join('\n');
@@ -905,6 +1137,7 @@ export function renderM5Markdown(report) {
   lines.push('|---|---|---|---|---|---|---|');
   const judge = {
     A1: '负迁移受控',
+    [A1_OPPOSITE_AXIS_ID]: '负迁移受控（反向）',
     A2: '收益（主判据）',
     A3: '可靠性',
     A4: '延迟/成本',
@@ -913,14 +1146,18 @@ export function renderM5Markdown(report) {
   };
   const metric = {
     A1: 'staleTransferRate',
+    [A1_OPPOSITE_AXIS_ID]: 'oppositeRate（+ 可判率）',
     A2: 'repeatFailureRate（LOO）',
     A3: 'injectFailureRate',
     A4: 'walk→card→gates p50',
     A5: 'crossScopeLeakRate',
     A6: 'provenanceCoverage',
   };
-  for (const id of AXIS_IDS) {
+  // T7：A1 的两条并列轴在总表里紧挨着（stale 在前，opposite 在后），其余轴顺序不变。
+  const tableOrder = AXIS_IDS.flatMap((id) => (id === A1_STALE_AXIS_ID ? [A1_STALE_AXIS_ID, A1_OPPOSITE_AXIS_ID] : [id]));
+  for (const id of tableOrder) {
     const a = report.axes[id];
+    if (!a) continue;
     const shown = a.unit === 'rate' ? pct(a.value) : (a.value === null ? 'n/a' : String(a.value));
     lines.push(`| **${id}** | ${judge[id]} | \`${metric[id]}\` | **${shown}** | ${a.unit} | ${a.n} | \`${a.status}\` |`);
   }
@@ -944,6 +1181,23 @@ export function renderM5Markdown(report) {
     }
     lines.push('');
   }
+  // T7：A1 两轴并列的对照表（stale 的口径与数值一字不动；这里只做并排展示）。
+  const a1oAxis = report.axes[A1_OPPOSITE_AXIS_ID] ?? null;
+  const a1sAxis = report.axes[A1_STALE_AXIS_ID] ?? null;
+  lines.push('## 2b · A1 负迁移 · 两轴并列（stale | opposite）');
+  lines.push('');
+  lines.push('| 轴 | 指标 | 值 | 分子 / 分母 | 可判率 | 可用于决策 | 状态 |');
+  lines.push('|---|---|---|---|---|---|---|');
+  const a1sDetail = a1sAxis?.detail ?? {};
+  const a1sNum = Number.isFinite(a1sDetail.postGateStale) ? a1sDetail.postGateStale : null;
+  const a1sDen = Number.isFinite(a1sDetail.postGateInjected) ? a1sDetail.postGateInjected : null;
+  lines.push(`| **A1.stale** | \`staleTransferRate\`（闸后） | **${pct(a1sAxis?.value)}** | ${a1sNum ?? '?'} / ${a1sDen ?? '?'} | 闸前 ${pct(a1sDetail.validityCoverage?.ratio ?? null)}（${a1sDetail.validityCoverage?.exercised ?? '?'} / ${a1sDetail.validityCoverage?.withValidity ?? '?'} 带 validity） | —（过期判定，不需要可判率） | \`${a1sAxis?.status ?? 'n/a'}\` |`);
+  lines.push(`| **A1.opposite** | \`oppositeRate\` | **${pct(a1oAxis?.value)}** | ${a1oAxis?.detail?.opposite ?? '?'} / ${a1oAxis?.detail?.total ?? '?'} 对 | ${pct(a1oAxis?.detail?.decidability ?? null)}（${a1oAxis?.detail?.decidable ?? '?'} / ${a1oAxis?.detail?.total ?? '?'}） | ${a1oAxis?.detail?.usableForDecision ? '✅ 可用于决策' : '❌ 不可用于决策'} | \`${a1oAxis?.status ?? 'n/a'}\` |`);
+  lines.push('');
+  lines.push(`**为什么线上 opposite 是 0**：T6 实测 1084 张真实卡 / 2354 行里 \`[semantic]\`/\`[disputed]\`/\`[stale]\` 各 **0** 次；本轴线上值 ${pct(a1oAxis?.value)}（${a1oAxis?.detail?.opposite ?? 0}/${a1oAxis?.detail?.total ?? 0}）是**同一个 0**。`);
+  lines.push('**无触发 ≠ 无反向记忆**：0 次的含义是"判据一次都没判出 opposite"，不是"线上不存在反向记忆"；精确率在线上是 0/0（无正样本）⇒ **仪表未通电**，不参与 exit code。');
+  lines.push(`**这个轴的局限**：① T2 校准集（135 对人工标注）可判率 **19.3%（26/135）** < 30% 下限、零误判上限 22.2% ⇒ 按知识库 83 **不可用于决策**；② \`opposite\` 精确率 100%（2/2）是**小样本**（Wilson 95% 下界约 34%）；③ 方向是"信号×claim 对"的属性，按 claimId 去重会把可判率抬到 ${pct(a1oAxis?.detail?.claimLevel?.decidability ?? null)}（${a1oAxis?.detail?.claimLevel?.same ?? '?'}+${a1oAxis?.detail?.claimLevel?.opposite ?? '?'} / ${a1oAxis?.detail?.claimLevel?.total ?? '?'}），那是口径幻觉，故主口径按对。`);
+  lines.push('');
   lines.push('## 3 · 语料与运行');
   lines.push('');
   lines.push(`- 记忆库（只读）：\`${report.storeRoot}\`${report.storeFound ? '' : '（未找到）'}`);
@@ -1086,6 +1340,7 @@ export async function main(argv = [], io = {}) {
 export default {
   runM5,
   measureA1,
+  measureA1Opposite,
   measureA2,
   measureA3,
   measureA4,
@@ -1101,6 +1356,8 @@ export default {
   main,
   AXIS_IDS,
   AXIS_STATUSES,
+  A1_AXIS_IDS,
+  A1_OPPOSITE_AXIS_ID,
   M5_VERSION,
 };
 
