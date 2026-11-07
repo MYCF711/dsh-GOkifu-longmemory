@@ -17,6 +17,22 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.40（2026-11-07）
+
+### 配置陷阱静态检查（`config.X !== false` 把"未设置"当"开启"）
+`scripts/check-config-traps.mjs`：扫 `src/` 里 `config.X !== false` 的写法（**跳过注释**），
+报告"这会把'未设置'当成'开启'，**应该在 DEFAULT_CONFIG 里设 `true`**"。
+
+**当场抓到一个实例**：`config.liveStats !== false`（`src/plugin.mjs:1352`）。
+**但查清后**：`liveStats` 上游有 `boolOf(src.liveStats, true)` 保护（未设置 ⇒ `true`），
+所以 `!== false` 在这里**不是真陷阱**（`boolOf` 已把"未设置"转成 `true`）。
+**处置**：**统一写法**为 `=== true`（与 `abstainIrrelevant` 一致），**行为不变** —— 避免将来有人绕过 `boolOf` 时踩坑。
+
+**检查通过**：`config.X !== false` 的写法 **0 处**。
+
+### 验证
+54 条 plugin 测试全绿；**1064 条全量测试全绿**；`check PASS`。
+
 ## 0.8.39（2026-11-07）
 
 ### abstain 在可靠输入上默认开启（含"默认开启"的正确写法）
