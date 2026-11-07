@@ -19,7 +19,7 @@ import { extractErrorKey } from './topic.mjs';
 import { loadSignatureIndex, lookupSignature } from './sigindex.mjs';
 // T347：F3 是 claim 文本的**纯函数** ⇒ 读时派生兜底，历史 claim（无该字段）也能上卡，且不动数据。
 import { deriveFalsifiableWhen } from './extract.mjs';
-import { markerWithPolarity, detectPolarity, isCold } from './abstain.mjs';
+import { markerWithPolarity, detectPolarity, isCold, decayWeight } from './abstain.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -452,7 +452,7 @@ function stateTokenOf(claim) {
   return state;
 }
 
-function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null, falsifiableWhen = null }) {
+function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null, falsifiableWhen = null, decay = 1 }) {
   // 2026-11-04（0.134.0，线上实测）：seq 是 **1 基**的；`seq: 0` 等于「不知道在哪」，不是合法出处。
   // 当前宿主 60 条引用里就有 2 条落在 seq 0，卡上文字在该局里找不到 ⇒ A6 文字层报 missing。
   // 回到根本规矩：无源不入 —— seq < 1 的条目不进卡（计入 omitted，而不是渲染一条查无实据的行）。
@@ -466,6 +466,10 @@ function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text
     marker,
     // T333：cost 只作**同分次序**（tokOverlap/rank 等主键都相同才比），不参与硬过滤。
     cost: Number.isFinite(cost) ? cost : null,
+    // 知识库 91：**衰减权重**（0..1，最近被调用 ⇒ 1；很久没被调用 ⇒ 接近 0）。
+    // 用作 `compareEntries` 的**次排序因子**（在 rank 之后，权重高的排前面）。
+    // **被调用时重置**（`lastInjectedAt` 更新 ⇒ 权重回到 1）；没有时间 ⇒ 1（保守，当作"新"）。
+    decay: Number.isFinite(decay) ? decay : 1,
     // T345：F3 失效条件是**派生内容**（非逐字），只作坐标后的尾注，绝不混进 rawText（否则 A6 文字层报 missing）。
     f3: falsifiableWhen && falsifiableWhen.when
       ? { rule: String(falsifiableWhen.rule ?? ''), when: String(falsifiableWhen.when).slice(0, F3_MAX_CHARS) }
@@ -588,6 +592,8 @@ function entryFromClaim(hit, claim, options = {}) {
       ? markerWithPolarity(claim, detectPolarity(options.signalText, text))
       : stateTokenOf(claim),
     cost: Number.isFinite(options?.costIndex?.get?.(String(claim.id ?? ''))) ? options.costIndex.get(String(claim.id ?? '')) : null,
+    // 知识库 91：**衰减权重**（最近被调用 ⇒ 1；很久没被调用 ⇒ 接近 0），用作 `compareEntries` 的次排序因子。
+    decay: decayWeight(claim, options.now),
     // T345/T347：F3 优先用 claim 上存的；没有（历史 claim）⇒ **读时派生兜底**（纯函数、确定性）。
     // `f3OnCard:false` 只给 A/B 对照与紧急关闭用。
     falsifiableWhen: options?.f3OnCard === false ? null : (claim.falsifiableWhen ?? deriveFalsifiableWhen(body)),
@@ -774,6 +780,9 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
 
 function compareEntries(a, b) {
   return (a.rank - b.rank)
+    // 知识库 91：**衰减权重**（次排序因子，在 rank 之后）—— 最近被调用的排前面，很久没被调用的沉底。
+    // **被调用时重置**（`lastInjectedAt` 更新 ⇒ 权重回到 1）；缺 decay ⇒ 视为 1（保守，当作"新"）。
+    || ((b.decay ?? 1) - (a.decay ?? 1))
     || ((b.occurredAt ?? 0) - (a.occurredAt ?? 0))
     || (String(a.source.episode) < String(b.source.episode) ? -1 : String(a.source.episode) > String(b.source.episode) ? 1 : 0)
     // T317：seq 缺失时 `a-b` 会是 NaN（被 sort 当 0 ⇒ 退回插入序）——先挡住
