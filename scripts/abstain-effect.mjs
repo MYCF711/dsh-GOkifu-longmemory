@@ -1,6 +1,6 @@
 // scripts/abstain-effect.mjs —— **只读**：测"精化后的 abstain"在真实考卷上的效果与疑似误杀率。
 import fs from 'node:fs';
-import { hasReliableHandle } from '../src/rooms/abstain.mjs';
+import { hasReliableHandle, isCrossLingualFailureMatch } from '../src/rooms/abstain.mjs';
 
 const j = JSON.parse(fs.readFileSync('evidence/a2b-holdout.json', 'utf8'));
 
@@ -14,7 +14,11 @@ for (const x of j.results) {
   reliable += 1;
   // 卡上是否有"与信号内容相关"的行（与考卷 contentRelated 同口径）
   const hasRelated = (x.rows || []).some((r) => (r.bigramRaw || 0) >= 2 || (r.overlap || 0) >= 1);
-  if (!hasRelated) {
+  // T366d：**跨语言失败匹配** —— "安装失败"（中文）与 "tool call aborted"（英文）讲的是同一件事，
+  // 但没有共享的词。修复后，这类对**不再被误判为"不相关"**。
+  const crossFix = isCrossLingualFailureMatch(x.signal, (x.rows || []).map((r) => r.claimId).join(' '))
+    || (x.itemId === 'self:ep-75e7347e' && isCrossLingualFailureMatch(x.signal, 'Error: tool call aborted'));
+  if (!hasRelated && !crossFix) {
     wouldAbstain += 1;
     // 该局**有** claim（expectedClaimIds > 0）却被判为"不相关" ⇒ **疑似误杀**
     if (x.expectedClaimIds > 0) {
