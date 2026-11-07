@@ -46,9 +46,31 @@ export function chineseBigrams(text) {
   return out;
 }
 
-/** 信号里**有没有可判别的内容**（英文 token / 中文 bigram / 硬实体）。没有 ⇒ 判据不可用。 */
-function hasAnySignalHandle(signalText) {
-  return abstainEntities(signalText).size > 0 || tokens(signalText).size > 0 || chineseBigrams(signalText).size > 0;
+/**
+ * **通用中文短语**（没有判别力）：`处理一下`、`继续`、`看看` 这类短语**也有 bigram**，
+ * 但它们**不指向任何事** —— 不剔除的话，`hasAnySignalHandle` 会把它们误判为"有判据可用"，
+ * 于是 abstain 会在"处理一下"这种信号上**误拒**（claim 与通用 bigram 不匹配 ⇒ 误判为不相关）。
+ * 与 T242 的 IDF 过滤同族：**通用词停用**。
+ */
+const GENERIC_ZH = new Set(['处理', '一下', '继续', '看看', '这个', '那个', '什么', '怎么', '怎样', '可以',
+  '一下', '帮我', '帮忙', '麻烦', '谢谢', '好的', '现在', '开始', '进行', '工作', '任务', '问题', '东西',
+  '事情', '地方', '时候', '应该', '需要', '还是', '就是', '不是', '没有', '一个', '我们', '你们', '自己']);
+
+/** 信号里**有没有可判别的内容**（英文 token / 非通用中文 bigram / 硬实体）。没有 ⇒ 判据不可用。 */
+export function hasAnySignalHandle(signalText) {
+  if (abstainEntities(signalText).size > 0) return true;
+  if (tokens(signalText).size > 0) return true;
+  // 中文：**短指令没有判别力**（"处理一下" / "继续" / "看看"）。
+  // 教训：bigram 停用表**拦不住** —— "处理一下"会切出"理一"这种**跨词 bigram**，不在任何停用表里。
+  // 所以**不用 bigram 停用**，改用一条**简单、机械、不会误伤**的判据：
+  // **信号 < 10 字符且不含硬实体/英文判别词 ⇒ 判据不可用**（短指令天然无判别力，不该拿去拒）。
+  const compact = String(signalText ?? '').replace(/\s+/g, '');
+  if (compact.length < 10) return false;
+  // 长信号：有非通用中文段（≥2 字且不在通用短语表）才算有内容
+  for (const m of String(signalText ?? '').matchAll(/[一-鿿]{2,}/g)) {
+    if (!GENERIC_ZH.has(m[0])) return true;
+  }
+  return false;
 }
 
 /**
@@ -84,4 +106,4 @@ export function hasRelevantClaim(card, signalText) {
   return false;
 }
 
-export default { hasRelevantClaim, abstainEntities, chineseBigrams };
+export default { hasRelevantClaim, abstainEntities, chineseBigrams, hasAnySignalHandle };
