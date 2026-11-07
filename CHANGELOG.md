@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.34（2026-11-07）
+
+### 知识库 87：辅助假设与"一刀切" —— 反例该精化适用条件，不是全关
+上一篇写"一条真反例就能推翻全称命题"（波普尔），本刀补上**拉卡托斯的反对**。
+
+**一手文献（SEP · 拉卡托斯）**：
+> "it can be **rational to persist with a 'falsified' theory**"；"all theories are **born refuted and die refuted**"；
+> 《Proofs and Refutations》：反例帮助"**finding hidden lemmas**"与"**finding conditions on its validity**"；
+> **blanket exclusion** 会误伤（"rules out some polyhedra for which V−E+F=2, **despite** the hole"）。
+
+**对照本仓**：我把 `abstain` **整个默认关**，那是一种"**blanket exclusion**" ——
+**把判据本来能判对的那些场景（英文信号、含硬实体的信号）也一起关掉了**。
+
+**机械判据（从"默认关"到"精化适用条件"）**：
+① 先问"反例推翻的是核心命题，还是辅助假设"（"在中文上失效"推翻的是"对所有输入都有效"，不是"在任何输入上都无效"）；
+② **把"默认关"改成"按输入类型开关"**（只在 `hasReliableHandle(signal)` 时启用）；
+③ **"一刀切"必须列出"被误伤的那部分"**；
+④ **保留"能判对的那部分"的实测证据**（含硬实体的英文信号上判据是可靠的）。
+
+### 验证
+`check PASS`（87 篇）。
+
 ## 0.8.33（2026-11-07）
 
 ### 知识库 86：一条反例何时能推翻结论（全称 vs 统计）
