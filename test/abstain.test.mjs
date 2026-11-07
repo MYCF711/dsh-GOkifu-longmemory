@@ -80,3 +80,18 @@ test('知识库 84：**方向相反 ⇒ 以 `[disputed]` 渲染**（不以"建�
   assert.equal(markerWithPolarity({ kind: 'fact', state: 'candidate' }, 'unclear'), 'candidate');
   assert.equal(markerWithPolarity({ kind: 'antipattern' }, 'same'), 'antipattern');
 });
+
+test('知识库 84 **渲染接线**：传了 signalText 时，方向相反的 claim 标 [disputed]', async () => {
+  const { detectPolarity, markerWithPolarity } = await import('../src/rooms/abstain.mjs');
+  // 模拟渲染路径：信号要"关掉"，claim 建议"更频繁" ⇒ opposite ⇒ disputed
+  const signal = '为什么这个报错要一直推送到我的邮箱，能不能关掉？被我自己的信息刷爆邮箱了';
+  const claimText = '能不能让邮箱接收信息并刷新，再通知这条链条更频繁一点？';
+  const pol = detectPolarity(signal, claimText);
+  assert.equal(pol, 'opposite', '这条必须被判为方向相反');
+  const marker = markerWithPolarity({ kind: 'fact', state: 'semantic' }, pol);
+  assert.equal(marker, 'disputed', '渲染时必须是 [disputed]，不是 [semantic]（建议）');
+  // 不传 signalText ⇒ 走 stateTokenOf（保持原标记，向后兼容）
+  const src = await import('node:fs').then((m) => m.readFileSync('src/rooms/inject.mjs', 'utf8'));
+  assert.ok(src.includes('options?.signalText'), '渲染路径必须支持可选的 signalText');
+  assert.ok(src.includes('signalText: signal?.text'), 'buildMemoryCard 必须把信号原文传下去');
+});

@@ -19,6 +19,7 @@ import { extractErrorKey } from './topic.mjs';
 import { loadSignatureIndex, lookupSignature } from './sigindex.mjs';
 // T347：F3 是 claim 文本的**纯函数** ⇒ 读时派生兜底，历史 claim（无该字段）也能上卡，且不动数据。
 import { deriveFalsifiableWhen } from './extract.mjs';
+import { markerWithPolarity, detectPolarity } from './abstain.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -581,7 +582,11 @@ function entryFromClaim(hit, claim, options = {}) {
     episode,
     seq,
     occurredAt,
-    marker: stateTokenOf(claim),
+    // 知识库 84：传了 `options.signalText` 时，**与信号方向相反**的 claim 标 `[disputed]`（不以"建议"出现）。
+    // **不传 ⇒ 保持 `stateTokenOf(claim)`（行为不变，向后兼容）**。
+    marker: options?.signalText
+      ? markerWithPolarity(claim, detectPolarity(options.signalText, text))
+      : stateTokenOf(claim),
     cost: Number.isFinite(options?.costIndex?.get?.(String(claim.id ?? ''))) ? options.costIndex.get(String(claim.id ?? '')) : null,
     // T345/T347：F3 优先用 claim 上存的；没有（历史 claim）⇒ **读时派生兜底**（纯函数、确定性）。
     // `f3OnCard:false` 只给 A/B 对照与紧急关闭用。
@@ -684,7 +689,10 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       continue;
     }
     const entry = claim
-      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard })
+      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard,
+        // 知识库 84：把**信号原文**也传下去 —— 与信号**方向相反**的 claim 标 `[disputed]`（不以"建议"出现）。
+        // 取不到原文 ⇒ 空串 ⇒ `hasAnySignalHandle` 为 false ⇒ **不拒绝、不改标记**（保守，向后兼容）。
+        signalText: signal?.text ?? signal?.quote ?? (Array.isArray(signal?.terms) ? signal.terms.join(' ') : '') })
       : entryFromEpisode(hit, view);
     if (entry && scope) {
       const rec = view.episodesById.get(String(hit?.episode ?? ''));
