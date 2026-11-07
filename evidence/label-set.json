@@ -217,7 +217,9 @@
    "signal": "为什么又是老毛病啊？502应该路由到别路由组内的其他供应商啊",
    "claimText": "不能是502，余额为0应该换别的错误代码",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "opposite",
+   "polarityNote": "内容相关但**方向相反**：用户要 A，claim 指向非 A（给了会误导）。"
   },
   {
    "pairId": 27,
@@ -280,7 +282,9 @@
    "signal": "为什么这个报错要一直推送到我的邮箱，能不能关掉？还有我自己作为is和pr的发起方的时候能不能不要发送啊？被我自己的信息刷爆邮箱了",
    "claimText": "还有一个就是，能不能让邮箱接收信息并刷新，再通知这条链条更频繁一点？",
    "bigramRaw": 5,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "opposite",
+   "polarityNote": "内容相关但**方向相反**：用户要 A，claim 指向非 A（给了会误导）。"
   },
   {
    "pairId": 34,
