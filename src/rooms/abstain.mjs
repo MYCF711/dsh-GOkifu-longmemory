@@ -169,3 +169,21 @@ export function polarityReport(counts, { decidabilityFloor = 0.30 } = {}) {
     text: `反向记忆率 ${(oppositeRate * 100).toFixed(1)}%（${opposite}/${total}）· 可判率 ${(decidability * 100).toFixed(1)}%（${decidable}/${total}）· ${usable ? '可用于决策' : '**不可用于决策**（可判率不足，只能作局部观察）'}`,
   };
 }
+
+// ── 知识库 84：方向相反 ⇒ 以 `[disputed]` 渲染（不以"建议"出现）──
+/**
+ * 决定一条 claim 在卡片上的**标记**（marker），**考虑与当前信号的方向关系**。
+ *
+ * - `polarity === 'opposite'`（用户要 A、claim 指向非 A）⇒ **`disputed`**（有争议），
+ *   **不得**以 `[semantic]`/`[candidate]`（= "建议/定式"）出现 —— 那会让模型顺着做；
+ * - 其它情况 ⇒ 保持原有标记（`kind`/`state` 决定），**行为不变**。
+ *
+ * 这是**纯函数**（可单测）。**渲染接线**（在 `buildEntry`/`renderSection` 里把 polarity 传进来）
+ * 是**单独一步** —— 不在没读清渲染路径时改它。
+ */
+export function markerWithPolarity(claim, polarity) {
+  if (polarity === 'opposite') return 'disputed';
+  if (claim?.kind === 'antipattern') return 'antipattern';
+  const state = typeof claim?.state === 'string' && claim.state ? claim.state : 'observed';
+  return state;
+}
