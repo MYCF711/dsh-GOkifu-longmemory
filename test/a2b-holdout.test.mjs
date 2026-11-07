@@ -375,3 +375,15 @@ test('T315 可复算三件套：结果带 at、顶层带 claimsCount', async () 
   assert.ok(Array.isArray(j.rows) && j.rows.length === 1);
   for (const k of ['related', 'strict', 'overlap', 'bigram', 'shared', 'episode']) assert.ok(k in j.rows[0], `row 缺字段 ${k}`);
 });
+
+test('T362 contentRelated：**跨局但内容相关**也算命中（与 hitRelated 并列，不替换）', async () => {
+  const mod = await import('../scripts/a2b-holdout.mjs');
+  const src = await import('node:fs').then((m) => m.readFileSync('scripts/a2b-holdout.mjs', 'utf8'));
+  // 判据必须"不限来源局"：用考卷自己算的 bigramRaw / overlap，而不是 episode 相等
+  assert.ok(src.includes('contentRelated: rows.some'), '结果对象必须带 contentRelated 字段');
+  assert.ok(src.includes('(r?.bigramRaw || 0) >= 2 || (r?.overlap || 0) >= 1'), '判据必须是 bigramRaw>=2 或 overlap>=1');
+  assert.ok(src.includes('contentHits'), '汇总必须并列报 contentHits');
+  assert.ok(src.includes('overlap: { onlyOld, onlyNew, neither }'), '必须给出两口径的重合分析');
+  // 既有口径不许被替换
+  assert.ok(src.includes('hitRelated: related > 0'), '旧口径 hitRelated 必须保留');
+});

@@ -1,8 +1,8 @@
 {
   "stats": {
-    "claims": 1578,
-    "episodesWithClaims": 95,
-    "self": 95,
+    "claims": 1657,
+    "episodesWithClaims": 99,
+    "self": 99,
     "repeat": 19,
     "skipped": 0,
     "frozen": true
@@ -10,11 +10,11 @@
   "skipped": [],
   "version": 1,
   "control": {
-    "n": 342,
-    "bridged": 4,
-    "tokenHit": 7,
-    "bridgeRate": 0.011695906432748537,
-    "tokenRate": 0.02046783625730994,
+    "n": 354,
+    "bridged": 3,
+    "tokenHit": 8,
+    "bridgeRate": 0.00847457627118644,
+    "tokenRate": 0.022598870056497175,
     "examples": [
       {
         "item": "self:ep-d70b7c2f",
@@ -42,40 +42,47 @@
       }
     ]
   },
-  "generatedAt": 1793951885869,
-  "claimsCount": 1578,
-  "n": 114,
+  "generatedAt": 1794011197639,
+  "claimsCount": 1657,
+  "n": 118,
   "errors": 0,
   "strictHits": 55,
   "relatedHits": 79,
-  "strictRate": 0.4824561403508772,
-  "relatedRate": 0.6929824561403509,
+  "contentHits": 94,
+  "contentRate": 0.7966101694915254,
+  "overlap": {
+    "onlyOld": 17,
+    "onlyNew": 32,
+    "neither": 7
+  },
+  "strictRate": 0.4661016949152542,
+  "relatedRate": 0.6694915254237288,
   "wilson": {
     "strict": {
-      "phat": 0.4824561403508772,
-      "lower": 0.3928049157542809,
-      "upper": 0.5732512138298388,
-      "n": 114,
+      "phat": 0.4661016949152542,
+      "lower": 0.37858563103599213,
+      "upper": 0.5557553493844881,
+      "n": 118,
       "z": 1.96
     },
     "related": {
-      "phat": 0.6929824561403509,
-      "lower": 0.6031723261159853,
-      "upper": 0.7702102484586981,
-      "n": 114,
+      "phat": 0.6694915254237288,
+      "lower": 0.5804506872362977,
+      "upper": 0.7478444106613005,
+      "n": 118,
       "z": 1.96
     }
   },
   "rows": {
-    "related": 154,
-    "pending": 152,
-    "unrelated": 86
+    "related": 158,
+    "pending": 157,
+    "unrelated": 90
   },
   "byKind": {
     "self/root": {
-      "n": 74,
-      "strict": 30,
-      "related": 48
+      "n": 78,
+      "strict": 31,
+      "related": 49
     },
     "self/shortRoot": {
       "n": 12,
@@ -84,8 +91,8 @@
     },
     "self/firstUser": {
       "n": 9,
-      "strict": 5,
-      "related": 5
+      "strict": 4,
+      "related": 4
     },
     "repeat/signature": {
       "n": 19,
@@ -104,14 +111,15 @@
       "signal": "E:/Documents/dsh-go/HANDOFF.md\n读这个交接文件，然后写方案，一个问题一个问题的拷问我：只在方向上提问。\n初始目标：用GO实现DSH，初衷保持DSH的官方初衷：一切皆插件。\n你可以先搜集本机相关内容，保存到工作区内，然后根据方案编写AGENTS e:/documents/dsh-go/handoff.md handoff.md documents/dsh-go dsh-go",
       "expectedClaimIds": 169,
       "rendered": 5,
-      "related": 3,
+      "related": 2,
       "strict": 0,
       "strictTokens": 0,
       "strictByBigramOnly": 0,
-      "pending": 2,
+      "pending": 3,
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-d010a5aa",
@@ -153,7 +161,7 @@
           "episode": "ep-62bcb7d2"
         },
         {
-          "claimId": "c-ac805904",
+          "claimId": "c-24b33a42",
           "related": true,
           "strict": false,
           "strictTokens": false,
@@ -166,17 +174,17 @@
           "episode": "ep-c0a5847a"
         },
         {
-          "claimId": "c-24b33a42",
-          "related": true,
+          "claimId": "c-c2686aa0",
+          "related": false,
           "strict": false,
           "strictTokens": false,
           "strictByBigramOnly": false,
-          "pending": false,
+          "pending": true,
           "overlap": 0,
-          "bigram": 1,
-          "bigramRaw": 2,
+          "bigram": 2,
+          "bigramRaw": 3,
           "shared": [],
-          "episode": "ep-c0a5847a"
+          "episode": "ep-191da5ac"
         }
       ],
       "signalHash": "07561eb8813c18390ca21638f5082b94bebf2ed6c4266c52ef6a30f41228eb56",
@@ -202,6 +210,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-d296e620",
@@ -292,6 +301,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-3c20c931",
@@ -339,6 +349,97 @@
       ]
     },
     {
+      "itemId": "self:ep-a1400ad0",
+      "at": 1793899301400,
+      "kind": "self",
+      "signalSource": "root",
+      "episode": "ep-a1400ad0",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace",
+      "signal": "海绵宝宝大闹蟹皇堡的手机apk破解版帮我找一个，扫一下有没有病毒和后门就i行了",
+      "expectedClaimIds": 43,
+      "rendered": 5,
+      "related": 5,
+      "strict": 1,
+      "strictTokens": 0,
+      "strictByBigramOnly": 1,
+      "pending": 0,
+      "unrelated": 0,
+      "hitStrict": true,
+      "hitRelated": true,
+      "contentRelated": true,
+      "rows": [
+        {
+          "claimId": "c-5a36c164",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-a1400ad0"
+        },
+        {
+          "claimId": "c-df895848",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-a1400ad0"
+        },
+        {
+          "claimId": "c-5d44b167",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-a1400ad0"
+        },
+        {
+          "claimId": "c-76447201",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-a1400ad0"
+        },
+        {
+          "claimId": "c-82d0ae1f",
+          "related": true,
+          "strict": true,
+          "strictTokens": false,
+          "strictByBigramOnly": true,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 2,
+          "bigramRaw": 2,
+          "shared": [],
+          "episode": "ep-a1400ad0"
+        }
+      ],
+      "signalHash": "65753b4a4d9042bd0d0e63d4a2c45e74c86ea2cfb7c7a01b2ab57c5c085beabc",
+      "expectedEpisodes": [
+        "ep-a1400ad0"
+      ]
+    },
+    {
       "itemId": "self:ep-9becea64",
       "at": 1793749483684,
       "kind": "self",
@@ -356,6 +457,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-c4364ac4",
@@ -394,6 +496,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-ac0a8aea",
@@ -442,13 +545,13 @@
     },
     {
       "itemId": "self:ep-8a73e06b",
-      "at": 1793884690273,
+      "at": 1793999194925,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "D:\\主工作区\\repos\\dsh-GOkifu-compact\\evidence\\归档收尾-验证单-2026-11-02.md\n继续任务，那个会话我已经归档，你去验证",
-      "expectedClaimIds": 106,
+      "expectedClaimIds": 114,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -458,6 +561,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-212aeafe",
@@ -479,6 +583,84 @@
       ]
     },
     {
+      "itemId": "self:ep-1e976ca9",
+      "at": 1793901548502,
+      "kind": "self",
+      "signalSource": "root",
+      "episode": "ep-1e976ca9",
+      "scopeKey": "w:d:/DeepSeek Harness/大肥鱼工作区/海绵宝宝单机版制作",
+      "signal": "session-<REDACTED-UUID>继续这个会话的任务",
+      "expectedClaimIds": 9,
+      "rendered": 4,
+      "related": 4,
+      "strict": 0,
+      "strictTokens": 0,
+      "strictByBigramOnly": 0,
+      "pending": 0,
+      "unrelated": 0,
+      "hitStrict": false,
+      "hitRelated": true,
+      "contentRelated": false,
+      "rows": [
+        {
+          "claimId": "c-bc2c51b8",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 0,
+          "bigramRaw": 0,
+          "shared": [],
+          "episode": "ep-1e976ca9"
+        },
+        {
+          "claimId": "c-d296e620",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 0,
+          "bigramRaw": 0,
+          "shared": [],
+          "episode": "ep-00b50089"
+        },
+        {
+          "claimId": "c-33e802f1",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 0,
+          "bigramRaw": 0,
+          "shared": [],
+          "episode": "ep-1e976ca9"
+        },
+        {
+          "claimId": "c-e4349004",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 0,
+          "bigramRaw": 0,
+          "shared": [],
+          "episode": "ep-1e976ca9"
+        }
+      ],
+      "signalHash": "f87a2030a72c74f6ee26e1ead1d34a0397e4fed5a6f5a012c6276452592cae91",
+      "expectedEpisodes": [
+        "ep-1e976ca9"
+      ]
+    },
+    {
       "itemId": "self:ep-00b50089",
       "at": 1793685893725,
       "kind": "self",
@@ -496,6 +678,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-5932a219",
@@ -570,13 +753,13 @@
     },
     {
       "itemId": "self:ep-8cc34e32",
-      "at": 1793884703908,
+      "at": 1793999405258,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-8cc34e32",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/长期记忆系统",
       "signal": "开启superagent模式，做好定时任务，写好goal，把任务清单列出来，写好AGENTS，记住最小交付房间理论，不要粉色大象。直接开跑吧，开一个私人仓库，然后按照magpie脚手架仓库的仓库维护准则进行维护。每次功能的实现都进行版本发布，写明更新内容。不过不要发npm。 npm",
-      "expectedClaimIds": 84,
+      "expectedClaimIds": 86,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -586,6 +769,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-6f4bb423",
@@ -624,6 +808,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-1af130ae",
@@ -685,13 +870,13 @@
     },
     {
       "itemId": "self:ep-1e82afca",
-      "at": 1793884702487,
+      "at": 1793901541932,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-1e82afca",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "重启好了，你再看看工具调用",
-      "expectedClaimIds": 214,
+      "expectedClaimIds": 222,
       "rendered": 3,
       "related": 1,
       "strict": 1,
@@ -701,6 +886,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-ccaf3076",
@@ -765,6 +951,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-dfa806ca",
@@ -800,13 +987,13 @@
     },
     {
       "itemId": "self:ep-62bcb7d2",
-      "at": 1793884703904,
+      "at": 1793999407961,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-62bcb7d2",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
       "signal": "你读本地的AGENTS和相关文件，然后完善这些文件，这些都是deepseekv4.1f自己写的，自己在执行，你实时写入的AGENTS能及时载入他们的会话引导方向。要求就是完成我当时提出的目标",
-      "expectedClaimIds": 99,
+      "expectedClaimIds": 114,
       "rendered": 5,
       "related": 2,
       "strict": 2,
@@ -816,6 +1003,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-9a77de3c",
@@ -829,6 +1017,19 @@
           "bigramRaw": 2,
           "shared": [],
           "episode": "ep-c0a5847a"
+        },
+        {
+          "claimId": "c-fa96a073",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": true,
+          "overlap": 0,
+          "bigram": 3,
+          "bigramRaw": 3,
+          "shared": [],
+          "episode": "ep-191da5ac"
         },
         {
           "claimId": "c-cb17dcf2",
@@ -868,19 +1069,6 @@
           "bigramRaw": 13,
           "shared": [],
           "episode": "ep-62bcb7d2"
-        },
-        {
-          "claimId": "c-559d36d4",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": true,
-          "overlap": 0,
-          "bigram": 2,
-          "bigramRaw": 2,
-          "shared": [],
-          "episode": "ep-226dbf4f"
         }
       ],
       "signalHash": "6059950a53f575d1774cc596ed7c99116190e471620ad332f19087f3938d0861",
@@ -906,6 +1094,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-8d3813fa",
@@ -957,6 +1146,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-5928a6a4",
@@ -1034,6 +1224,7 @@
       "unrelated": 1,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-ed6513f7",
@@ -1108,15 +1299,15 @@
     },
     {
       "itemId": "self:ep-bde12afa",
-      "at": 1793860129558,
+      "at": 1793901541365,
       "kind": "self",
       "signalSource": "root",
       "episode": "ep-bde12afa",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace",
       "signal": "看下DSH的0.2.2-rc.1版本更新了什么，有没有必要更新",
-      "expectedClaimIds": 60,
-      "rendered": 2,
-      "related": 2,
+      "expectedClaimIds": 64,
+      "rendered": 3,
+      "related": 3,
       "strict": 0,
       "strictTokens": 0,
       "strictByBigramOnly": 0,
@@ -1124,7 +1315,21 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
+        {
+          "claimId": "c-36118c08",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 2,
+          "shared": [],
+          "episode": "ep-bde12afa"
+        },
         {
           "claimId": "c-2d4fdcf7",
           "related": true,
@@ -1175,6 +1380,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-2a1d9e2e",
@@ -1235,96 +1441,6 @@
       ]
     },
     {
-      "itemId": "self:ep-a1400ad0",
-      "at": 1793884694815,
-      "kind": "self",
-      "signalSource": "root",
-      "episode": "ep-a1400ad0",
-      "scopeKey": "w:d:/DeepSeek Harness/default-workspace",
-      "signal": "海绵宝宝大闹蟹皇堡的手机apk破解版帮我找一个，扫一下有没有病毒和后门就i行了",
-      "expectedClaimIds": 22,
-      "rendered": 5,
-      "related": 5,
-      "strict": 0,
-      "strictTokens": 0,
-      "strictByBigramOnly": 0,
-      "pending": 0,
-      "unrelated": 0,
-      "hitStrict": false,
-      "hitRelated": true,
-      "rows": [
-        {
-          "claimId": "c-697bba5d",
-          "related": true,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 0,
-          "bigramRaw": 0,
-          "shared": [],
-          "episode": "ep-16d5a1e2"
-        },
-        {
-          "claimId": "c-d296e620",
-          "related": true,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 0,
-          "bigramRaw": 0,
-          "shared": [],
-          "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-280d7b5f",
-          "related": true,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 1,
-          "bigramRaw": 1,
-          "shared": [],
-          "episode": "ep-a1400ad0"
-        },
-        {
-          "claimId": "c-02a7d85a",
-          "related": true,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 1,
-          "bigramRaw": 1,
-          "shared": [],
-          "episode": "ep-a1400ad0"
-        },
-        {
-          "claimId": "c-fbe74d18",
-          "related": true,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 0,
-          "bigramRaw": 0,
-          "shared": [],
-          "episode": "ep-1286ce28"
-        }
-      ],
-      "signalHash": "65753b4a4d9042bd0d0e63d4a2c45e74c86ea2cfb7c7a01b2ab57c5c085beabc",
-      "expectedEpisodes": [
-        "ep-a1400ad0"
-      ]
-    },
-    {
       "itemId": "self:ep-03bc3e53",
       "at": 1793628876556,
       "kind": "self",
@@ -1342,6 +1458,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-22b83bcb",
@@ -1393,6 +1510,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-22b83bcb",
@@ -1483,6 +1601,7 @@
       "unrelated": 1,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-5632db0e",
@@ -1573,6 +1692,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-f500b3a9",
@@ -1624,6 +1744,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-ad12427e",
@@ -1675,6 +1796,7 @@
       "unrelated": 2,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-0153220d",
@@ -1765,6 +1887,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-b3a27873",
@@ -1816,6 +1939,7 @@
       "unrelated": 2,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-fb8a1c26",
@@ -1906,6 +2030,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-be42ed25",
@@ -1944,6 +2069,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -1995,6 +2121,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-580cb483",
@@ -2059,6 +2186,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-d28bff86",
@@ -2127,6 +2255,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-2a1d9e2e",
@@ -2165,6 +2294,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-ad12427e",
@@ -2242,6 +2372,7 @@
       "unrelated": 2,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-e3f037e5",
@@ -2319,6 +2450,7 @@
       "unrelated": 4,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-c8f3eecc",
@@ -2409,6 +2541,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -2486,6 +2619,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-c4364ac4",
@@ -2537,7 +2671,34 @@
       "unrelated": 4,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": false,
       "rows": [
+        {
+          "claimId": "c-c85b4a80",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-a1400ad0"
+        },
+        {
+          "claimId": "c-df895848",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-a1400ad0"
+        },
         {
           "claimId": "c-33238572",
           "related": false,
@@ -2550,32 +2711,6 @@
           "bigramRaw": 1,
           "shared": [],
           "episode": "ep-bde12afa"
-        },
-        {
-          "claimId": "c-6157880e",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 1,
-          "bigramRaw": 1,
-          "shared": [],
-          "episode": "ep-b5586316"
-        },
-        {
-          "claimId": "c-4592e4a2",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 1,
-          "bigramRaw": 1,
-          "shared": [],
-          "episode": "ep-62b1cd78"
         },
         {
           "claimId": "c-5175f1dc",
@@ -2614,6 +2749,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-4531a6d0",
@@ -2695,16 +2831,30 @@
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace",
       "signal": "https://github.com/DIYgod/RSSHub\n这个是干嘛的 s://github.com/diygod/rsshub github.com/diygod",
       "expectedClaimIds": 3,
-      "rendered": 4,
+      "rendered": 5,
       "related": 1,
       "strict": 1,
       "strictTokens": 1,
       "strictByBigramOnly": 0,
       "pending": 2,
-      "unrelated": 1,
+      "unrelated": 2,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
+        {
+          "claimId": "c-c85b4a80",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 1,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-a1400ad0"
+        },
         {
           "claimId": "c-4592e4a2",
           "related": false,
@@ -2781,6 +2931,7 @@
       "unrelated": 2,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-93de775a",
@@ -2845,6 +2996,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-fd84fb1d",
@@ -2909,6 +3061,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-4bb30aa4",
@@ -2986,6 +3139,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1ef91c04",
@@ -3076,6 +3230,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-dc0d6a9e",
@@ -3123,6 +3278,84 @@
       ]
     },
     {
+      "itemId": "self:ep-191da5ac",
+      "at": 1793893371471,
+      "kind": "self",
+      "signalSource": "root",
+      "episode": "ep-191da5ac",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "signal": "之前说要把宿主和dsh-TUI直接兼容的成果在哪里？",
+      "expectedClaimIds": 14,
+      "rendered": 4,
+      "related": 2,
+      "strict": 0,
+      "strictTokens": 0,
+      "strictByBigramOnly": 0,
+      "pending": 1,
+      "unrelated": 1,
+      "hitStrict": false,
+      "hitRelated": true,
+      "contentRelated": true,
+      "rows": [
+        {
+          "claimId": "c-ee47eca6",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-62bcb7d2"
+        },
+        {
+          "claimId": "c-f5c25ded",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-191da5ac"
+        },
+        {
+          "claimId": "c-78e1da6a",
+          "related": true,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-191da5ac"
+        },
+        {
+          "claimId": "c-0d5e6d7b",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": true,
+          "overlap": 0,
+          "bigram": 2,
+          "bigramRaw": 2,
+          "shared": [],
+          "episode": "ep-62bcb7d2"
+        }
+      ],
+      "signalHash": "cab4b70cd42ba4f262af1d0cf3908a319856a9b5e166ebfaa763d2dd4417d604",
+      "expectedEpisodes": [
+        "ep-191da5ac"
+      ]
+    },
+    {
       "itemId": "self:ep-5e4ee30c",
       "at": 1793749490013,
       "kind": "self",
@@ -3140,6 +3373,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1193cf93",
@@ -3230,6 +3464,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-c8f3eecc",
@@ -3320,6 +3555,7 @@
       "unrelated": 2,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-4bb30aa4",
@@ -3410,6 +3646,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-232f6a04",
@@ -3461,6 +3698,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-57687946",
@@ -3538,6 +3776,7 @@
       "unrelated": 1,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1193cf93",
@@ -3615,6 +3854,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1288fd51",
@@ -3705,6 +3945,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-658ba7bb",
@@ -3782,6 +4023,7 @@
       "unrelated": 4,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-7b3fb03e",
@@ -3859,6 +4101,7 @@
       "unrelated": 2,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-4bb30aa4",
@@ -3936,6 +4179,7 @@
       "unrelated": 2,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-fbe74d18",
@@ -4026,6 +4270,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-480cda15",
@@ -4039,6 +4284,19 @@
           "bigramRaw": 2,
           "shared": [],
           "episode": "ep-9c2cbede"
+        },
+        {
+          "claimId": "c-0ec4622b",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": true,
+          "overlap": 0,
+          "bigram": 4,
+          "bigramRaw": 4,
+          "shared": [],
+          "episode": "ep-a1400ad0"
         },
         {
           "claimId": "c-0be349c8",
@@ -4078,19 +4336,6 @@
           "bigramRaw": 5,
           "shared": [],
           "episode": "ep-d62a520c"
-        },
-        {
-          "claimId": "c-4f3726e0",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": true,
-          "overlap": 0,
-          "bigram": 3,
-          "bigramRaw": 3,
-          "shared": [],
-          "episode": "ep-1f6c629b"
         }
       ],
       "signalHash": "24079f9c8d5795ccb8c688a968c129d5fc6e59b187e7e60507e2f77b243e3144",
@@ -4116,6 +4361,7 @@
       "unrelated": 3,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-1451e56c",
@@ -4171,15 +4417,16 @@
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "安装失败\n@tencent-connect/dsh-qqbot@latest\n帮我装一下 tencent-connect/dsh-qqbot dsh-qqbot",
       "expectedClaimIds": 13,
-      "rendered": 3,
-      "related": 1,
+      "rendered": 2,
+      "related": 0,
       "strict": 0,
       "strictTokens": 0,
       "strictByBigramOnly": 0,
       "pending": 0,
       "unrelated": 2,
       "hitStrict": false,
-      "hitRelated": true,
+      "hitRelated": false,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-87004749",
@@ -4206,19 +4453,6 @@
           "bigramRaw": 1,
           "shared": [],
           "episode": "ep-00b50089"
-        },
-        {
-          "claimId": "c-20d7a628",
-          "related": true,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 1,
-          "bigramRaw": 1,
-          "shared": [],
-          "episode": "ep-75e7347e"
         }
       ],
       "signalHash": "97d7de5cb0918d8b167871e351ce944c37670e385f190aa999e7d3c8137a16ff",
@@ -4244,6 +4478,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1c966596",
@@ -4334,6 +4569,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1193cf93",
@@ -4398,6 +4634,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-6afdb391",
@@ -4457,6 +4694,7 @@
       "unrelated": 3,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-8d3813fa",
@@ -4534,6 +4772,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-80cb2d09",
@@ -4611,6 +4850,7 @@
       "unrelated": 5,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-2d4fdcf7",
@@ -4652,19 +4892,6 @@
           "episode": "ep-03bc3e53"
         },
         {
-          "claimId": "c-c4a267d2",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 0,
-          "bigramRaw": 1,
-          "shared": [],
-          "episode": "ep-1e82afca"
-        },
-        {
           "claimId": "c-b4544b7c",
           "related": false,
           "strict": false,
@@ -4676,6 +4903,19 @@
           "bigramRaw": 1,
           "shared": [],
           "episode": "ep-bde12afa"
+        },
+        {
+          "claimId": "c-c4a267d2",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 0,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-1e82afca"
         }
       ],
       "signalHash": "02df943a59767c810ff4f5884c4b13ed14efa119f3b5dee4cefbac23154663e2",
@@ -4701,6 +4941,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -4739,6 +4980,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -4816,6 +5058,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-07128d11",
@@ -4897,15 +5140,16 @@
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "为什么我打开DSH的配置文件会报错呢？",
       "expectedClaimIds": 4,
-      "rendered": 3,
-      "related": 1,
-      "strict": 1,
+      "rendered": 1,
+      "related": 0,
+      "strict": 0,
       "strictTokens": 0,
-      "strictByBigramOnly": 1,
-      "pending": 1,
+      "strictByBigramOnly": 0,
+      "pending": 0,
       "unrelated": 1,
-      "hitStrict": true,
-      "hitRelated": true,
+      "hitStrict": false,
+      "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-30445eeb",
@@ -4919,32 +5163,6 @@
           "bigramRaw": 2,
           "shared": [],
           "episode": "ep-0ef39d3a"
-        },
-        {
-          "claimId": "c-36d8c8df",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": true,
-          "overlap": 0,
-          "bigram": 3,
-          "bigramRaw": 3,
-          "shared": [],
-          "episode": "ep-2ddf0a19"
-        },
-        {
-          "claimId": "c-bbdb207d",
-          "related": true,
-          "strict": true,
-          "strictTokens": false,
-          "strictByBigramOnly": true,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 3,
-          "bigramRaw": 3,
-          "shared": [],
-          "episode": "ep-1710f716"
         }
       ],
       "signalHash": "81d1f66d5bbb0d71831a3217bb400a5e9605ef20a0317689ec8075d7d91d234e",
@@ -4970,6 +5188,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1193cf93",
@@ -5060,6 +5279,7 @@
       "unrelated": 3,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1193cf93",
@@ -5150,6 +5370,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1193cf93",
@@ -5214,6 +5435,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-c6e5182d",
@@ -5291,6 +5513,7 @@
       "unrelated": 2,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-19d45e1f",
@@ -5368,6 +5591,7 @@
       "unrelated": 1,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-7bff6c80",
@@ -5458,6 +5682,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1193cf93",
@@ -5548,6 +5773,7 @@
       "unrelated": 1,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-7871dcf3",
@@ -5625,6 +5851,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-9fcfd507",
@@ -5667,15 +5894,16 @@
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "去品鉴一下这个up主的产品，，他控诉deepseek的superagent插件是对他的抄袭，笑死我了，你去把他的和官方的对比一下",
       "expectedClaimIds": 2,
-      "rendered": 5,
+      "rendered": 4,
       "related": 0,
       "strict": 0,
       "strictTokens": 0,
       "strictByBigramOnly": 0,
-      "pending": 5,
+      "pending": 4,
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-3629fd8d",
@@ -5728,19 +5956,6 @@
           "bigramRaw": 3,
           "shared": [],
           "episode": "ep-1e82afca"
-        },
-        {
-          "claimId": "c-078f9fd9",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": true,
-          "overlap": 0,
-          "bigram": 2,
-          "bigramRaw": 2,
-          "shared": [],
-          "episode": "ep-1286ce28"
         }
       ],
       "signalHash": "49c36c721caa8eb81895f69bd78f40818023932687a99933d7f7930837265292",
@@ -5766,6 +5981,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-024b2bda",
@@ -5826,6 +6042,71 @@
       ]
     },
     {
+      "itemId": "self:ep-c650bcea",
+      "at": 1793893499617,
+      "kind": "self",
+      "signalSource": "root",
+      "episode": "ep-c650bcea",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
+      "signal": "billion-context\n把这个项目的DSH版本和我们先做的产品做一个功能上的全面对比，告诉我具体到功能项上面的优劣",
+      "expectedClaimIds": 4,
+      "rendered": 3,
+      "related": 0,
+      "strict": 0,
+      "strictTokens": 0,
+      "strictByBigramOnly": 0,
+      "pending": 2,
+      "unrelated": 1,
+      "hitStrict": false,
+      "hitRelated": false,
+      "contentRelated": true,
+      "rows": [
+        {
+          "claimId": "c-4531a6d0",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 0,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-03bc3e53"
+        },
+        {
+          "claimId": "c-03e940bb",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": true,
+          "overlap": 0,
+          "bigram": 2,
+          "bigramRaw": 3,
+          "shared": [],
+          "episode": "ep-8a73e06b"
+        },
+        {
+          "claimId": "c-81a330f8",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": true,
+          "overlap": 0,
+          "bigram": 2,
+          "bigramRaw": 2,
+          "shared": [],
+          "episode": "ep-8a73e06b"
+        }
+      ],
+      "signalHash": "56a5a57566cbe37ee6276fd4c4cb82c5bfdaee8350fd42953bc13cd2407a6fbc",
+      "expectedEpisodes": [
+        "ep-c650bcea"
+      ]
+    },
+    {
       "itemId": "self:ep-62b1cd78",
       "at": 1793786662604,
       "kind": "self",
@@ -5843,6 +6124,7 @@
       "unrelated": 2,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -5920,6 +6202,7 @@
       "unrelated": 4,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1ef91c04",
@@ -5935,19 +6218,6 @@
           "episode": "ep-9c2cbede"
         },
         {
-          "claimId": "c-22b83bcb",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 0,
-          "bigramRaw": 0,
-          "shared": [],
-          "episode": "ep-22d3bd16"
-        },
-        {
           "claimId": "c-fbe74d18",
           "related": false,
           "strict": false,
@@ -5959,6 +6229,19 @@
           "bigramRaw": 0,
           "shared": [],
           "episode": "ep-1286ce28"
+        },
+        {
+          "claimId": "c-0ec4622b",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-a1400ad0"
         },
         {
           "claimId": "c-cc2595d2",
@@ -6010,6 +6293,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1193cf93",
@@ -6087,6 +6371,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-7ef2f75c",
@@ -6115,17 +6400,17 @@
           "episode": "ep-62b1cd78"
         },
         {
-          "claimId": "c-4531a6d0",
+          "claimId": "c-0ec4622b",
           "related": false,
           "strict": false,
           "strictTokens": false,
           "strictByBigramOnly": false,
           "pending": true,
-          "overlap": 10,
-          "bigram": 0,
-          "bigramRaw": 1,
+          "overlap": 0,
+          "bigram": 3,
+          "bigramRaw": 3,
           "shared": [],
-          "episode": "ep-03bc3e53"
+          "episode": "ep-a1400ad0"
         },
         {
           "claimId": "c-0be349c8",
@@ -6164,6 +6449,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-7771001d",
@@ -6254,6 +6540,7 @@
       "unrelated": 4,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-ef6c8e1b",
@@ -6344,6 +6631,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-d868bbc7",
@@ -6382,6 +6670,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": false,
       "rows": [],
       "signalHash": "55a3bea1ccabaa8e43ef460edacd55d29b4ea3403d2f00fb14d98a60c46c57d7",
       "expectedEpisodes": [
@@ -6406,6 +6695,7 @@
       "unrelated": 3,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-7b3fb03e",
@@ -6483,6 +6773,7 @@
       "unrelated": 3,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-34fef2f7",
@@ -6573,6 +6864,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-72c3aae1",
@@ -6663,20 +6955,8 @@
       "unrelated": 5,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": false,
       "rows": [
-        {
-          "claimId": "c-4531a6d0",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 0,
-          "bigram": 0,
-          "bigramRaw": 0,
-          "shared": [],
-          "episode": "ep-03bc3e53"
-        },
         {
           "claimId": "c-c6ddadd5",
           "related": false,
@@ -6702,6 +6982,19 @@
           "bigramRaw": 0,
           "shared": [],
           "episode": "ep-0ef39d3a"
+        },
+        {
+          "claimId": "c-4531a6d0",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 0,
+          "bigram": 0,
+          "bigramRaw": 0,
+          "shared": [],
+          "episode": "ep-03bc3e53"
         },
         {
           "claimId": "c-7ef2f75c",
@@ -6753,6 +7046,7 @@
       "unrelated": 4,
       "hitStrict": false,
       "hitRelated": true,
+      "contentRelated": false,
       "rows": [
         {
           "claimId": "c-9f3f19d5",
@@ -6826,6 +7120,84 @@
       ]
     },
     {
+      "itemId": "self:ep-a0c54630",
+      "at": 1793899423209,
+      "kind": "self",
+      "signalSource": "root",
+      "episode": "ep-a0c54630",
+      "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
+      "signal": "https://dshtui.com/plugins/\n我们基本实现了GO宿主使用TUI，问题是TUI也有自己的插件，这些插件能兼容吗？你看看网页里面的tui插件 s://dshtui.com/plugins/ dshtui.com/plugins",
+      "expectedClaimIds": 1,
+      "rendered": 4,
+      "related": 0,
+      "strict": 0,
+      "strictTokens": 0,
+      "strictByBigramOnly": 0,
+      "pending": 3,
+      "unrelated": 1,
+      "hitStrict": false,
+      "hitRelated": false,
+      "contentRelated": true,
+      "rows": [
+        {
+          "claimId": "c-9a77de3c",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": true,
+          "overlap": 0,
+          "bigram": 3,
+          "bigramRaw": 3,
+          "shared": [],
+          "episode": "ep-c0a5847a"
+        },
+        {
+          "claimId": "c-24b33a42",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 1,
+          "bigram": 1,
+          "bigramRaw": 1,
+          "shared": [],
+          "episode": "ep-c0a5847a"
+        },
+        {
+          "claimId": "c-fa96a073",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": true,
+          "overlap": 0,
+          "bigram": 6,
+          "bigramRaw": 6,
+          "shared": [],
+          "episode": "ep-191da5ac"
+        },
+        {
+          "claimId": "c-d25431a9",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": true,
+          "overlap": 0,
+          "bigram": 3,
+          "bigramRaw": 3,
+          "shared": [],
+          "episode": "ep-191da5ac"
+        }
+      ],
+      "signalHash": "bd32d09481684cd08465d28c6c4daa8c57f9266949c636fa4460c9b59d998cfc",
+      "expectedEpisodes": [
+        "ep-a0c54630"
+      ]
+    },
+    {
       "itemId": "self:ep-411a2729",
       "at": 1793530541657,
       "kind": "self",
@@ -6843,6 +7215,7 @@
       "unrelated": 0,
       "hitStrict": false,
       "hitRelated": false,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-07f0f51a",
@@ -6933,6 +7306,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-1193cf93",
@@ -7010,7 +7384,21 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
+        {
+          "claimId": "c-ee47eca6",
+          "related": false,
+          "strict": false,
+          "strictTokens": false,
+          "strictByBigramOnly": false,
+          "pending": true,
+          "overlap": 4,
+          "bigram": 0,
+          "bigramRaw": 3,
+          "shared": [],
+          "episode": "ep-62bcb7d2"
+        },
         {
           "claimId": "c-f577ada3",
           "related": false,
@@ -7038,19 +7426,6 @@
           "episode": "ep-1286ce28"
         },
         {
-          "claimId": "c-5175f1dc",
-          "related": false,
-          "strict": false,
-          "strictTokens": false,
-          "strictByBigramOnly": false,
-          "pending": true,
-          "overlap": 2,
-          "bigram": 0,
-          "bigramRaw": 2,
-          "shared": [],
-          "episode": "ep-00b50089"
-        },
-        {
           "claimId": "c-2522cc28",
           "related": false,
           "strict": false,
@@ -7072,14 +7447,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:257",
+      "itemId": "repeat:ep-8a73e06b:265",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
-      "expectedClaimIds": 246,
+      "expectedClaimIds": 254,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -7089,6 +7464,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -7111,14 +7487,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-9becea64:257",
+      "itemId": "repeat:ep-9becea64:265",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9becea64",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
-      "expectedClaimIds": 246,
+      "expectedClaimIds": 254,
       "rendered": 5,
       "related": 4,
       "strict": 4,
@@ -7128,6 +7504,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -7202,14 +7579,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:342",
+      "itemId": "repeat:ep-8a73e06b:350",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
-      "expectedClaimIds": 309,
+      "expectedClaimIds": 317,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -7219,6 +7596,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -7243,14 +7621,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-a09a4535:342",
+      "itemId": "repeat:ep-a09a4535:350",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
-      "expectedClaimIds": 309,
+      "expectedClaimIds": 317,
       "rendered": 2,
       "related": 2,
       "strict": 2,
@@ -7260,6 +7638,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -7297,14 +7676,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-ed98c462:342",
+      "itemId": "repeat:ep-ed98c462:350",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-ed98c462",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
-      "expectedClaimIds": 309,
+      "expectedClaimIds": 317,
       "rendered": 2,
       "related": 2,
       "strict": 2,
@@ -7314,6 +7693,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-5175f1dc",
@@ -7351,14 +7731,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-a09a4535:257",
+      "itemId": "repeat:ep-a09a4535:265",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: cannot write \"<path>\": file changed since it was read — re-read the file, then retry",
-      "expectedClaimIds": 246,
+      "expectedClaimIds": 254,
       "rendered": 3,
       "related": 3,
       "strict": 3,
@@ -7368,6 +7748,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-6d74f391",
@@ -7416,14 +7797,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:338",
+      "itemId": "repeat:ep-8a73e06b:348",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web request used endpoint \"http://127.0.0.1:3425/v1/messages\". search endpoint conf…",
-      "expectedClaimIds": 313,
+      "expectedClaimIds": 323,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -7433,6 +7814,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-fbe74d18",
@@ -7461,14 +7843,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-9d375d75:338",
+      "itemId": "repeat:ep-9d375d75:348",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-9d375d75",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web request used endpoint \"http://127.0.0.1:3425/v1/messages\". search endpoint conf…",
-      "expectedClaimIds": 313,
+      "expectedClaimIds": 323,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -7478,6 +7860,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-e9ced83a",
@@ -7506,14 +7889,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-a09a4535:338",
+      "itemId": "repeat:ep-a09a4535:348",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-a09a4535",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web request used endpoint \"http://127.0.0.1:3425/v1/messages\". search endpoint conf…",
-      "expectedClaimIds": 313,
+      "expectedClaimIds": 323,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -7523,6 +7906,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-e9ced83a",
@@ -7551,14 +7935,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-e336b9dd:338",
+      "itemId": "repeat:ep-e336b9dd:348",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-e336b9dd",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web request used endpoint \"http://127.0.0.1:3425/v1/messages\". search endpoint conf…",
-      "expectedClaimIds": 313,
+      "expectedClaimIds": 323,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -7568,6 +7952,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-e9ced83a",
@@ -7613,6 +7998,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-52a12b82",
@@ -7685,6 +8071,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-52a12b82",
@@ -7740,14 +8127,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:214",
+      "itemId": "repeat:ep-8a73e06b:222",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "error: old_string was not found in \"<path>\"",
-      "expectedClaimIds": 214,
+      "expectedClaimIds": 222,
       "rendered": 2,
       "related": 2,
       "strict": 2,
@@ -7757,6 +8144,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-2eaa41ee",
@@ -7791,14 +8179,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-c0a5847a:257",
+      "itemId": "repeat:ep-c0a5847a:265",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-c0a5847a",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
       "signal": "error: this goal operation requires a direct human turn on a top-level agent",
-      "expectedClaimIds": 246,
+      "expectedClaimIds": 254,
       "rendered": 4,
       "related": 1,
       "strict": 1,
@@ -7808,6 +8196,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-17bba130",
@@ -7869,14 +8258,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-e336b9dd:84",
+      "itemId": "repeat:ep-e336b9dd:86",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-e336b9dd",
       "scopeKey": "w:e:/Documents/deepseek-harness/default-workspace",
       "signal": "error: url hostname \"raw.githubusercontent.com\" resolves to a non-public ip address",
-      "expectedClaimIds": 84,
+      "expectedClaimIds": 86,
       "rendered": 4,
       "related": 1,
       "strict": 1,
@@ -7886,6 +8275,7 @@
       "unrelated": 1,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-22b83bcb",
@@ -7914,19 +8304,6 @@
           "episode": "ep-0ef39d3a"
         },
         {
-          "claimId": "c-5d7c9265",
-          "related": true,
-          "strict": true,
-          "strictTokens": true,
-          "strictByBigramOnly": false,
-          "pending": false,
-          "overlap": 6,
-          "bigram": 6,
-          "bigramRaw": 7,
-          "shared": [],
-          "episode": "ep-8cc34e32"
-        },
-        {
           "claimId": "c-715ed818",
           "related": false,
           "strict": false,
@@ -7938,6 +8315,19 @@
           "bigramRaw": 7,
           "shared": [],
           "episode": "ep-e336b9dd"
+        },
+        {
+          "claimId": "c-5d7c9265",
+          "related": true,
+          "strict": true,
+          "strictTokens": true,
+          "strictByBigramOnly": false,
+          "pending": false,
+          "overlap": 6,
+          "bigram": 6,
+          "bigramRaw": 7,
+          "shared": [],
+          "episode": "ep-8cc34e32"
         }
       ],
       "signalHash": "4b8dd0a14425cc77e28321f3e69e9f2903c7dbd110883e6fbd3dc5ca6a07c2ca",
@@ -7946,14 +8336,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-c0a5847a:214",
+      "itemId": "repeat:ep-c0a5847a:222",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-c0a5847a",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/DSH-GO",
       "signal": "json.decoder.jsondecodeerror: expecting value: line <line> column 1 (char 0)",
-      "expectedClaimIds": 214,
+      "expectedClaimIds": 222,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -7963,6 +8353,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-4fca33d1",
@@ -7984,14 +8375,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:214",
+      "itemId": "repeat:ep-8a73e06b:222",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "sed: -e expression #<n>, char 1: unknown command: `,'",
-      "expectedClaimIds": 214,
+      "expectedClaimIds": 222,
       "rendered": 2,
       "related": 1,
       "strict": 1,
@@ -8001,6 +8392,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-13f0ea15",
@@ -8052,6 +8444,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-ed0ced41",
@@ -8077,14 +8470,14 @@
       ]
     },
     {
-      "itemId": "repeat:ep-8a73e06b:269",
+      "itemId": "repeat:ep-8a73e06b:277",
       "at": 1793577600000,
       "kind": "repeat",
       "signalSource": "signature",
       "episode": "ep-8a73e06b",
       "scopeKey": "w:d:/DeepSeek Harness/default-workspace/GOkifu上下文压缩",
       "signal": "syntaxerror: missing ) after argument list at checksyntax (node:internal/main/check_syntax:<line>)",
-      "expectedClaimIds": 257,
+      "expectedClaimIds": 265,
       "rendered": 1,
       "related": 1,
       "strict": 1,
@@ -8094,6 +8487,7 @@
       "unrelated": 0,
       "hitStrict": true,
       "hitRelated": true,
+      "contentRelated": true,
       "rows": [
         {
           "claimId": "c-b4755a88",
