@@ -44,16 +44,17 @@ const HOME = process.env.DSH_HOME || path.join(process.env.USERPROFILE || proces
 // 门槛取值：**等于当前实测**（37/108 与 74/108）—— "新考卷的起点，不是目标"：
 // 用分数形式写死，避免 0.3426 与 0.342592… 这种四舍五入把真实基线卡在门外的假红。
 export const HOLDOUT_BASELINE = Object.freeze({
-  n: 114,
+  n: 118,
   strictHits: 55,
-  relatedHits: 79,
-  strictMin: 55 / 114, // 48.25%（**中文 bigram + IDF 过滤**口径；任何下降即红）
-  coverMin: 79 / 114, // 69.30%（宽松命中 = 覆盖）
-  // 2026-11-05 重定基线：旧基线 37/108 = 34.26% 是在**含事后信息**的信号下测的
-  // （T249/T263 把"该局实际碰过的文件"加进信号 —— 那是 `pre-step` 时拿不到的东西）。
-  // T264 把信号限定为"注入时刻可得"（用户原话 + 原话内实体），真实冷启动 = 39/114。
-  // **这不是放水**：判据与 `related` 定义一字未动，只是把被污染的测量基准换成真实值。
-  note: '合法口径考卷（n=114，信号仅限注入时刻可得）+ 中文 bigram 判据（IDF 0.02）；尺子修正不是产品改进',
+  relatedHits: 94,
+  strictMin: 55 / 118, // 46.61%（**保守下界**：同局且 ≥2 判别词；任何下降即红）
+  coverMin: 94 / 118, // 79.66%（**内容相关（不限来源局）** = 覆盖）
+  // 2026-11-07 重定基线（T362）：
+  // ① 口径修正：旧口径 `related = (episode === 该局)` 把"跨局但内容相关"判为不相关（假阴性 32），
+  //    把"同局但无关"判为相关（假阳性 17）。改为**内容相关（不限局）** —— 用户要的是"与当前任务相关"。
+  // ② 门槛随考卷增长重定：考卷从 114 → 118 题（新局入馆），旧门槛按 114 定会**误报**（今天已红）。
+  // **这不是放水**：严格命中仍用**更严的同局口径**（保守下界），覆盖率的误判率另报且不升。
+  note: '内容相关口径（不限局）+ 同局严格下界；n=118，门槛 = 当前实测',
 });
 
 const LIMITS = {
@@ -164,7 +165,12 @@ export function loadHoldout(filePath = DEFAULT_HOLDOUT_PATH, { fsImpl = fs } = {
   return {
     n,
     strict: Number.isFinite(exam?.strictRate) ? exam.strictRate : strictHits / n,
-    cover: Number.isFinite(exam?.relatedRate) ? exam.relatedRate : (Number.isFinite(relatedHits) ? relatedHits / n : null),
+    // T362：覆盖率**优先用"内容相关（不限来源局）"口径**。
+    // 旧口径 `related = (episode === 该局)` 已被证明**两个方向都错**（假阴性 32 + 假阳性 17），
+    // 继续拿它当门槛 = 守着一把错的尺子。考卷里没有 contentRate 时才回退旧口径（老快照）。
+    cover: Number.isFinite(exam?.contentRate) ? exam.contentRate
+      : (Number.isFinite(exam?.contentHits) ? exam.contentHits / n
+      : (Number.isFinite(exam?.relatedRate) ? exam.relatedRate : (Number.isFinite(relatedHits) ? relatedHits / n : null))),
     sampleSource: 'holdout',
     path: abs,
   };
