@@ -416,6 +416,10 @@ export function judgeCard({ card, store, item, minOverlap = 2, bigramFilter = nu
     unrelated,
     hitStrict: strict > 0,
     hitRelated: related > 0,
+    // T362：**内容相关（不限来源局）** —— 与 hitRelated（= 同局）**并列**，不替换。
+    // 依据：旧口径把"跨局但内容相关"判为不相关（假阴性 29 条），把"同局但无关"判为相关（假阳性 18 条）。
+    // 判据：卡上存在与信号共享 **≥2 判别词组（bigramRaw）或 ≥1 硬实体（overlap）** 的行，**不管它来自哪局**。
+    contentRelated: rows.some((r) => (r?.bigramRaw || 0) >= 2 || (r?.overlap || 0) >= 1),
     rows,
   };
 }
@@ -553,6 +557,11 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
   const evaluated = results.filter((r) => !r.error);
   const strictHits = evaluated.filter((r) => r.hitStrict).length;
   const relatedHits = evaluated.filter((r) => r.hitRelated).length;
+  // T362：并列口径（内容相关，不限局）与**重合分析**（谁在两个方向上被误判）。
+  const contentHits = evaluated.filter((r) => r.contentRelated).length;
+  const onlyOld = evaluated.filter((r) => r.hitRelated && !r.contentRelated).length;
+  const onlyNew = evaluated.filter((r) => !r.hitRelated && r.contentRelated).length;
+  const neither = evaluated.filter((r) => !r.hitRelated && !r.contentRelated).length;
   const n = evaluated.length;
   const pendingRows = evaluated.reduce((acc, r) => acc + (r.pending ?? 0), 0);
   const unrelatedRows = evaluated.reduce((acc, r) => acc + (r.unrelated ?? 0), 0);
@@ -575,6 +584,10 @@ export function runHoldout({ store, exam, limit = 5, budgetTokens = 500, now = n
     errors: results.filter((r) => r.error).length,
     strictHits,
     relatedHits,
+    contentHits,
+    contentRate: n ? contentHits / n : 0,
+    overlap: { onlyOld, onlyNew, neither },
+
     strictRate: n ? strictHits / n : null,
     relatedRate: n ? relatedHits / n : null,
     wilson: {
@@ -618,6 +631,10 @@ export function formatReport(r) {
   lines.push(`A2b 考卷（T236a）· n=${r.n}${r.errors ? ` · 构建失败 ${r.errors}` : ''}`);
   lines.push(`严格命中 ${r.strictHits}/${r.n} = ${pct(r.strictRate)} · Wilson 95% [${pct(r.wilson.strict.lower)}, ${pct(r.wilson.strict.upper)}]`);
   lines.push(`宽松命中 ${r.relatedHits}/${r.n} = ${pct(r.relatedRate)} · Wilson 95% [${pct(r.wilson.related.lower)}, ${pct(r.wilson.related.upper)}]`);
+  // T362：**并列口径**（内容相关，不限来源局）—— 不改旧口径，两个都报。
+  if (r.contentHits !== undefined) {
+    lines.push(`内容相关（不限局） ${r.contentHits}/${r.n} = ${pct(r.contentRate)} · 仅旧口径 ${r.overlap.onlyOld}（同局但内容重合低）· **仅新口径 ${r.overlap.onlyNew}（跨局但内容相关）** · 都未命中 ${r.overlap.neither}`);
+  }
   lines.push(`渲染行：related ${r.rows.related} · pending ${r.rows.pending} · unrelated ${r.rows.unrelated}`);
   lines.push(`分类型：${Object.entries(r.byKind).map(([k, v]) => `${k} n=${v.n} 严格 ${v.strict} 宽松 ${v.related}`).join(' · ')}`);
   if (r.control) {
