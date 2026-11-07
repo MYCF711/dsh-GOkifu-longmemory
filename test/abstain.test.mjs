@@ -120,3 +120,20 @@ test('T366d **跨语言失败映射**：中文"安装失败" + 英文"tool call 
   // 但"中文失败" + "英文无关内容" ⇒ 不该误判为相关
   assert.equal(isCrossLingualFailureMatch('安装失败帮我看看', '今天天气不错，适合出去散步'), false, '英文里没有失败信号 ⇒ 不算相关');
 });
+
+test('知识库 90 **冷却**：距最后注入 >30 天 ⇒ 冷却；最近被调用 ⇒ 不冷却', async () => {
+  const { isCold } = await import('../src/rooms/abstain.mjs');
+  const now = Date.now();
+  const day = 86400000;
+  // 40 天前被注入过 ⇒ 冷却
+  assert.equal(isCold({ counters: { lastInjectedAt: now - 40 * day } }, now), true, '40 天没被调用 ⇒ 冷却');
+  // 5 天前被注入过 ⇒ 不冷却
+  assert.equal(isCold({ counters: { lastInjectedAt: now - 5 * day } }, now), false, '5 天前被调用过 ⇒ 不冷却');
+  // 没有 lastInjectedAt ⇒ 用 recordedAt 兜底
+  assert.equal(isCold({ recordedAt: now - 40 * day }, now), true, 'recordedAt 距今 40 天 ⇒ 冷却');
+  // 没有时间 ⇒ 判不了 ⇒ 不冷却（保守，不误杀）
+  assert.equal(isCold({}, now), false, '没有时间 ⇒ 不冷却（保守）');
+  // **不按 `injections === 0` 判**：那可能是"被调用了但没被记录"
+  assert.equal(isCold({ counters: { injections: 0, lastInjectedAt: now - 5 * day } }, now), false,
+    '`injections === 0` 但**最近被调用过** ⇒ **不冷却**（不按 `=== 0` 杀）');
+});
