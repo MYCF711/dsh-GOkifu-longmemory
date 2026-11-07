@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.32（2026-11-07）
+
+### latent code 清单与重开条件审计（知识库 85 落地）
+新增 `docs/latent-toggles.md`：把"默认关"的功能**集中登记**，
+每个写清**开关名 / 位置 / 为什么关 / 重开条件 / 当前是否满足 / 最近复核日期**。
+**依据**：Feature Toggles 的"**toggles 是 inventory which comes with a carrying cost**" ——
+**没有重开条件的 toggle = 永远没人敢删的库存**。
+
+**当前 3 个开关，均未满足重开条件**：
+- `messageSignals`：T279 实测净 −3，新增命中全是造命中；
+- `abstainIrrelevant`：判据未校准到"不误杀"（可判率仅 3.7%）；
+- **Q18**：配对 p=1.000 且 noiseShare 88% ⇒ **已否决**（不是"待开"）。
+
+**一条纪律**：**"默认关"不等于"以后一定会开"。**
+`messageSignals` / `abstainIrrelevant` 是**期权**（等证据）；**Q18 是"已否决"**（不该再被反复提起）。
+**重开条件多次复核仍不满足 ⇒ 应该删掉那段代码，而不是让它一直躺着。**
+
+### 验证
+`check PASS`。
+
 ## 0.8.31（2026-11-07）
 
 ### 知识库 85：向后兼容与灰度（Feature Toggle）
