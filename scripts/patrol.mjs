@@ -146,7 +146,11 @@ export function verdictOf(audit) {
   if (audit.crossScope > 0) problems.push(`跨作用域 ${audit.crossScope} 条（A5 必须 0）`);
   if (audit.missing > 0) problems.push(`missing ${audit.missing} 条（A6 文字层）`);
   if (audit.dateOk !== null && audit.refs !== null && audit.dateOk !== audit.refs) problems.push(`日期不一致 ${audit.refs - audit.dateOk} 条`);
-  return { ok: problems.length === 0, problems };
+  // T366：**空分母 = 未验证，不是"通过"**（知识库 50：N=0 不判绿）。
+  // 当前宿主刚重启、还没产生卡样本时，missing/crossScope 都是 0 ⇒ 旧逻辑会显示"通过"，
+  // 那是**假绿**：根本没有数据可审。必须显式标"未验证"，并且**不计入通过**。
+  const unverified = Number(audit.refs) === 0;
+  return { ok: problems.length === 0 && !unverified, unverified, problems };
 }
 
 const live = run([path.join(REPO, 'scripts', 'live-stats.mjs')]);
@@ -176,7 +180,7 @@ const lines = [
   a2b.text, // T250：主判据永远第一行
   `| A3 心跳 | inject=${stats.inject ?? '?'} · skip=${stats.skip ?? '?'} · gates-failed=${stats.gatesFailed ?? '?'} | ${stats.inject > 0 ? '通过' : '无注入（查是否没信号）'} |`,
   `| A5 跨作用域 | ${audit.crossScope ?? '?'} | ${audit.crossScope === 0 ? '通过' : '**最高优先级**'} |`,
-  `| A6 文字层 | ok ${audit.atSeq ?? '?'}/${audit.refs ?? '?'} · offset ${audit.elsewhere ?? 0} · notFound ${audit.missing ?? '?'} · unreadable ${audit.unreadable ?? 0} · 日期 ${audit.dateOk ?? '?'}/${audit.refs ?? '?'} | ${verdict.ok ? '通过' : '**要看**'} |`,
+  `| A6 文字层 | ok ${audit.atSeq ?? '?'}/${audit.refs ?? '?'} · offset ${audit.elsewhere ?? 0} · notFound ${audit.missing ?? '?'} · unreadable ${audit.unreadable ?? 0} · 日期 ${audit.dateOk ?? '?'}/${audit.refs ?? '?'} | ${verdict.unverified ? '**未验证**（当前宿主无卡样本，不算通过）' : (verdict.ok ? '通过' : '**要看**')} |`,
   semantic.text, // T269：语义不变量（SI-1/2/4/5），紧接 A6 之后
   merge.text, // T296：子代理归并率（门槛 mergeRate ≥ 90% + 恒等式闭合）
   `| 样本 | ${audit.samples ?? '?'} 张（当前宿主 pid=${audit.pid ?? '?'}） | — |`,
