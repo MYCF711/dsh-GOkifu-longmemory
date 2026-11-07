@@ -13,6 +13,11 @@
 //   indexLine 恒一行：`MEMORY: <index 路径>（scope=…, N 局, 未列出≠不存在）`
 //   section   仅当命中：<memory-ledger> 内每行 `- [state] 文本 (ep-…, YYYY-MM-DD, seq N)`，≤5 条、≤500 tokens
 //   排序      失败教训 → 约束/偏好 → 事实 → 定式候选（同档按 occurredAt 新→旧）
+//   三级交付（T3）：
+//     content  —— 有把握：给全文（逐字原文 + 坐标）；
+//     pointers —— 没把握：只给指针（`episode + seq + occurredAt`），正文不渲染；
+//     abstain  —— 无关 / 无源 / 预算放不下：零展开（`section=null`），省略如实记数。
+//   判据是**计数**（`isPointerCandidate`），不是打分；默认关（`pointerTier:true` 才降级）。
 
 import fs from 'node:fs';
 import { extractErrorKey } from './topic.mjs';
@@ -79,6 +84,64 @@ export const INDEX_LINE_RE = /^MEMORY: .+（scope=.+, (\d+) 局, 未列出≠不
  * 这一段是**事实陈述**：没有祈使句、没有「何时该查」。
  */
 export const MARKERS_LINE = '# markers: [semantic]=≥3 局且无反例 · [candidate]=2 局 · [observed]=1 局 · [disputed]=存在反例 · [stale]=条件已变只给指针 · [antipattern]=失败教训 · 日期=occurredAt(UTC)';
+
+// ---------------------------------------------------------------------------
+// T3 · 三级交付的第二级：「拿不准给指针」
+//
+// 此前只有两级：有把握给全文（`content`）/ 无关不给（`abstain`）。中间缺一级 ——
+// **只有 1 局支撑、没有第二种证据**的记忆，给全文会**冒充断言**（模型会当它已经被反复验证），
+// 不给又会丢掉线索。这一级只给 `episode + seq + occurredAt`：模型可以自己去查，
+// **比全文省 token，也不误导**（卡上没有一句我们不敢担保的话）。
+//
+// 判据**必须机械**（AGENTS §2.3「计数不是打分」）—— 两条同时成立才降级：
+//   ① `state === 'observed'`：本仓 marker 语义里 `observed` 就是「1 局」；
+//   ② `support.length <= POINTER_SUPPORT_LIMIT`（=1）：计数也必须是 1。
+// 只有 ①（标了 observed 但支撑 ≥2）⇒ **计数是硬事实，按计数走，照常给全文**；
+// 只有 ②（支撑 1 却标了 candidate/semantic）⇒ 状态自相矛盾，**按最保守的"不降级"走**
+// （宁可多给，不许把有把握的条目降成指针）。
+// ---------------------------------------------------------------------------
+
+/** 「没把握」的支撑局数上限（含）。计数口径 = `claim.support.length`（**不按作用域过滤**）。 */
+export const POINTER_SUPPORT_LIMIT = 1;
+
+/**
+ * 这一条 claim 是否「没把握 ⇒ 只给指针」。
+ * 纯函数、只看计数与状态标记；不看模型评分、不看信号、不看时间。
+ * @param {object} claim
+ * @returns {boolean}
+ */
+export function isPointerCandidate(claim) {
+  if (!claim || typeof claim !== 'object') return false;
+  const state = typeof claim.state === 'string' && claim.state ? claim.state : 'observed';
+  if (state !== 'observed') return false;
+  const support = Array.isArray(claim.support) ? claim.support : [];
+  return support.length > 0 && support.length <= POINTER_SUPPORT_LIMIT;
+}
+
+/**
+ * 指针行的正文（**只写计数，不写断言**）。
+ * `原文未给` 是这张卡的事实（该坐标有原文、卡上没有给），不是对模型的安排。
+ * @param {object} claim
+ * @returns {string}
+ */
+export function pointerBodyOf(claim) {
+  const n = Array.isArray(claim?.support) ? claim.support.length : 0;
+  return `${n > 0 ? n : 1} 局支撑 · 原文未给`;
+}
+
+/**
+ * 三级交付的卡片级判定（**纯函数**，只读 `section` 与 `claims[].delivery`）。
+ * @param {object} card
+ * @returns {'content'|'pointers'|'abstain'}
+ *   - `content`  —— 展开段里至少有一行给了全文；
+ *   - `pointers` —— 有展开段，但**每一行都是指针**（只给坐标）；
+ *   - `abstain`  —— 没有展开段（零注入：无关 / 无源 / 预算放不下）。
+ */
+export function tierOf(card) {
+  const claims = Array.isArray(card?.claims) ? card.claims : [];
+  if (!card || !card.section || claims.length === 0) return 'abstain';
+  return claims.every((c) => c && c.delivery === 'pointer') ? 'pointers' : 'content';
+}
 
 export class InjectError extends Error {
   constructor(message, code = 'inject/error', detail = null) {
@@ -452,7 +515,12 @@ function stateTokenOf(claim) {
   return state;
 }
 
-function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null, falsifiableWhen = null, decay = 1 }) {
+function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null, falsifiableWhen = null, decay = 1,
+  // T3：`delivery === 'pointer'` ⇒ 这一行只给指针（正文是计数，不是断言）。
+  // `claimText` 只在这时出现：它是**那条记忆的正文**，留在结构化字段里（相关性判定要用），
+  // **不进 `rawText`** —— 渲染只认 `rawText`，所以卡上不会出现没把握的断言。
+  delivery = 'content',
+  claimText = null }) {
   // 2026-11-04（0.134.0，线上实测）：seq 是 **1 基**的；`seq: 0` 等于「不知道在哪」，不是合法出处。
   // 当前宿主 60 条引用里就有 2 条落在 seq 0，卡上文字在该局里找不到 ⇒ A6 文字层报 missing。
   // 回到根本规矩：无源不入 —— seq < 1 的条目不进卡（计入 omitted，而不是渲染一条查无实据的行）。
@@ -480,6 +548,8 @@ function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text
     claimId,
     source: { episode, seq, ...(edgeId ? { edgeId } : {}) },
     rank: rankOf(kind),
+    // T3：**只给指针**的行多两个字段（content 行的结构一字不改，旧消费方拿到的还是老形状）。
+    ...(delivery === 'pointer' ? { delivery: 'pointer', claimText: claimText ?? rawText } : {}),
   };
 }
 
@@ -581,6 +651,10 @@ function entryFromClaim(hit, claim, options = {}) {
   const occurredAt = Number.isFinite(src?.occurredAt)
     ? Number(src.occurredAt)
     : (Number.isFinite(claim.occurredAt) ? claim.occurredAt : (Number.isFinite(hit?.occurredAt) ? hit.occurredAt : null));
+  // T3（三级交付的第二级）：**没把握 ⇒ 只给指针**（判据见 `isPointerCandidate`，纯计数）。
+  // **默认关**（`options.pointerTier !== true` ⇒ 一个字都不变）：打开它会改变注入文本，
+  // 属"注入内容"变更，先有前后对照（`evidence/T3-pointer-tier.md`）再接线。
+  const pointer = options?.pointerTier === true && isPointerCandidate(claim);
 
   return buildEntry({
     episode,
@@ -588,6 +662,7 @@ function entryFromClaim(hit, claim, options = {}) {
     occurredAt,
     // 知识库 84：传了 `options.signalText` 时，**与信号方向相反**的 claim 标 `[disputed]`（不以"建议"出现）。
     // **不传 ⇒ 保持 `stateTokenOf(claim)`（行为不变，向后兼容）**。
+    // T3：指针行也保留这个标记 —— 它是**那条记忆的状态事实**，与"给不给正文"是两件事。
     marker: options?.signalText
       ? markerWithPolarity(claim, detectPolarity(options.signalText, text))
       : stateTokenOf(claim),
@@ -596,10 +671,15 @@ function entryFromClaim(hit, claim, options = {}) {
     decay: decayWeight(claim, options.now),
     // T345/T347：F3 优先用 claim 上存的；没有（历史 claim）⇒ **读时派生兜底**（纯函数、确定性）。
     // `f3OnCard:false` 只给 A/B 对照与紧急关闭用。
-    falsifiableWhen: options?.f3OnCard === false ? null : (claim.falsifiableWhen ?? deriveFalsifiableWhen(body)),
+    // T3：**指针行不带 F3** —— F3 是正文的适用条件，指针行没有正文；带上它等于把没把握的断言的一部分塞回来。
+    falsifiableWhen: pointer ? null : (options?.f3OnCard === false ? null : (claim.falsifiableWhen ?? deriveFalsifiableWhen(body))),
     ...(crossAllowed ? { prefix: '[跨项目] ' } : {}),
     state: typeof claim.state === 'string' && claim.state ? claim.state : 'observed',
-    text,
+    // T3：指针行的正文只写计数（`1 局支撑 · 原文未给`），**断言正文不进 rawText**；
+    // 正文仍留在 `claimText`（结构化字段，相关性判定要用），但**不渲染**。
+    text: pointer ? pointerBodyOf(claim) : text,
+    delivery: pointer ? 'pointer' : 'content',
+    claimText: pointer ? text : null,
     kind: claim.kind,
     claimId: claim.id,
     edgeId: typeof src?.edgeId === 'string' ? src.edgeId : null,
@@ -677,6 +757,11 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
   // 而当前宿主只有 CLI 进程、没有真实流量，注入记录不可靠 ⇒ 默认关，不误杀。
   // 开启后，距最后注入超过 `coldAfterDays` 天的 claim **不再出现在卡片上**（**但不删**，可逆）。
   coldAfterDays = null,
+  // T3：**三级交付**的第二级开关（默认关）。
+  // `true` ⇒ `isPointerCandidate` 成立的条目只给指针（`episode + seq + occurredAt`），正文不渲染。
+  // 默认关的理由：打开它会改变注入文本（少给正文），必须有前后对照与线上重开条件
+  // （`evidence/T3-pointer-tier.md`）；关掉时卡片与 0.8.46 逐字节一致。
+  pointerTier = false,
 }) {
   const entries = [];
   let droppedNoProvenance = 0;
@@ -709,7 +794,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       continue;
     }
     const entry = claim
-      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard,
+      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard, pointerTier,
         // 知识库 84：把**信号原文**也传下去 —— 与信号**方向相反**的 claim 标 `[disputed]`（不以"建议"出现）。
         // 取不到原文 ⇒ 空串 ⇒ `hasAnySignalHandle` 为 false ⇒ **不拒绝、不改标记**（保守，向后兼容）。
         signalText: signal?.text ?? signal?.quote ?? (Array.isArray(signal?.terms) ? signal.terms.join(' ') : '') })
@@ -991,9 +1076,12 @@ const CLIP_STEPS = Object.freeze([TEXT_CLIP, TIGHT_CLIP]);
  * @param {number}   [p.budgetTokens] token 预算（默认 500；口径 = indexLine + section）
  * @param {string}   [p.indexPath]   覆盖 index 路径
  * @param {number}   [p.episodeCount] 覆盖「N 局」
+ * @param {boolean}  [p.pointerTier] T3：三级交付的第二级开关（默认 false = 与 0.8.46 逐字节一致）。
+ *   `true` ⇒ `isPointerCandidate` 成立的条目只给指针（`episode + seq + occurredAt`），正文不渲染。
  * @returns {{indexLine:string, section:string|null, claims:Array, omissions:string|null,
  *            tokens:number, shadow:true, omittedCount:number, hitCount:number,
- *            indexTokens:number, limit:number, budgetTokens:number, cardVersion:number}}
+ *            indexTokens:number, limit:number, budgetTokens:number, cardVersion:number,
+ *            tier:'content'|'pointers'|'abstain', pointerCount:number}}
  */
 export function buildMemoryCard({
   cache = null,
@@ -1017,6 +1105,9 @@ export function buildMemoryCard({
   allowCrossScopeClass = false,
   // T347：F3 上卡开关（默认开）。关掉 ⇒ 卡片与 0.6.3 之前的格式逐字节一致（A/B 对照用）。
   f3OnCard = true,
+  // T3：**三级交付**的第二级开关（默认关）。`true` ⇒ 没把握的条目只给指针（正文不渲染）。
+  // 关掉时输出与 0.8.46 逐字节一致 —— 这是"旧消费方不会炸"的唯一保证。
+  pointerTier = false,
 } = {}) {
   const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
   const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
@@ -1064,10 +1155,13 @@ export function buildMemoryCard({
       signalAt: Number.isFinite(now) ? now : null,
       // T207/T226：不命中 ⇒ 四个计数全 0（字段始终存在）
       mergeStats: { groupsHit: 0, membersHit: 0, collapsed: 0, bubbled: 0 },
+      // T3：不命中 = 无关 ⇒ abstain（三级里的第三级）
+      tier: 'abstain',
+      pointerCount: 0,
     };
   }
 
-  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex, f3OnCard });
+  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex, f3OnCard, pointerTier });
   // T162a：认「合并节点」。合流（consolidate）会把多条近似 claim 压成一个带 `merge.members` 的节点；
   // 消费侧不认它，合并节点与它的成员就会在同一张卡里重复出现。规则见 collapseMergeNodes 的注释。
   const { entries, stats: collapseStats } = collapseMergeNodes({
@@ -1159,11 +1253,17 @@ export function buildMemoryCard({
       clip: clipUsed,
       // T207：命中过合并节点、但一行都没留下（成员全不可代表）⇒ 计数照实给出
       mergeStats,
+      // T3：三级交付 —— 一行都没留下 ⇒ abstain（无关/无源/预算放不下，三者都不给）
+      tier: 'abstain',
+      pointerCount: 0,
     };
   }
 
+  // T3：指针行的 `text` 是**那条记忆的正文**（相关性判定要用），但 `line` 是指针行 ——
+  // 真正进模型上下文的只有 `section`（由 `line` 拼成），所以卡上不会出现没把握的断言。
+  // content 行的 `text` 仍是渲染正文（与旧版一字不差）。
   const claims = chosen.map((e) => ({
-    text: clipLine(e.rawText, clipUsed),
+    text: e.delivery === 'pointer' ? clipLine(e.claimText ?? '', TEXT_CLIP) : clipLine(e.rawText, clipUsed),
     kind: e.kind,
     marker: e.marker,
     state: e.state,
@@ -1172,7 +1272,10 @@ export function buildMemoryCard({
     source: e.source,
     line: renderEntryLine(e, clipUsed),
     ...(e.claimId ? { claimId: e.claimId } : {}),
+    // T3：只在"只给指针"的行上出现（content 行结构一字不改，旧消费方不必判空）
+    ...(e.delivery === 'pointer' ? { delivery: 'pointer' } : {}),
   }));
+  const pointerCount = claims.filter((c) => c.delivery === 'pointer').length;
 
   return {
     indexLine,
@@ -1194,6 +1297,10 @@ export function buildMemoryCard({
     clip: clipUsed,
     // T207：触发面实验的运行时计数（只加字段，不改语义）
     mergeStats,
+    // T3：三级交付的卡片级判定（content / pointers / abstain）与指针行数。
+    // `tier` 由 `tierOf` 一处判定 —— 判定口径与消费方不各写一份。
+    tier: tierOf({ section, claims }),
+    pointerCount,
   };
 }
 
@@ -1402,7 +1509,10 @@ async function loadWalkRoom() {
 function formatInjectText({ card, gates, signal, walk, shadow }) {
   const lines = [];
   const gateOk = gates?.ok ? 'OK' : 'FAIL';
-  lines.push(`inject · shadow=true（只记录，未注入模型上下文）· 命中 ${card.hitCount} · 渲染 ${card.claims.length} · tokens ${card.tokens}/${card.budgetTokens} · gates ${gateOk}`);
+  // T3：只有真的出现指针行才多打这一段（默认关 ⇒ 输出与旧版逐字节一致）。
+  const pointerCount = Number.isFinite(card.pointerCount) ? card.pointerCount : 0;
+  const tierText = pointerCount > 0 ? ` · 交付 ${card.tier}（指针 ${pointerCount}/${card.claims.length}）` : '';
+  lines.push(`inject · shadow=true（只记录，未注入模型上下文）· 命中 ${card.hitCount} · 渲染 ${card.claims.length} · tokens ${card.tokens}/${card.budgetTokens} · gates ${gateOk}${tierText}`);
   lines.push(`signal: kind=${signal.kind} · terms=${signal.terms.length} · entities=${signal.entities.length}${signal.terms.length ? ` · ${signal.terms.slice(0, 8).join(', ')}` : ''}`);
   const crossScope = Number.isFinite(card.crossScope) ? card.crossScope : 0;
   const crossScopeWalk = Number.isFinite(card.crossScopeWalk) ? card.crossScopeWalk : 0;
@@ -1496,6 +1606,9 @@ export async function runInject({ flags = {}, positional = [], root = '' } = {})
     droppedCrossScope: scoped.dropped,
     droppedUnknownScope: scoped.droppedUnknown,
     walkCrossScope: walkCross,
+    // T3：`--pointer-tier` 打开三级交付的第二级（默认关 ⇒ 与 0.8.46 逐字节一致）。
+    // 它同时是 A/B 对照的入口：同一批输入跑两遍，比 `card.tokens` 与 `card.section` 的差。
+    pointerTier: flags['pointer-tier'] === true,
   });
   // store + scope 一起传：闸 1/2/3/4/5/7 才能真的核（否则只是 unverified）。
   const { runGates } = await import('./gates.mjs');
@@ -1563,6 +1676,10 @@ export default {
   PROVENANCE_LINE_RE,
   INDEX_LINE_RE,
   MARKERS_LINE,
+  POINTER_SUPPORT_LIMIT,
+  isPointerCandidate,
+  pointerBodyOf,
+  tierOf,
   InjectError,
   estimateTokens,
   formatCardDate,
