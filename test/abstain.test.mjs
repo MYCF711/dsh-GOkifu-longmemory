@@ -7,9 +7,18 @@ test('T366 相关性判据：共享硬实体（ENOENT）⇒ 相关', () => {
   assert.equal(hasRelevantClaim(card, '读一下文件，报了个 ENOENT'), true);
 });
 
-test('T366 相关性判据：完全不同 ⇒ 不相关（该沉默）', () => {
+test('T366 相关性判据：**有判别内容但确实不相关** ⇒ 拒绝', () => {
   const card = { claims: [{ text: 'Error: ENOENT: no such file or directory: assets/cover-1.png' }] };
-  assert.equal(hasRelevantClaim(card, '今天天气怎么样'), false);
+  // 信号里**有**可判别内容（中文段"天气预报"），但与卡上的 ENOENT **完全无关** ⇒ 该拒
+  assert.equal(hasRelevantClaim(card, '帮我查一下明天的天气预报和气温变化情况'), false);
+});
+
+test('T366 **短指令 ⇒ 不拒绝**（判据不可用，保守不误杀）', () => {
+  const card = { claims: [{ text: 'Error: ENOENT: no such file or directory: assets/cover-1.png' }] };
+  // "处理一下" / "今天天气怎么样" 都是**短指令**：没有可判别内容 ⇒ **不拒绝**（保持现状）
+  assert.equal(hasRelevantClaim(card, '处理一下'), true, '短指令不该被拿去拒');
+  assert.equal(hasRelevantClaim(card, '继续'), true);
+  assert.equal(hasRelevantClaim(card, '今天天气怎么样'), true, '<10 字符的短句判据不可用 ⇒ 不拒绝');
 });
 
 test('T366 相关性判据：共享 ≥2 判别词 ⇒ 相关（不需要硬实体）', () => {
