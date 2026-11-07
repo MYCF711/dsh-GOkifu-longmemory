@@ -187,6 +187,144 @@ test('T4 **可解释的拒绝**：abstain 的 reason 按判据分类，不是单
   );
 });
 
+// ── T2：**精确率优先**（宁可少判，不许错判）────────────────────────────────
+// 背景：T1 在 135 对人工标注上实测 v1 判据的 `opposite` 精确率只有 20%（4/20）。
+// 误触发**全部来自词面**（`别` / `要不要` / `应该` / 只共享方向词的无关内容），不是语义。
+// 下面每一条都是 **tombstone**：把对应的收窄条件删掉，这条测试必须红。
+
+test('T2 词面边界：`别` 不是否定祈使（别的/别人/识别/别路由组）⇒ 不判 opposite', async () => {
+  const { detectPolarity } = await import('../src/rooms/abstain.mjs');
+  // 吃鸡方案信号里的「抢夺别人的初始apikey，或者别人手里的key」——
+  // v1 的 NEGATE 含 1 字「别」，把它当成了「别做」⇒ 和 claim 的「应该」拼成 opposite（本集 7 条难负例之一）。
+  const signal = '做一个各种模型一起参与的吃鸡：抢夺别人的初始apikey，或者别人手里的key；如果模型的key被抢走就直接死了';
+  const claim = '如果一个功能有明确收益，损失在可控范围内，应该默认打开，且不提供开关';
+  assert.notEqual(detectPolarity(signal, claim), 'opposite', '「别人」不是否定祈使，不得判 opposite');
+  assert.equal(detectPolarity(signal, claim), 'unclear', '没有收缩方向 ⇒ 判不了');
+
+  // 「别的软件」同理（本集 pair 20 的误触发来源）
+  assert.notEqual(
+    detectPolarity('是不是别的软件都能重写解决内存占用问题，只有浏览器必须要用webview？',
+      '落后就应该实现最新，而不是一直落后'),
+    'opposite',
+  );
+  // 「识别」「类别」等复合词里的「别」也不是否定祈使
+  assert.notEqual(detectPolarity('我截图发送的图片会被识别成 user 文字', '最好关闭原生看图走回退'), 'opposite');
+});
+
+test('T2 词面边界：`不要` 是否定**任意谓词**（方向随谓词翻转）⇒ 不单独作收缩证据', async () => {
+  const { detectPolarity, polarityDirection } = await import('../src/rooms/abstain.mjs');
+  // 「不要自己去干活」= **扩张授权**（多派活），不是收缩。v1 把它当收缩 ⇒ 与 claim 的「打开」拼成 opposite。
+  const signal = '团队模式总是约束lead不要自己去干活，让成员和子代理去干活';
+  const claim = '打开了子代理的子代理功能，你应该让他们和你一样';
+  assert.equal(polarityDirection(signal), 'none', '「不要 + 谓词」本身没有方向（方向在谓词上）');
+  assert.equal(detectPolarity(signal, claim), 'unclear', '没有收缩方向 ⇒ 判不了（v1 会判 opposite）');
+  // 「要不要…？」是**自问**，同样不是否定祈使
+  assert.equal(detectPolarity('我们要不要把这个能力做成插件？', '这个插件应该默认打开'), 'unclear');
+  // 真正的**直接抑制动词**仍然判得出来（收窄不是「全关」）
+  assert.equal(
+    detectPolarity('这个功能太吵了，能不能关掉？', '这个功能应该默认打开'),
+    'opposite',
+    '「关掉」是直接抑制动词 ⇒ 与「打开」反向',
+  );
+});
+
+test('T2 单一方向：一段话同时出现扩张与收缩 ⇒ 没有单一方向 ⇒ unclear（不猜）', async () => {
+  const { detectPolarity, polarityDirection } = await import('../src/rooms/abstain.mjs');
+  const multiTopic = '开启superagent模式，做好定时任务，写好goal，不要粉色大象；顺便把定时推送关掉';
+  assert.equal(polarityDirection(multiTopic), 'both', '多议题长消息天然没有单一方向');
+  assert.equal(
+    detectPolarity(multiTopic, '你现在应该让他们和你一样，要会发包独立任务'),
+    'unclear',
+    '两个方向都有 ⇒ 不拿其中任意一个去判反向',
+  );
+});
+
+test('T2 对象锚定：只共享方向词、不同议题 ⇒ unclear（不拿「关掉」当同一对象）', async () => {
+  const { detectPolarity, polarityAnchored } = await import('../src/rooms/abstain.mjs');
+  // 本集 pair 76/77/80：信号讲邮箱通知要关掉，claim 讲 TUI 光标 / pwsh / 分支保护 —— 不同对象
+  const signal = '为什么这个报错要一直推送到我的邮箱，能不能关掉？被我自己的信息刷爆邮箱了';
+  assert.equal(polarityAnchored(signal, '行，我把pwsh直接关掉跑一个小时看看数据'), false, '只共享「关掉」不算同一对象');
+  assert.equal(detectPolarity(signal, '行，我把pwsh直接关掉跑一个小时看看数据'), 'unclear');
+  // 同一对象（邮箱）时仍然判得出来
+  assert.equal(polarityAnchored(signal, '还有一个就是，能不能让邮箱接收信息并刷新，再通知这条链条更频繁一点？'), true);
+  assert.equal(
+    detectPolarity(signal, '还有一个就是，能不能让邮箱接收信息并刷新，再通知这条链条更频繁一点？'),
+    'opposite',
+    '真反向（邮箱通知链条）必须保留',
+  );
+});
+
+test('T2 回归：`evidence/label-set.json` 上 8 条「不得判 opposite」+ 12 条「必须退回 unclear」', async (t) => {
+  const { detectPolarity } = await import('../src/rooms/abstain.mjs');
+  const { readFileSync, existsSync } = await import('node:fs');
+  const path = 'evidence/label-set.json';
+  if (!existsSync(path)) {
+    t.skip(`缺少 ${path}（T1 标注集），跳过回归`);
+    return;
+  }
+  const set = JSON.parse(readFileSync(path, 'utf8'));
+  assert.equal(set.pairs.length, 135, '标注集必须是 135 对');
+
+  // ① 8 条「同向被误判成反向」：一条都不许再判 opposite
+  const mustNotOpposite = set.pairs.filter((p) => p.stratum === 'dir' && p.polarityHuman === 'same');
+  assert.ok(mustNotOpposite.length >= 8, `dir/same 至少 8 条，实际 ${mustNotOpposite.length}`);
+  for (const p of mustNotOpposite) {
+    assert.notEqual(detectPolarity(p.signalText, p.claimText), 'opposite',
+      `pair ${p.pairId} 人工判 same，不得判 opposite（${p.why}）`);
+  }
+
+  // ② 12 条「机械判成可判、人工判 irrelevant」：必须全部退回 unclear
+  const mustBeUnclear = set.pairs.filter((p) => p.verdict === 'irrelevant' && p.polarity !== 'unclear');
+  assert.ok(mustBeUnclear.length >= 12, `误判清单至少 12 条，实际 ${mustBeUnclear.length}`);
+  for (const p of mustBeUnclear) {
+    assert.equal(detectPolarity(p.signalText, p.claimText), 'unclear',
+      `pair ${p.pairId} 人工判 irrelevant，必须退回 unclear（不得拿词面重合当方向）`);
+  }
+
+  // ③ 真反向（人工判 opposite）里，直接抑制动词那几条必须保留
+  const trueOpposite = set.pairs.filter((p) => p.stratum === 'dir' && p.polarityHuman === 'opposite');
+  const kept = trueOpposite.filter((p) => detectPolarity(p.signalText, p.claimText) === 'opposite');
+  assert.ok(kept.length >= 2, `真反向至少保留 2 条，实际 ${kept.length}：${kept.map((p) => p.pairId)}`);
+  for (const p of kept) assert.equal(detectPolarity(p.signalText, p.claimText), 'opposite');
+});
+
+test('T2 记分卡：可判率 + 精确率一起报（`polarityHuman` 当金标）', async () => {
+  const { polarityScorecard } = await import('../src/rooms/abstain.mjs');
+  const { readFileSync, existsSync } = await import('node:fs');
+  const path = 'evidence/label-set.json';
+  if (!existsSync(path)) return;
+  const set = JSON.parse(readFileSync(path, 'utf8'));
+  const { counts, report } = polarityScorecard(set.pairs);
+  assert.equal(counts.same + counts.opposite + counts.unclear, 135, '分母 = 135（全部标注对）');
+  assert.equal(report.total, 135);
+  assert.equal(report.decidable, counts.same + counts.opposite, '可判 = same + opposite');
+  assert.ok(Math.abs(report.decidability - report.decidable / 135) < 1e-9, '可判率 = 可判/135');
+  // 精确率：判成 opposite 的必须**都是**人工判 opposite 的
+  assert.equal(report.precision.opposite, 1, `opposite 精确率必须 100%，实际 ${report.precision.opposite}`);
+  assert.equal(report.precision.falsePositives, 0, '反向里不许有误判');
+  assert.ok(report.text.includes('精确率'), '报告文本里必须出现精确率（只报可判率 = 把误判当成绩）');
+  // **口径警告必须能被读到**：本集是分层集，19.3% 不能外推成线上可判率
+  assert.equal(report.usableForDecision, false, '可判率 < 30% ⇒ 不可用于决策（不粉饰）');
+});
+
+test('T2 `polarityReport` 精确率：有金标才算，没金标不拿「没标注」冒充「全对」', async () => {
+  const { polarityReport } = await import('../src/rooms/abstain.mjs');
+  // 没有金标 ⇒ 不输出 precision（向后兼容 v1 的三件套）
+  const plain = polarityReport({ same: 5, opposite: 2, unclear: 183 });
+  assert.equal(plain.precision, undefined, '没给金标就不报精确率');
+  assert.equal(plain.usableForDecision, false);
+  // 有金标 ⇒ 精确率 = tp / opposite
+  const withGold = polarityReport({ same: 10, opposite: 4, unclear: 86 }, { gold: { oppositeTrue: 4 } });
+  assert.equal(withGold.precision.opposite, 1);
+  assert.equal(withGold.precision.truePositives, 4);
+  assert.equal(withGold.precision.falsePositives, 0);
+  assert.ok(withGold.text.includes('100.0%（4/4）'), withGold.text);
+  // 精确率不足 ⇒ 即使可判率过线也**不可用于决策**
+  const bad = polarityReport({ same: 60, opposite: 10, unclear: 30 }, { gold: { oppositeTrue: 2 } });
+  assert.equal(bad.precision.opposite, 0.2, '20% 精确率');
+  assert.equal(bad.usableForDecision, false, '可判率 70% 但精确率 20% ⇒ 仍不可用于决策');
+});
+
 test('知识库 90 **冷却**：距最后注入 >30 天 ⇒ 冷却；最近被调用 ⇒ 不冷却', async () => {
   const { isCold } = await import('../src/rooms/abstain.mjs');
   const now = Date.now();

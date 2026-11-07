@@ -117,22 +117,116 @@ export default { hasRelevantClaim, abstainEntities, chineseBigrams, hasAnySignal
 
 // ── T366c：方向（polarity）——"相关但反向"的记忆是负迁移，A1 现在测不到 ──
 // 依据：用户要 A、claim 指向非 A ⇒ 给了会误导。
-// **机械**判据（AGENTS §2.3：禁止模型评分）：否定意图词表 × 促进意图词表。
+// **机械**判据（AGENTS §2.3：禁止模型评分）：收缩意图词表 × 扩张意图词表。
 // **判不了就 `unclear`**，不许为了出数硬判。
+//
+// ── T2：可判率（decidability）与**精确率**必须一起报 ──
+// T1 的标注集（`evidence/label-set.json`，135 对人工标注）实测：v1 判据的 `opposite` 精确率只有 **20%（4/20）**。
+// 误触发**全部来自词面**，不是语义：
+//   - `别`（1 字）在 49 段信号里命中 6 段，**没有一段**是否定祈使（`别的`/`别人`/`别家`/`识别`/`别路由组`）；
+//   - `不要` 有 1 段其实是 `要不要…` 的**自问**（不是「别做」）；
+//   - claim 侧 `应该` 占促进命中的 **62.5%**，它本身**不携带方向**，却能把任意建议型 claim 拉成反向。
+// T2 的修法（**只收窄，不扩表**）：
+//   ① `别` / `不想` / `不要` **不作收缩证据** —— `别` 是 1 字歧义字；`不要` 是**否定任意谓词**，
+//      方向随谓词翻转（"不要自己去干活" = 扩张授权），单独用会把方向判反。
+//      收缩证据只留**本身就带方向**的直接抑制动词（`关掉`/`删除`/`减少`…）。
+//   ② `要不要` 是**自问**，先做守卫（归一化成分隔符），不当收缩。
+//   ③ 反向判定前先过**对象锚定**：两侧方向词必须指向**同一个对象**（硬实体 / ≥2 判别词 /
+//      1 个非通用、非方向词的中文二字组）。只共享「关掉」这类方向词**不算**同一对象 ——
+//      那正是"不同议题、共享方向词"的难负例被误判成反向的机制。
+//   ④ 任一侧**同时**出现扩张与收缩 ⇒ 整段没有单一方向 ⇒ `unclear`（不猜）。
 
-/** 否定/收缩意图：用户想"关掉、减少、避免、别"。 */
-const NEGATE = ['关掉', '不要', '别', '避免', '取消', '停止', '关闭', '禁用', '不想', '太多', '刷爆', '烦', '不要再', '别再', '去掉', '删除', '屏蔽', '不再'];
-/** 促进/扩张意图：claim 建议"打开、增加、更频繁、应该做"。 */
-const PROMOTE = ['更频繁', '增加', '打开', '开启', '启用', '应该', '建议', '最好', '推荐', '多做', '加强', '提升', '扩大', '加快'];
-/** 与 NEGATE 对应的"收缩"建议（claim 也在说"关掉/减少"）⇒ 同向。 */
-const SUPPRESS = ['关掉', '关闭', '取消', '停止', '禁用', '减少', '降低', '避免', '屏蔽', '去掉', '删除'];
+/**
+ * 收缩意图：**直接抑制动词**（词本身就带"关掉 / 减少"的方向）。
+ * 与 v1 的差别：**移除** `别` / `不要` / `不想` / `太多` / `烦` —— 它们是否定/程度词，不是方向词。
+ */
+const POLARITY_SUPPRESS = Object.freeze(['关掉', '关闭', '取消', '停止', '禁用', '减少', '降低',
+  '避免', '屏蔽', '删除', '去掉', '不再', '别再']);
+
+/**
+ * 扩张意图：**直接扩张动词** + **建议型模态**。
+ * `应该` / `建议` / `最好` / `推荐` **不携带方向**：它们只在两侧同为"建议"时参与**同向**判定，
+ * 单靠它们**不足以**判反向（反向还要求对象锚定 + 信号侧是直接抑制动词）。
+ */
+const POLARITY_EXPAND = Object.freeze(['更频繁', '增加', '打开', '开启', '启用', '多做', '加强',
+  '提升', '扩大', '加快', '应该', '建议', '最好', '推荐']);
+
+/**
+ * 方向词全集（**含被排除的歧义词**）：**只**用于"把方向词从文本里剥掉、再算对象锚"，
+ * **不**参与方向判定。剥掉它们，"只共享『关掉』两个字的无关内容"才不会被算成同一对象。
+ */
+const POLARITY_LEXICON = Object.freeze([...new Set([...POLARITY_SUPPRESS, ...POLARITY_EXPAND,
+  '不要', '别再', '别', '不想', '不用'])]);
+
+/** 纯功能字组成的二字组没有判别力（"这个" / "什么" / "为什" / "不能"）。 */
+const FUNCTION_CHARS = new Set('的了是在我你他她它这那什么为有没和与就都也还又啊吗呢吧能要会不个上下中里到对把被让给从向往而且但却若如因所以此其之者很太更最多少'.split(''));
+
+/** `要不要`（自问）**不是** `不要`（否定祈使）：先替换成分隔符，避免跨词拼出假二字组。 */
+function maskDeliberation(text) {
+  return String(text ?? '').replace(/要不要/g, '\u0000\u0000\u0000');
+}
+
+/** 从文本里剥掉**方向词本身**，剩下的才是"对象面"。 */
+function stripPolarityWords(text) {
+  let s = maskDeliberation(text);
+  for (const w of [...POLARITY_LEXICON].sort((a, b) => b.length - a.length)) {
+    if (w) s = s.split(w).join('\u0000');
+  }
+  return s;
+}
+
+/** 对象锚：**非通用、非功能字**的中文二字组（"邮箱" / "供应商" / "分支保护"）。 */
+function objectBigrams(text) {
+  const out = new Set();
+  for (const b of chineseBigrams(stripPolarityWords(text))) {
+    if (GENERIC_ZH.has(b)) continue;
+    if (FUNCTION_CHARS.has(b[0]) && FUNCTION_CHARS.has(b[1])) continue;
+    out.add(b);
+  }
+  return out;
+}
+
+/**
+ * **对象锚定**：信号与 claim 的方向词是否指向**同一个对象**（与考卷 `hasRelevantClaim` 同口径）。
+ *
+ * 判据：共享 **≥1 硬实体** 或 **≥2 判别词** 或 **≥1 个对象二字组**（通用词、功能字、方向词都已剔除）。
+ * **只共享方向词不算** —— 两个不同议题共享"关掉"两个字，不构成"同一对象"。
+ */
+export function polarityAnchored(signalText, claimText) {
+  const es = abstainEntities(signalText);
+  const ec = abstainEntities(claimText);
+  for (const e of es) if (ec.has(e)) return true;
+  const ts = tokens(signalText);
+  const tc = tokens(claimText);
+  let shared = 0;
+  for (const t of ts) if (tc.has(t)) shared += 1;
+  if (shared >= 2) return true;
+  const bs = objectBigrams(signalText);
+  const bc = objectBigrams(claimText);
+  for (const b of bs) if (bc.has(b)) return true;
+  return false;
+}
+
+/** 一段文本的**单一方向**：`expand` / `contract` / `both`（两个方向都有 ⇒ 没有单一方向）/ `none`。 */
+export function polarityDirection(text) {
+  const s = maskDeliberation(text);
+  const expand = POLARITY_EXPAND.some((w) => s.includes(w));
+  const contract = POLARITY_SUPPRESS.some((w) => s.includes(w));
+  if (expand && contract) return 'both';
+  if (expand) return 'expand';
+  if (contract) return 'contract';
+  return 'none';
+}
 
 /**
  * 判定 claim 与信号的**方向关系**（不是"相不相关"，是"**同不同向**"）。
  * @returns {'same'|'opposite'|'unclear'}
- *  - 信号有**否定/收缩**意图，而 claim 是**促进/扩张**建议 ⇒ **opposite**；
- *  - 信号有否定意图，claim 也是**收缩**建议 ⇒ **same**；
- *  - 其它（没有方向、或判不了）⇒ **unclear**。
+ *  - 信号**收缩**、claim **扩张** ⇒ **opposite**；
+ *  - 两侧同向（都收缩 / 都扩张）⇒ **same**；
+ *  - 任一侧没有方向 / 两个方向都有 / 两侧方向词不指向同一对象 ⇒ **unclear**。
+ *
+ * **宁可少判，不许错判**：`opposite` 会以 `[disputed]` 渲染（`markerWithPolarity`），
+ * 错判的代价是**负迁移**；判不出来的代价只是**少一条可判**。
  */
 export function detectPolarity(signalText, claimText) {
   const s = String(signalText ?? '');
@@ -143,23 +237,29 @@ export function detectPolarity(signalText, claimText) {
   const ns = s.replace(/\s+/g, '');
   const nc = c.replace(/\s+/g, '');
   if (nc.length >= 8 && (ns.includes(nc) || nc.includes(ns))) return 'same';
-  const sigNegate = NEGATE.some((w) => s.includes(w));
-  const claimPromote = PROMOTE.some((w) => c.includes(w));
-  const claimSuppress = SUPPRESS.some((w) => c.includes(w));
-  if (sigNegate && claimPromote && !claimSuppress) return 'opposite';
-  if (sigNegate && claimSuppress) return 'same';
-  return 'unclear';
+  // ① 任一侧**没有方向**或**两个方向都有** ⇒ 判不了（多议题长消息天然没有单一方向）
+  const sd = polarityDirection(s);
+  const cd = polarityDirection(c);
+  if (sd === 'none' || cd === 'none' || sd === 'both' || cd === 'both') return 'unclear';
+  // ② 对象锚定：两侧方向词必须指向**同一个对象**（只共享方向词的难负例在这里被挡住）
+  if (!polarityAnchored(s, c)) return 'unclear';
+  return sd === cd ? 'same' : 'opposite';
 }
 
 // ── 知识库 83：任何"率"都必须**同时报可判率**，可判率太低 ⇒ **不可用于决策** ──
 /**
- * 方向统计的报告（**率 + 可判率 + 决策可用性** 三件套）。
+ * 方向统计的报告（**率 + 可判率 + 决策可用性** 三件套，T2 起**再加精确率**）。
  * 只报"反向记忆率 1.1%"而不报"可判率 3.7%"= 误导（知识库 83）。
+ * **只报可判率而不报精确率 = 把误判当成绩**（T1 实测 v1 的 `opposite` 精确率只有 20%）。
  *
  * @param {{same?:number,opposite?:number,unclear?:number}} counts
- * @param {{decidabilityFloor?:number}} [opts] 可判率下限（默认 0.30 = 30%），低于 ⇒ **不可用于决策**
+ * @param {object} [opts]
+ * @param {number} [opts.decidabilityFloor] 可判率下限（默认 0.30 = 30%），低于 ⇒ **不可用于决策**
+ * @param {number} [opts.precisionFloor] 精确率下限（默认 0.80），低于 ⇒ **不可用于决策**
+ * @param {{oppositeTrue:number}} [opts.gold] 人工金标（`polarityHuman`）里判为 `opposite` 的条数；
+ *   给了才算精确率（`tp / opposite`）。**没给金标就不报精确率**，不拿"没标注"冒充"全对"。
  */
-export function polarityReport(counts, { decidabilityFloor = 0.30 } = {}) {
+export function polarityReport(counts, { decidabilityFloor = 0.30, precisionFloor = 0.80, gold = null } = {}) {
   const same = counts.same ?? 0;
   const opposite = counts.opposite ?? 0;
   const unclear = counts.unclear ?? 0;
@@ -167,14 +267,50 @@ export function polarityReport(counts, { decidabilityFloor = 0.30 } = {}) {
   const decidable = same + opposite;
   const decidability = total ? decidable / total : 0;
   const oppositeRate = total ? opposite / total : 0;
-  const usable = decidability >= decidabilityFloor && decidable > 0;
-  return {
+  const report = {
     opposite, decidable, total,
     oppositeRate,
     decidability,
-    usableForDecision: usable,
-    text: `反向记忆率 ${(oppositeRate * 100).toFixed(1)}%（${opposite}/${total}）· 可判率 ${(decidability * 100).toFixed(1)}%（${decidable}/${total}）· ${usable ? '可用于决策' : '**不可用于决策**（可判率不足，只能作局部观察）'}`,
+    usableForDecision: decidability >= decidabilityFloor && decidable > 0,
+    text: `反向记忆率 ${(oppositeRate * 100).toFixed(1)}%（${opposite}/${total}）· 可判率 ${(decidability * 100).toFixed(1)}%（${decidable}/${total}）`,
   };
+  const tpRaw = gold?.oppositeTrue;
+  if (Number.isFinite(Number(tpRaw))) {
+    const truePositives = Number(tpRaw);
+    const falsePositives = Math.max(0, opposite - truePositives);
+    const precision = opposite > 0 ? truePositives / opposite : null;
+    report.precision = { opposite: precision, truePositives, falsePositives, gold: 'polarityHuman' };
+    report.usableForDecision = report.usableForDecision && (precision === null || precision >= precisionFloor);
+    report.text += ` · opposite 精确率 ${precision === null ? 'n/a（未判出反向）' : `${(precision * 100).toFixed(1)}%（${truePositives}/${opposite}）`}`;
+  }
+  report.text += report.usableForDecision ? ' · 可用于决策' : ' · **不可用于决策**（可判率或精确率不足，只能作局部观察）';
+  return report;
+}
+
+/**
+ * 在**带人工金标**的标注集上跑一遍方向判据，产出可复现的记分卡。
+ *
+ * 输入是 `evidence/label-set.json` 的 `pairs`（每条至少要有 `signalText` / `claimText`，
+ * 以及人工字段 `polarityHuman` ∈ {`same`|`opposite`|`none`|undefined}）。
+ * `polarityHuman` 只作**金标**，**不参与**判定。
+ *
+ * @param {Array<object>} pairs
+ * @param {{detect?:(signal:string, claim:string)=>string}} [opts]
+ * @returns {{rows:Array<object>, counts:{same:number,opposite:number,unclear:number}, report:object}}
+ */
+export function polarityScorecard(pairs, { detect = detectPolarity } = {}) {
+  const rows = [];
+  for (const p of Array.isArray(pairs) ? pairs : []) {
+    const polarity = detect(p?.signalText, p?.claimText);
+    rows.push({
+      pairId: p?.pairId, stratum: p?.stratum, verdict: p?.verdict,
+      polarityHuman: p?.polarityHuman, polarityBefore: p?.polarity, polarity,
+    });
+  }
+  const counts = { same: 0, opposite: 0, unclear: 0 };
+  for (const r of rows) counts[r.polarity] += 1;
+  const oppositeTrue = rows.filter((r) => r.polarity === 'opposite' && r.polarityHuman === 'opposite').length;
+  return { rows, counts, report: polarityReport(counts, { gold: { oppositeTrue } }) };
 }
 
 // ── 知识库 84：方向相反 ⇒ 以 `[disputed]` 渲染（不以"建议"出现）──
