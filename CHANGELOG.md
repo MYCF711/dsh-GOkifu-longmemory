@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.22（2026-11-07）
+
+### 知识库 81：难负例（hard negatives）—— 随机负例测不出真实误判率
+我昨天补的 20 对"跨 scope 负例"**几乎没用**：一眼就不相关，判据不会犯错 ⇒ **误判率恒为 0，但那是假的**。
+
+**一手文献（DPR，EMNLP 2020）**：
+> "how to select negative examples is often overlooked but could be **decisive**"；
+> 三种负例 = **Random** / **BM25**（**匹配了大部分问题 token 但不含答案**）/ **Gold**；
+> 最佳组合**必须含 BM25 负例**。
+
+**关键**：**BM25 负例 = 表面重合、实际无关**，**这才是考验**。
+
+**对照本仓**：我那 20 对"跨 scope 负例"是 **Random negatives**（太容易）；
+**pair 5 才是天然的难负例**（信号"看 token 额度" vs claim"Error: glob search failed"，`bigramRaw=2` 但内容无关）。
+
+**难负例的机械构造法**：`bigramRaw ≥ 2（有表面重合）且人工判为不相关` —— **不要**从"别的 scope"随机挑。
+
+**已交付**：`evidence/label-hard-negatives.json`（**已确认 1 条**（pair 5）+ **134 条候选**）+ `scripts/build-hard-negatives.mjs`。
+
+**我必须承认的错误**：拿"跨 scope 负例"去证"误判率 = 0"= 自己骗自己。**负例必须"长得像正例"。**
+
+### 验证
+`check PASS`（81 篇）。**abstain 仍默认关**（校准未完成）。
+
 ## 0.8.21（2026-11-07）
 
 ### 标注集补负例（T366b 续）—— 发现**正例富集**的选择偏差
