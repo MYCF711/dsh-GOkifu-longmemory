@@ -17,6 +17,29 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.33（2026-11-07）
+
+### 知识库 86：一条反例何时能推翻结论（全称 vs 统计）
+本仓的定式准入"≥2 局支撑 + 无反例"混着两种要求：**"无反例"是全称要求**，**"≥2 局"是统计要求** —— 对反例的敏感度完全不同。
+
+**一手文献（SEP 波普尔）**：
+> "**a single genuine counter-instance falsifies the corresponding universal law**… an exception, far from proving a rule, **conclusively refutes it**"；
+> 全称命题 = **prohibitive**（"All As are X" ≡ "No A is not-X"）；
+> 但"in practice a single counter-instance is **never sufficient methodologically**"（**观测误差会造出"看似反例"**）。
+
+**对照本仓**：**全称/禁止 ⇒ 一条真反例就够**（"无反例"的效力 > 任意多条支撑，这就是"反例优先"的逻辑根据）；
+**统计/比例 ⇒ 要看反例比例**，一条不够。
+
+**波普尔提醒的第三件事（与本仓今天的反复教训一致）**：**"看似反例"先验证** ——
+"看似违规"284 条是判据误报、"看似未命中"85% 其实相关、"看似覆盖不足"全是子代理局。
+**每一次都是"测量错了"，不是"真反例"。**
+
+**四条机械判据**：先分清命题形式；"看似反例"先过三道验证（测量/反的是不是这个命题/可否复现）；
+全称命题被反例命中 ⇒ 降级 `disputed` 不改写原文；统计命题不许被一条反例推翻。
+
+### 验证
+`check PASS`（86 篇）。
+
 ## 0.8.32（2026-11-07）
 
 ### latent code 清单与重开条件审计（知识库 85 落地）
