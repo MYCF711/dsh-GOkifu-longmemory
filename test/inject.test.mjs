@@ -9,6 +9,8 @@
 //   - shadow：只追加到指定目录（测试用临时目录）；默认目录不在 $DSH_HOME 内；写 $DSH_HOME 直接拒
 //   - 只陈述事实：卡片里不出现任何一种指令式片段（R13 边界闸同一份正则）
 //   - 纯函数：同输入同输出；卡片文本不含时钟（now 只进 shadow 记录）
+//   - 三级交付（T3）：content（全文）/ pointers（只给 ep+seq+日期）/ abstain（零展开）；
+//     判据是**计数**（observed 且 support ≤ 1），默认关（pointerTier:true 才降级）
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,6 +23,7 @@ import {
   ENTRY_LIMIT,
   IMPERATIVE_PATTERNS,
   INDEX_LINE_RE,
+  POINTER_SUPPORT_LIMIT,
   PROVENANCE_LINE_RE,
   TIGHT_CLIP,
   assertSafeShadowDir,
@@ -32,18 +35,23 @@ import {
   estimateTokens,
   filterHitsByScope,
   formatCardDate,
+  isPointerCandidate,
   isScopeVisible,
   normalizeScopeKey,
+  pointerBodyOf,
   readShadow,
   runInject,
   scopeKeyFromPath,
   signalFromText,
   singleLine,
+  tierOf,
   writeShadow,
   InjectError,
 } from '../src/rooms/inject.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
 import { runGates } from '../src/rooms/gates.mjs';
+// T3：三级交付不能把「相关性判定」一起打掉 —— 指针行仍带正文（结构化字段），abstain 照旧能判。
+import { hasRelevantClaim } from '../src/rooms/abstain.mjs';
 
 // ---------------------------------------------------------------------------
 // 夹具：临时目录里的最小记忆库（episodes + claims）
@@ -1742,4 +1750,216 @@ test('T333 ②: 主键全同 ⇒ cost > 0 排前（同分才比 cost；cost 不�
     const noIndex = buildMemoryCard({ walkResult: walk, store, scope: SCOPE, now: T(24) });
     assert.equal(noIndex.claims.length, 2);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+// ---------------------------------------------------------------------------
+// T3 · 三级交付的第二级：「拿不准给指针」
+//
+// 此前只有两级：有把握给全文（content）/ 无关不给（abstain）。
+// 中间这一级解决的是同一件事的两个失败：给全文 ⇒ 只有 1 局支撑的记忆**冒充断言**（模型当它被反复验证过）；
+// 不给 ⇒ 线索丢了。指针行只写「哪一局、哪个 seq、哪一天」，正文不渲染 ⇒ 更省 token，也不误导。
+//
+// 判据**必须机械**（AGENTS §2.3「计数不是打分」）：`state === 'observed'`（marker 语义 = 1 局）
+// **且** `support.length <= POINTER_SUPPORT_LIMIT`（=1）—— 状态与计数**同时**成立才降级。
+//
+// ⚠ 本段自带夹具（`makeTierFixture`）：共享的 `fixture()` 被 T298/T333 的 `finally` 删掉了根目录，
+//    后面再 `fixture()` 得到的是空库 —— 那是既有测试的破坏性副作用，三级交付的判定不该被它牵连。
+// ---------------------------------------------------------------------------
+
+/** 指针行的形状（事实陈述 + 坐标；正文位置只写计数与「原文未给」）。 */
+const POINTER_LINE_RE = /^- \[[^\]]+\] 1 局支撑 · 原文未给 \(ep-[a-z0-9]+, \d{4}-\d{2}-\d{2}, seq \d+\)$/;
+
+/** 三级交付专用夹具：两条「没把握」（observed + 1 局）+ 两条「有把握」（candidate / 2 局支撑）。 */
+function makeTierFixture() {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-tier-'));
+  const store = createStore({ root, now: T(20) });
+  store.ensureDirs();
+  store.putMany('episodes', [episode('ep-aaaaaaa1', 21, 3), episode('ep-aaaaaaa2', 22, 1), episode('ep-aaaaaaa3', 23, 0)]);
+  store.putMany('claims', [
+    // 没把握：observed + 1 局支撑（事实）
+    claim({ id: 'c-tier00001', kind: 'fact', text: 'package.json 的 engines.node 是 >=23.8', day: 23, state: 'observed', support: [{ episode: 'ep-aaaaaaa3', seq: 7 }] }),
+    // 没把握：observed + 1 局支撑（软偏好，正文最长 ⇒ 省 token 最明显）
+    claim({ id: 'c-tier00002', kind: 'preference', text: '理由：不写这句话就会为了省 token 省轮次，质量会下降', level: 'soft', day: 23, state: 'observed', support: [{ episode: 'ep-aaaaaaa3', seq: 6 }] }),
+    // 有把握：candidate（=2 局语义）—— 支撑数只有 1 也不降级（状态与计数必须同时成立）
+    claim({ id: 'c-tier00003', kind: 'pattern', text: '测试入口是 node test/run.mjs 而不是 npm test', day: 21, state: 'candidate', support: [{ episode: 'ep-aaaaaaa1', seq: 41 }] }),
+    // 有把握：observed 但 2 局支撑（计数是硬事实）
+    claim({ id: 'c-tier00004', kind: 'antipattern', text: "Cannot find module 'yaml'（pnpm add yaml 之后仍在）", day: 22, state: 'observed', support: [{ episode: 'ep-aaaaaaa2', seq: 12 }, { episode: 'ep-aaaaaaa1', seq: 30 }] }),
+  ]);
+  return { root, store };
+}
+
+/** 每个用例自带库、自带清理（不依赖共享夹具的生死）。 */
+function withTierFixture(fn) {
+  const { root, store } = makeTierFixture();
+  try {
+    return fn(store);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const LOW = () => hit({ episodeId: 'ep-aaaaaaa3', seq: 7, kind: 'claim', why: ['package.json'], claimId: 'c-tier00001' });
+const LOW2 = () => hit({ episodeId: 'ep-aaaaaaa3', seq: 6, claimId: 'c-tier00002', day: 23 });
+const HIGH_CANDIDATE = () => hit({ episodeId: 'ep-aaaaaaa1', seq: 41, kind: 'claim', why: ['测试'], claimId: 'c-tier00003' });
+const HIGH_TWO_SUPPORT = () => hit({ episodeId: 'ep-aaaaaaa2', seq: 12, claimId: 'c-tier00004' });
+
+test('T3 ①: `pointerTier` ⇒ 没把握的条目只给指针（episode + seq + 日期），断言正文不进卡', () => withTierFixture((store) => {
+  const card = buildMemoryCard({ walkResult: walkOf([LOW()]), store, scope: SCOPE, now: T(24), pointerTier: true });
+
+  assert.equal(card.tier, 'pointers', '整张卡都只有指针 ⇒ 第二级');
+  assert.equal(card.pointerCount, 1);
+  const line = cardLines(card)[0] ?? '';
+  assert.match(line, POINTER_LINE_RE, `渲染行必须是指针形态：${line}`);
+  assert.ok(!String(card.section).includes('engines.node'), `断言正文不许出现在注入文本里：${line}`);
+  // 三件套缺一不可：episode + seq + occurredAt（日期 = 所引事件的 UTC 日期）
+  const m = PROVENANCE_LINE_RE.exec(line);
+  assert.ok(m, `指针行也要能被 provenance 正则解析：${line}`);
+  assert.equal(m[3], 'ep-aaaaaaa3', 'episode');
+  assert.equal(Number(m[5]), 7, 'seq');
+  assert.equal(m[4], formatCardDate(card.claims[0].occurredAt), '日期 = occurredAt（不是入卡时间）');
+  assert.equal(m[4], '2026-10-23');
+  // 结构字段：`delivery` 只在指针行上出现
+  assert.equal(card.claims[0].delivery, 'pointer');
+  assert.equal(card.claims[0].claimId, 'c-tier00001');
+}));
+
+test('T3 ②: 默认关 ⇒ 与旧版逐字节一致（三级是能力，不许悄悄改注入）', () => withTierFixture((store) => {
+  const dflt = buildMemoryCard({ walkResult: walkOf([LOW()]), store, scope: SCOPE, now: T(24) });
+  const explicitOff = buildMemoryCard({ walkResult: walkOf([LOW()]), store, scope: SCOPE, now: T(24), pointerTier: false });
+
+  assert.equal(dflt.section, explicitOff.section, '默认与显式 false 必须一字不差');
+  assert.equal(dflt.tier, 'content');
+  assert.equal(dflt.pointerCount, 0);
+  assert.ok(String(dflt.section).includes('engines.node'), '默认仍然给全文');
+  assert.match(cardLines(dflt)[0], /^- \[observed\] package\.json 的 engines\.node 是 >=23\.8 \(ep-aaaaaaa3, 2026-10-23, seq 7\)$/);
+  assert.equal('delivery' in dflt.claims[0], false, 'content 行结构一字不改（旧消费方不必判空）');
+}));
+
+test('T3 ③: 有把握的场景（content）⇒ 开不开指针逐字节不变（含 golden）', () => withTierFixture((store) => {
+  const hits = [HIGH_CANDIDATE(), HIGH_TWO_SUPPORT()];
+  const off = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+  const on = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24), pointerTier: true });
+
+  assert.equal(on.section, off.section, '有把握的条目一个字都不许变');
+  assert.equal(on.tokens, off.tokens);
+  assert.equal(on.tier, 'content');
+  assert.equal(on.pointerCount, 0);
+  assert.equal(on.omittedCount, off.omittedCount);
+
+  // golden：单条 candidate 的卡与改动前的快照逐字节相同（与 T192 的 MERGE_FREE_GOLDEN 同一份口径）
+  const single = buildMemoryCard({ walkResult: walkOf([HIGH_CANDIDATE()]), store, scope: SCOPE, now: T(24), pointerTier: true });
+  assert.equal(single.section, MERGE_FREE_GOLDEN, 'candidate 条目开指针开关也必须与旧快照逐字节相同');
+}));
+
+test('T3 ④: 判据是机械的 —— 状态与支撑计数**同时**成立才降级（边界表）', () => withTierFixture((store) => {
+  const cases = [
+    [{ state: 'observed', support: [{}] }, true, 'observed + 1 局 ⇒ 降级（marker 语义就是 1 局）'],
+    [{ state: 'observed', support: [{}, {}] }, false, 'observed 但 2 局 ⇒ 计数是硬事实，照常给全文'],
+    [{ state: 'observed', support: [{}, {}, {}] }, false, '3 局同理'],
+    [{ state: 'candidate', support: [{}] }, false, 'candidate 却只有 1 局 ⇒ 状态自相矛盾，宁可多给'],
+    [{ state: 'semantic', support: [{}] }, false, 'semantic 同理'],
+    [{ state: 'disputed', support: [{}] }, false, '有反例 ⇒ 不是「没把握」，另走标记'],
+    [{ state: 'stale', support: [{}] }, false, 'stale 由读侧硬过滤，不走指针'],
+    [{ state: 'observed', support: [] }, false, '无支撑 ⇒ 无源不入（根本进不了卡）'],
+    [{ state: undefined, support: [{}] }, true, '缺 state 按 observed 兜底（与 buildEntry 同口径）'],
+    [null, false, '空 claim 不算'],
+  ];
+  for (const [claim0, want, why] of cases) {
+    assert.equal(isPointerCandidate(claim0), want, `${JSON.stringify(claim0)} ⇒ ${want}（${why}）`);
+  }
+  assert.equal(POINTER_SUPPORT_LIMIT, 1, '上限就是 1 局（计数口径，不是打分）');
+
+  // 端到端：同一个库，一条 observed/1 局、一条 observed/2 局 ⇒ 只有前者降级
+  const mixed = buildMemoryCard({
+    walkResult: walkOf([LOW(), HIGH_TWO_SUPPORT()]),
+    store, scope: SCOPE, now: T(24), pointerTier: true,
+  });
+  const low = mixed.claims.find((c) => c.claimId === 'c-tier00001');
+  const high = mixed.claims.find((c) => c.claimId === 'c-tier00004');
+  assert.equal(low.delivery, 'pointer', '1 局支撑 ⇒ 指针');
+  assert.equal('delivery' in high, false, '2 局支撑 ⇒ 全文');
+  assert.equal(high.text.includes('Cannot find module'), true);
+  assert.equal(mixed.tier, 'content', '两行里有全文 ⇒ 卡片级是 content（不是 pointers）');
+}));
+
+test('T3 ⑤: 三级判定 tierOf —— 全是指针=pointers / 有一行全文=content / 零展开=abstain', () => withTierFixture((store) => {
+  const allPointers = buildMemoryCard({ walkResult: walkOf([LOW(), LOW2()]), store, scope: SCOPE, now: T(24), pointerTier: true });
+  assert.equal(allPointers.tier, 'pointers');
+  assert.equal(allPointers.pointerCount, 2);
+  assert.equal(allPointers.claims.length, 2, '指针不是省略：行数照旧');
+  assert.ok(!String(allPointers.section).includes('engines.node'));
+
+  // 无关 ⇒ 零展开 ⇒ abstain（第三级）
+  const none = buildMemoryCard({ walkResult: walkOf([]), store, scope: SCOPE, now: T(24), pointerTier: true });
+  assert.equal(none.tier, 'abstain');
+  assert.equal(none.pointerCount, 0);
+  assert.equal(none.section, null);
+
+  // 纯函数：也认手搓的卡片（没有 delivery 字段 = 旧卡 = content）
+  assert.equal(tierOf({ section: '<memory-ledger>\n- x\n</memory-ledger>', claims: [{ claimId: 'c-1' }] }), 'content');
+  assert.equal(tierOf({ section: null, claims: [] }), 'abstain');
+  assert.equal(tierOf(null), 'abstain');
+  assert.equal(tierOf({ section: '<memory-ledger>\n- x\n</memory-ledger>', claims: [{ claimId: 'c-1', delivery: 'pointer' }] }), 'pointers');
+}));
+
+test('T3 ⑥: 指针比全文省 token（同一批输入逐卡对照；行数不变）', () => withTierFixture((store) => {
+  const hits = [LOW(), LOW2()];
+  const off = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24) });
+  const on = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24), pointerTier: true });
+
+  assert.equal(cardLines(on).length, cardLines(off).length, '指针不减少行数（只是每行更短）');
+  assert.ok(on.tokens < off.tokens, `省 token（两级 ${off.tokens} → 三级 ${on.tokens}）`);
+  // 省下来的就是正文（行数、坐标、日期都还在）
+  for (const c of on.claims) {
+    const m = PROVENANCE_LINE_RE.exec(c.line);
+    assert.ok(m, c.line);
+    assert.equal(m[4], c.date, '日期不许省');
+    assert.equal(Number(m[5]), c.source.seq, 'seq 不许省');
+    assert.ok(c.text.length > 0, '正文留在结构化字段（相关性判定要用），只是不渲染');
+  }
+}));
+
+test('T3 ⑦: 指针卡照样过十道闸；相关性判定照旧（正文留在结构化字段里）', () => withTierFixture((store) => {
+  const walkResult = walkOf([LOW()]);
+  const card = buildMemoryCard({ walkResult, store, scope: SCOPE, now: T(24), pointerTier: true });
+  const gates = runGates({ card, walkResult, store, scope: SCOPE });
+  assert.equal(gates.ok, true, `指针卡必须过闸：${JSON.stringify(gates.errors)}`);
+
+  // abstain 的 `hasRelevantClaim` 读的是 `claims[].text` —— 指针行必须还能被判定为「相关」，
+  // 否则打开指针级会把「相关命中」误判成「不相关」，直接不注入（那是误杀，不是省 token）。
+  assert.ok(String(card.claims[0].text).includes('engines.node'), '正文仍在 text（结构化字段）');
+  assert.equal(hasRelevantClaim(card, 'package.json 的 engines.node 是 >=23.8'), true, '相关命中不许被指针级误杀');
+}));
+
+test('T3 ⑧: 限额/省略口径不变（指针仍占一个名额），同输入同输出', () => withTierFixture((store) => {
+  const hits = [];
+  for (let i = 0; i < 9; i += 1) {
+    hits.push(hit({ episodeId: `ep-bbbbbbb${i}`, seq: 100 + i, why: ['yaml'], day: 22, claim: {
+      id: `c-p${i}`,
+      kind: 'antipattern',
+      state: 'observed',
+      text: `第 ${i} 条失败教训：yaml 模块安装后仍报 Cannot find module`,
+      occurredAt: T(22),
+      support: [{ episode: `ep-bbbbbbb${i}`, seq: 100 + i }],
+    } }));
+  }
+  const a = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(24), pointerTier: true });
+  const b = buildMemoryCard({ walkResult: walkOf(hits), store, scope: SCOPE, now: T(25), pointerTier: true });
+
+  assert.equal(a.claims.length, ENTRY_LIMIT, '仍是 ≤5 条');
+  assert.equal(a.omittedCount, 4, '超出上限的照旧记省略');
+  assert.match(a.omissions, /^omitted: 4 items/);
+  assert.equal(a.tier, 'pointers');
+  assert.equal(a.section, b.section, '同库同题 ⇒ 逐字节相同（now 只进 shadow）');
+  for (const c of cardLines(a)) assert.match(c, POINTER_LINE_RE);
+}));
+
+test('T3 ⑨: pointerBodyOf 只写计数（不写断言、不写「下一步」）', () => {
+  assert.equal(pointerBodyOf({ support: [{}] }), '1 局支撑 · 原文未给');
+  assert.equal(pointerBodyOf({ support: [{}, {}] }), '2 局支撑 · 原文未给');
+  assert.equal(pointerBodyOf({}), '1 局支撑 · 原文未给', '没有 support 时按 1 局兜底，不产「0 局」这种怪话');
+  for (const body of [pointerBodyOf({ support: [{}] }), pointerBodyOf({ support: [{}, {}] })]) {
+    assert.equal(auditImperatives(body).length, 0, `指针正文不许含指令式片段：${body}`);
+  }
 });
