@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.15（2026-11-07）
+
+### 卡样本补 `signalPreview`（T365）—— **"不相关时沉默"此前无法验证**
+真实卡样本的字段是 `at / pid / scope / scopeFrom / digest / tokens / section`，
+**没有"是什么信号触发了这张卡"** ⇒ **无法审计"这张卡是否该注入"**。
+"不相关时沉默"这条设计原则**根本无法验证**（只能看到卡，看不到为什么给）。
+
+`appendCardSample` 的调用点新增：
+```js
+signalPreview: String(lastUserText(payload?.messages) ?? '').slice(0, 160)
+```
+留样带上**注入时刻的信号前 160 字符**，之后才能算"卡上内容与信号是否相关"。
+
+**我当场抓到自己的一个 bug**：第一版写 `String(text ?? '')`，但 `text` 是 `decidePreStep` 的**局部变量**，
+外层作用域没有 ⇒ ReferenceError，**3 条 R16 测试当场红**。已改为 `lastUserText(payload?.messages)`。
+
+### 验证
+54 条 plugin 测试全绿（含新增 T365 用例）；**1049 条全量测试全绿**；`check PASS`。
+
 ## 0.8.14（2026-11-07）
 
 ### 入库覆盖**是完整的**（T364）—— 不要去"提高覆盖"

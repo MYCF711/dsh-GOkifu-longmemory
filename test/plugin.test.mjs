@@ -1323,3 +1323,11 @@ test('T282 ④: 真实 pre-step 语料只写 <storeRoot>/corpus/messages.jsonl',
     cleanup();
   }
 });
+
+test('T365 卡样本必须带 signalPreview（没有信号就无法审计"这张卡是否该注入"）', async () => {
+  const src = await import('node:fs').then((m) => m.readFileSync('src/plugin.mjs', 'utf8'));
+  assert.ok(src.includes('signalPreview:'), '卡样本必须带 signalPreview 字段');
+  // 必须在外层作用域用 lastUserText 现取（外层没有 decidePreStep 的局部 text 变量）
+  assert.ok(src.includes("signalPreview: String(lastUserText(payload?.messages) ?? '').slice(0, 160)"),
+    '信号必须来自 lastUserText(payload.messages)（外层作用域），不能用 decidePreStep 的局部 text');
+});
