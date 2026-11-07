@@ -36,7 +36,9 @@ test('patrol: 审计摘要解析 —— 七项都取到，pid 也取到', () => 
 });
 
 test('patrol: 判定 —— 全绿时没问题；跨作用域/ missing / 日期不一致都要报出来', () => {
-  assert.deepEqual(verdictOf(parseAudit(AUDIT_OK)), { ok: true, problems: [] });
+  // T366：verdictOf 现在额外返回 `unverified`（空分母 = 未验证，不是通过）。
+  // AUDIT_OK 有真实引用（refs > 0），所以 unverified=false、ok=true。
+  assert.deepEqual(verdictOf(parseAudit(AUDIT_OK)), { ok: true, unverified: false, problems: [] });
   const bad = verdictOf(parseAudit(AUDIT_BAD));
   assert.equal(bad.ok, false);
   assert.ok(bad.problems.some((p) => p.includes('跨作用域')));
@@ -148,4 +150,19 @@ test('T296 ④: 跑不动 / 超时 ⇒ **要看**（fail-closed）', () => {
   assert.match(mergeRowOf('', null).text, /超时/);
   assert.equal(mergeRowOf('boom', 2).ok, false);
   assert.match(mergeRowOf('boom', 2).text, /拿不到 subagent-merge/);
+});
+
+test('T366 **空分母 = 未验证，不是"通过"**（知识库 50：N=0 不判绿）', async () => {
+  const { verdictOf } = await import('../scripts/patrol.mjs');
+  // 当前宿主刚重启、没有卡样本：missing/crossScope 都是 0，但**没有数据可审** ⇒ 不许判绿
+  const v = verdictOf({ crossScope: 0, missing: 0, refs: 0, dateOk: 0 });
+  assert.equal(v.unverified, true, '分母为 0 必须标 unverified');
+  assert.equal(v.ok, false, '分母为 0 **不许**判"通过"（那是假绿）');
+  // 有数据且没问题 ⇒ 才判通过
+  const ok = verdictOf({ crossScope: 0, missing: 0, refs: 10, dateOk: 10 });
+  assert.equal(ok.unverified, false);
+  assert.equal(ok.ok, true, '有数据且无问题时才判通过');
+  // 有数据且有问题 ⇒ 要看
+  const bad = verdictOf({ crossScope: 0, missing: 1, refs: 10, dateOk: 10 });
+  assert.equal(bad.ok, false);
 });
