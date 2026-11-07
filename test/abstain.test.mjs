@@ -39,3 +39,19 @@ test('T366 abstainEntities：抽出文件路径 / 扩展名 / 错误码', () => 
   assert.ok([...e].some((x) => x.includes('handoff.md')), '要抽到 HANDOFF.md');
   assert.ok(e.has('ENOENT'), '要抽到 ENOENT');
 });
+
+test('T366c 方向判据：用户要"关掉"、claim 建议"更频繁" ⇒ opposite', async () => {
+  const { detectPolarity } = await import('../src/rooms/abstain.mjs');
+  assert.equal(detectPolarity('为什么这个报错要一直推送到我的邮箱，能不能关掉？被我自己的信息刷爆邮箱了',
+    '还有一个就是，能不能让邮箱接收信息并刷新，再通知这条链条更频繁一点？'), 'opposite');
+});
+
+test('T366c 方向判据：用户要"关掉"、claim 也是"关闭" ⇒ same（同向）', async () => {
+  const { detectPolarity } = await import('../src/rooms/abstain.mjs');
+  assert.equal(detectPolarity('能不能关掉这个通知？', '把这个通知的开关关闭即可'), 'same');
+});
+
+test('T366c 方向判据：没有方向 ⇒ unclear（不许硬判）', async () => {
+  const { detectPolarity } = await import('../src/rooms/abstain.mjs');
+  assert.equal(detectPolarity('读一下 HANDOFF.md 然后写方案', 'Error: failed to push some refs'), 'unclear');
+});

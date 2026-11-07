@@ -107,3 +107,39 @@ export function hasRelevantClaim(card, signalText) {
 }
 
 export default { hasRelevantClaim, abstainEntities, chineseBigrams, hasAnySignalHandle };
+
+// ── T366c：方向（polarity）——"相关但反向"的记忆是负迁移，A1 现在测不到 ──
+// 依据：用户要 A、claim 指向非 A ⇒ 给了会误导。
+// **机械**判据（AGENTS §2.3：禁止模型评分）：否定意图词表 × 促进意图词表。
+// **判不了就 `unclear`**，不许为了出数硬判。
+
+/** 否定/收缩意图：用户想"关掉、减少、避免、别"。 */
+const NEGATE = ['关掉', '不要', '别', '避免', '取消', '停止', '关闭', '禁用', '不想', '太多', '刷爆', '烦', '不要再', '别再', '去掉', '删除', '屏蔽', '不再'];
+/** 促进/扩张意图：claim 建议"打开、增加、更频繁、应该做"。 */
+const PROMOTE = ['更频繁', '增加', '打开', '开启', '启用', '应该', '建议', '最好', '推荐', '多做', '加强', '提升', '扩大', '加快'];
+/** 与 NEGATE 对应的"收缩"建议（claim 也在说"关掉/减少"）⇒ 同向。 */
+const SUPPRESS = ['关掉', '关闭', '取消', '停止', '禁用', '减少', '降低', '避免', '屏蔽', '去掉', '删除'];
+
+/**
+ * 判定 claim 与信号的**方向关系**（不是"相不相关"，是"**同不同向**"）。
+ * @returns {'same'|'opposite'|'unclear'}
+ *  - 信号有**否定/收缩**意图，而 claim 是**促进/扩张**建议 ⇒ **opposite**；
+ *  - 信号有否定意图，claim 也是**收缩**建议 ⇒ **same**；
+ *  - 其它（没有方向、或判不了）⇒ **unclear**。
+ */
+export function detectPolarity(signalText, claimText) {
+  const s = String(signalText ?? '');
+  const c = String(claimText ?? '');
+  // 守卫：**信号与 claim 高度重合（同一句/包含关系）⇒ 必然同向**，直接 `same`。
+  // 教训（pair 15）：信号与 claim 逐字相同（"开启superagent模式…不要粉色大象"），
+  // 却因为"信号含'不要' + claim 含'开启'"被误判为 opposite —— **同一段话不可能方向相反**。
+  const ns = s.replace(/\s+/g, '');
+  const nc = c.replace(/\s+/g, '');
+  if (nc.length >= 8 && (ns.includes(nc) || nc.includes(ns))) return 'same';
+  const sigNegate = NEGATE.some((w) => s.includes(w));
+  const claimPromote = PROMOTE.some((w) => c.includes(w));
+  const claimSuppress = SUPPRESS.some((w) => c.includes(w));
+  if (sigNegate && claimPromote && !claimSuppress) return 'opposite';
+  if (sigNegate && claimSuppress) return 'same';
+  return 'unclear';
+}
