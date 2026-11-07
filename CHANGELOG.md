@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.29（2026-11-07）
+
+### `markerWithPolarity`：方向相反 ⇒ `[disputed]`（不以"建议"出现）
+`src/rooms/abstain.mjs` 新增 `markerWithPolarity(claim, polarity)`：
+**`polarity === 'opposite'`**（用户要 A、claim 指向非 A）⇒ **`disputed`**（有争议），
+**不得**以 `[semantic]`/`[candidate]`（= "建议/定式"）出现；其它情况**保持原标记**（行为不变）。
+
+**为什么**："相关但反向"的记忆**本该进 `counter`（反例），却被当成 `support`（支撑）**。
+标成 `[disputed]` ⇒ 渲染时以"这条路有争议"出现，**而不是"建议"**。
+
+**测试（纯函数）**：方向相反 ⇒ 必须 `disputed`；同向/判不了 ⇒ 保持原标记。
+
+### 验证
+11 条 abstain 测试全绿；**1061 条全量测试全绿**；`check PASS`。
+
+**未做（如实）**：**渲染接线**（把 polarity 传进 `buildEntry`/`renderSection`）是**单独一步** ——
+我之前改渲染路径弄坏过测试，**不在没读清路径时硬接**。
+
 ## 0.8.28（2026-11-07）
 
 ### 知识库 84：反例优先 —— 方向相反的证据该进 `counter`，不是 `support`

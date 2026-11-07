@@ -69,3 +69,14 @@ test('知识库 83：**任何"率"都必须同时报可判率**，可判率太�
   const ok = polarityReport({ same: 60, opposite: 10, unclear: 30 });
   assert.equal(ok.usableForDecision, true, '可判率 70% ⇒ 可用于决策');
 });
+
+test('知识库 84：**方向相反 ⇒ 以 `[disputed]` 渲染**（不以"建议"出现）', async () => {
+  const { markerWithPolarity } = await import('../src/rooms/abstain.mjs');
+  // 方向相反 ⇒ 必须标 disputed（哪怕它原本是 semantic/candidate）
+  assert.equal(markerWithPolarity({ kind: 'fact', state: 'semantic' }, 'opposite'), 'disputed');
+  assert.equal(markerWithPolarity({ kind: 'fact', state: 'candidate' }, 'opposite'), 'disputed');
+  // 同向 / 判不了 ⇒ 保持原标记（行为不变）
+  assert.equal(markerWithPolarity({ kind: 'fact', state: 'semantic' }, 'same'), 'semantic');
+  assert.equal(markerWithPolarity({ kind: 'fact', state: 'candidate' }, 'unclear'), 'candidate');
+  assert.equal(markerWithPolarity({ kind: 'antipattern' }, 'same'), 'antipattern');
+});
