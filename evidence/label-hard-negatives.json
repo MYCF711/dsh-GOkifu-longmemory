@@ -1,0 +1,314 @@
+{
+ "note": "难负例 = **有表面重合（bigramRaw≥2）但内容无关**的对（DPR 的 BM25 negatives）。**不是**\"来自别的 scope\"的随机负例（那些太容易，判据不会犯错）。",
+ "confirmed": [
+  {
+   "pairId": 5,
+   "bigramRaw": 2,
+   "note": "信号=看token额度；claim=Error: glob search failed。**有词重合(bigramRaw=2)但内容无关** —— 判据误判为相关，是典型难负例。"
+  }
+ ],
+ "candidatesCount": 134,
+ "candidates": [
+  {
+   "pairId": 1,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 2,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 5,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 6,
+   "bigramRaw": 4,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 9,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 10,
+   "bigramRaw": 2,
+   "overlap": 11,
+   "status": "待标注"
+  },
+  {
+   "pairId": 11,
+   "bigramRaw": 7,
+   "overlap": 6,
+   "status": "待标注"
+  },
+  {
+   "pairId": 12,
+   "bigramRaw": 6,
+   "overlap": 5,
+   "status": "待标注"
+  },
+  {
+   "pairId": 13,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 14,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 15,
+   "bigramRaw": 31,
+   "overlap": 7,
+   "status": "待标注"
+  },
+  {
+   "pairId": 16,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 17,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 18,
+   "bigramRaw": 3,
+   "overlap": 7,
+   "status": "待标注"
+  },
+  {
+   "pairId": 19,
+   "bigramRaw": 3,
+   "overlap": 7,
+   "status": "待标注"
+  },
+  {
+   "pairId": 20,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 21,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 22,
+   "bigramRaw": 11,
+   "overlap": 42,
+   "status": "待标注"
+  },
+  {
+   "pairId": 23,
+   "bigramRaw": 13,
+   "overlap": 46,
+   "status": "待标注"
+  },
+  {
+   "pairId": 25,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 26,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 27,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 28,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 29,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 30,
+   "bigramRaw": 4,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 32,
+   "bigramRaw": 4,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 33,
+   "bigramRaw": 5,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 34,
+   "bigramRaw": 20,
+   "overlap": 2,
+   "status": "待标注"
+  },
+  {
+   "pairId": 35,
+   "bigramRaw": 6,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 36,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 37,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 38,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 41,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 42,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 45,
+   "bigramRaw": 2,
+   "overlap": 1,
+   "status": "待标注"
+  },
+  {
+   "pairId": 47,
+   "bigramRaw": 4,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 48,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 49,
+   "bigramRaw": 4,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 50,
+   "bigramRaw": 53,
+   "overlap": 6,
+   "status": "待标注"
+  },
+  {
+   "pairId": 51,
+   "bigramRaw": 6,
+   "overlap": 1,
+   "status": "待标注"
+  },
+  {
+   "pairId": 52,
+   "bigramRaw": 3,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 53,
+   "bigramRaw": 65,
+   "overlap": 6,
+   "status": "待标注"
+  },
+  {
+   "pairId": 54,
+   "bigramRaw": 5,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 57,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 59,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 60,
+   "bigramRaw": 5,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 63,
+   "bigramRaw": 2,
+   "overlap": 2,
+   "status": "待标注"
+  },
+  {
+   "pairId": 64,
+   "bigramRaw": 2,
+   "overlap": 2,
+   "status": "待标注"
+  },
+  {
+   "pairId": 68,
+   "bigramRaw": 2,
+   "overlap": 0,
+   "status": "待标注"
+  },
+  {
+   "pairId": 69,
+   "bigramRaw": 6,
+   "overlap": 10,
+   "status": "待标注"
+  }
+ ],
+ "method": "从这些 bigramRaw≥2 的候选里，**人工判\"不相关\"**的，就是难负例 —— 它们骗过了判据。"
+}
