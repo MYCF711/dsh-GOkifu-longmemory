@@ -202,8 +202,11 @@ export function listCandidates({ store, n = 20, allowUnsafe = false, readEvents 
  * 判据（全机械，零模型）：把运行里所有失败行归一成签名（`errorKeyOf`），与任务 `signature` 求交。
  * 不读 claim 文本、不看提示、不手工填 0/1。
  */
-export function judgeRecurrence({ tasks = [], events = [] } = {}) {
-  const list = Array.isArray(events) ? events : [];
+export function judgeRecurrence({ tasks = [], events = [], onlyToolResults = false } = {}) {
+  // onlyToolResults：只扫 `tool/result`（**真跑出来的失败**）。
+  // A 臂注入的记忆卡正文里可能就有该错误原文，扫全事件会把「注入的卡」误算成「复发」
+  // （A 假阳性；T9 成员 2026-11-08 实测提醒）。默认 false = 旧行为（向后兼容）。
+  const list = (Array.isArray(events) ? events : []).filter((e) => !onlyToolResults || e?.type === 'tool/result');
   const seen = new Set();
   for (let i = 0; i < list.length; i += 1) {
     const hit = failureLineOf(eventText(list[i]));

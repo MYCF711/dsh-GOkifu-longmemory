@@ -24,6 +24,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createStore } from '../src/rooms/persist.mjs';
+import { buildMemoryCard, signalFromText, filterHitsByScope } from '../src/rooms/inject.mjs';
+import { walkFromSignals } from '../src/rooms/walk.mjs';
+import { cardText } from '../src/plugin.mjs';
 import { listCandidates, judgeRecurrence, eventsFromLog, record, score, defaultHome } from './ablation-live.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -141,6 +144,29 @@ function prepare() {
 // ---------------------------------------------------------------------------
 // --run
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// A 臂的「记忆」从哪来：**在主仓用主库实算一张真卡，拼进 prompt**（手喂卡）。
+//
+// 为什么不靠在沙箱里装插件（T9 成员实测的三连坑）：
+//   ① headless profile 默认没有 kifu-loader ⇒ 插件根本不在；
+//   ② 只复制 memory-context 不够 —— `resolveSessionScope` 按沙箱 cwd 推 scope，
+//      与主库 episode 的 scope 不同 ⇒ A5 跨作用域闸把卡清空（T352 §7 已踩过）；
+//   ③ 为此还得改写副本里全部 scopeKey。
+// 手喂卡把这三件**整组绕开**：卡是文本，与沙箱 cwd 无关；A/B 两臂只差这一张卡。
+// 主库**只读**。
+// ---------------------------------------------------------------------------
+function cardForTask({ task, store, episodesById }) {
+  const scope = episodesById.get(String(task?.episode ?? ''))?.scopeKey ?? null;
+  if (!scope) return { text: '', scope: null };
+  const signal = signalFromText(String(task.taskPrompt ?? ''), { at: Date.now() });
+  signal.scopeKey = scope;
+  const walk = walkFromSignals({ signal, store, scope, cache: null, depth: 2, limit: 5, budgetTokens: 500 });
+  const scoped = filterHitsByScope(walk.hits ?? [], scope);
+  const walkResult = { ...walk, hitCount: (walk.hits ?? []).length, hits: scoped.hits, crossScope: scoped.dropped, unknownScope: scoped.droppedUnknown };
+  const card = buildMemoryCard({ signal, walkResult, store, scope, now: Date.now(), limit: 5, budgetTokens: 500, droppedCrossScope: scoped.dropped, droppedUnknownScope: scoped.droppedUnknown });
+  return { text: card.section ? cardText(card) : '', scope, tokens: card.tokens, hitCount: walkResult.hitCount };
+}
+
 function run() {
   const dir = sandboxDir();
   if (!dir) { console.error('[run] 没有沙箱，先跑 --prepare'); return 2; }
@@ -170,21 +196,32 @@ function run() {
   const picked = tasks.slice(0, pairs);
   console.log(`[run] ${picked.length} 题 × 2 臂，单次上限 ${perRunMs / 1000}s，副本 ${repo}`);
 
+  // A 臂的真卡：主库只读，一次建 store，逐题实算（不装沙箱插件，见 cardForTask 注释）。
+  const liveStore = createStore({ root: path.join(defaultHome(), 'memory-context') });
+  const episodesById = new Map(liveStore.list('episodes').map((e) => [e?.record?.id, e?.record]).filter(([id]) => typeof id === 'string'));
+
   let ok = 0;
   for (const t of picked) {
+    const card = cardForTask({ task: t, store: liveStore, episodesById });
+    fs.writeFileSync(path.join(runsDir, `${t.taskId}.card.json`), JSON.stringify({ scope: card.scope, tokens: card.tokens ?? 0, hitCount: card.hitCount ?? 0, hasCard: Boolean(card.text) }, null, 2));
     for (const variant of ['B', 'A']) {
+      // A = 真卡 + 题；B = 只有题。两臂**只差这一张卡**。
+      const prompt = variant === 'A' && card.text ? `${card.text}\n\n${t.taskPrompt}` : t.taskPrompt;
       const before = snapshot();
       const started = Date.now();
       const r = spawnSync(exe, [bin, 'headless', '-'], {
-        input: t.taskPrompt,
+        input: prompt,
         env, cwd: repo, timeout: perRunMs, maxBuffer: 64 * 1024 * 1024, encoding: null,
       });
       fs.writeFileSync(path.join(runsDir, `${t.taskId}.${variant}.out.txt`), r.stdout ?? Buffer.alloc(0));
       fs.writeFileSync(path.join(runsDir, `${t.taskId}.${variant}.err.txt`), r.stderr ?? Buffer.alloc(0));
+      fs.writeFileSync(path.join(runsDir, `${t.taskId}.${variant}.prompt.txt`), prompt);
       const log = [...snapshot()].find((x) => !before.has(x)) ?? null;
       let recurred = null;
       if (log && fs.existsSync(log)) {
-        const row = judgeRecurrence({ tasks: [t], events: eventsFromLog(log) })[0];
+        // 判分**只扫 tool/result**：A 臂卡正文里可能就有该错误原文，
+        // 扫全事件会把「注入的卡」算成「复发」（A 假阳性，成员实测提醒）。
+        const row = judgeRecurrence({ tasks: [t], events: eventsFromLog(log), onlyToolResults: true })[0];
         recurred = row?.recurred ?? null;
       }
       if (recurred !== null) {
@@ -192,7 +229,10 @@ function run() {
         ok += 1;
       }
       const sec = Math.round((Date.now() - started) / 1000);
-      console.log(`  ${t.taskId} ${variant} ${recurred === null ? 'NOLOG' : `recurred=${recurred}`} rc=${r.status} ${sec}s`);
+      // 超时判据（机械）：spawnSync 超时是 status=null + SIGTERM（**不会**给 rc=124，
+      // rc=124 是 coreutils `timeout` 的，T352 那批是外层 timeout 给的）。
+      const timedOut = r.error?.code === 'ETIMEDOUT' || (r.status === null && r.signal === 'SIGTERM') || sec >= perRunMs / 1000 - 5;
+      console.log(`  ${t.taskId} ${variant} ${recurred === null ? 'NOLOG' : `recurred=${recurred}`} rc=${r.status}${timedOut ? ' TIMEOUT' : ''} card=${variant === 'A' ? (card.text ? card.tokens + 'tok' : 'EMPTY') : '-'} ${sec}s`);
     }
   }
   fs.writeFileSync(path.join(dir, 'done.json'), JSON.stringify({ at: new Date().toISOString(), judged: ok }, null, 2));
