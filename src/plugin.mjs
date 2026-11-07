@@ -932,6 +932,7 @@ export const Config = {
     budgetTokens: { type: 'number', meta: { default: 500, description: '每次注入的 token 预算' } },
     limit: { type: 'number', meta: { default: 5, description: '每次最多注入几条' } },
     oncePerSession: { type: 'boolean', meta: { default: true, description: '每会话只注入一次（首轮）' } },
+    pointerTier: { type: 'boolean', meta: { default: true, description: '三级交付：只有 1 局支撑（observed）的记忆只给指针（ep + seq + 日期），不给全文' } },
   },
   meta: { default: {} },
   toJSON() {

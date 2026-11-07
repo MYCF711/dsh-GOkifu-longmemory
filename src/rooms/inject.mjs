@@ -17,7 +17,7 @@
 //     content  —— 有把握：给全文（逐字原文 + 坐标）；
 //     pointers —— 没把握：只给指针（`episode + seq + occurredAt`），正文不渲染；
 //     abstain  —— 无关 / 无源 / 预算放不下：零展开（`section=null`），省略如实记数。
-//   判据是**计数**（`isPointerCandidate`），不是打分；默认关（`pointerTier:true` 才降级）。
+//   判据是**计数**（`isPointerCandidate`），不是打分；默认开（`pointerTier:false` 才回到两级）。
 
 import fs from 'node:fs';
 import { extractErrorKey } from './topic.mjs';
@@ -112,9 +112,12 @@ export const POINTER_SUPPORT_LIMIT = 1;
  * （D5 的 `!== false` 陷阱就是同一个坑：**未设置**被当成**开启**）。
  *
  * 默认值本身是**行为开关**：`true` = 生产链路给指针行（与 `evidence/T3-pointer-tier.md` 的
- * 前后对照口径一致）；`false` = 与 0.8.46 逐字节一致（只作 A/B 对照）。
+ * 前后对照口径一致）；`false` = 与 0.8.46 逐字节一致（只作 A/B 对照与紧急回退）。
+ *
+ * 0.8.49 起**默认开**：A6 文字层已补机械豁免（指针行不进 A6 分子分母），
+ * 且"有把握"（`support >= 2` / 非 `observed`）的场景逐字节不变（T3 ③ 钉住）。
  */
-export const POINTER_TIER_DEFAULT = false;
+export const POINTER_TIER_DEFAULT = true;
 
 /**
  * 指针行正文的**固定尾段**（单一来源：`pointerBodyOf` 渲染它，`POINTER_BODY_RE` 用它判定）。
@@ -681,8 +684,8 @@ function entryFromClaim(hit, claim, options = {}) {
     ? Number(src.occurredAt)
     : (Number.isFinite(claim.occurredAt) ? claim.occurredAt : (Number.isFinite(hit?.occurredAt) ? hit.occurredAt : null));
   // T3（三级交付的第二级）：**没把握 ⇒ 只给指针**（判据见 `isPointerCandidate`，纯计数）。
-  // **默认关**（`options.pointerTier !== true` ⇒ 一个字都不变）：打开它会改变注入文本，
-  // 属"注入内容"变更，先有前后对照（`evidence/T3-pointer-tier.md`）再接线。
+  // **默认开**（`options.pointerTier === false` 才回到两级）：开/关的判据只有这一处收口，
+  // 关掉时卡片与 0.8.46 逐字节一致（前后对照见 `evidence/T3-pointer-tier.md`）。
   const pointer = options?.pointerTier === true && isPointerCandidate(claim);
 
   return buildEntry({
@@ -1134,8 +1137,9 @@ export function buildMemoryCard({
   allowCrossScopeClass = false,
   // T347：F3 上卡开关（默认开）。关掉 ⇒ 卡片与 0.6.3 之前的格式逐字节一致（A/B 对照用）。
   f3OnCard = true,
-  // T3：**三级交付**的第二级开关（默认关）。`true` ⇒ 没把握的条目只给指针（正文不渲染）。
-  // 关掉时输出与 0.8.46 逐字节一致 —— 这是"旧消费方不会炸"的唯一保证。
+  // T3：**三级交付**的第二级开关（默认 = `POINTER_TIER_DEFAULT`，生产默认开）。
+  // `true` ⇒ 没把握的条目只给指针（正文不渲染）；`false` ⇒ 输出与 0.8.46 逐字节一致
+  // —— 这是"旧消费方不会炸"的唯一保证（A/B 对照走它）。
   pointerTier = POINTER_TIER_DEFAULT,
 } = {}) {
   const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
@@ -1538,7 +1542,7 @@ async function loadWalkRoom() {
 function formatInjectText({ card, gates, signal, walk, shadow }) {
   const lines = [];
   const gateOk = gates?.ok ? 'OK' : 'FAIL';
-  // T3：只有真的出现指针行才多打这一段（默认关 ⇒ 输出与旧版逐字节一致）。
+  // T3：只有真的出现指针行才多打这一段（没有指针行 ⇒ 输出与旧版逐字节一致）。
   const pointerCount = Number.isFinite(card.pointerCount) ? card.pointerCount : 0;
   const tierText = pointerCount > 0 ? ` · 交付 ${card.tier}（指针 ${pointerCount}/${card.claims.length}）` : '';
   lines.push(`inject · shadow=true（只记录，未注入模型上下文）· 命中 ${card.hitCount} · 渲染 ${card.claims.length} · tokens ${card.tokens}/${card.budgetTokens} · gates ${gateOk}${tierText}`);
@@ -1635,9 +1639,10 @@ export async function runInject({ flags = {}, positional = [], root = '' } = {})
     droppedCrossScope: scoped.dropped,
     droppedUnknownScope: scoped.droppedUnknown,
     walkCrossScope: walkCross,
-    // T3：`--pointer-tier` 打开三级交付的第二级（默认关 ⇒ 与 0.8.46 逐字节一致）。
-    // 它同时是 A/B 对照的入口：同一批输入跑两遍，比 `card.tokens` 与 `card.section` 的差。
-    pointerTier: flags['pointer-tier'] === true,
+    // T3：`--pointer-tier` 打开三级交付的第二级（**生产默认已开**，见 `POINTER_TIER_DEFAULT`）；
+    // `--no-pointer-tier` 显式回到两级 —— 它同时是 A/B 对照的入口：同一批输入跑两遍，
+    // 比 `card.tokens` 与 `card.section` 的差。
+    pointerTier: flags['no-pointer-tier'] === true ? false : POINTER_TIER_DEFAULT,
   });
   // store + scope 一起传：闸 1/2/3/4/5/7 才能真的核（否则只是 unverified）。
   const { runGates } = await import('./gates.mjs');
