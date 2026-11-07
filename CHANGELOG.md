@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.30（2026-11-07）
+
+### 渲染接线完成（知识库 84 真正落地）
+上一刀只交付了纯函数 `markerWithPolarity`，本刀**完成渲染接线**：
+① `entryFromClaim` 支持**可选的** `options.signalText`
+（传了 ⇒ 用 `markerWithPolarity`；**不传 ⇒ `stateTokenOf(claim)`（原行为，向后兼容）**）；
+② `buildMemoryCard` 把**信号原文**传下去（取不到 ⇒ 空串 ⇒ **不改标记**，保守）。
+
+**效果**：与当前需求"方向相反"的 claim，在卡片上标 **`[disputed]`（有争议）**，
+而不是 `[semantic]`/`[candidate]`（建议/定式）。
+**"相关但反向"的记忆本该进 `counter`，不该被当成"建议"端给模型。**
+
+**验证**：接线测试（"能不能关掉" + "能不能更频繁" ⇒ `opposite` ⇒ `[disputed]`）；
+向后兼容（不传 `signalText` ⇒ 原行为）；取不到原文 ⇒ 不改标记。
+
+### 验证
+12 条 abstain 测试全绿；**1062 条全量测试全绿**；`check PASS`。
+
 ## 0.8.29（2026-11-07）
 
 ### `markerWithPolarity`：方向相反 ⇒ `[disputed]`（不以"建议"出现）
