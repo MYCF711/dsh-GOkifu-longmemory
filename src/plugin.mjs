@@ -1349,7 +1349,10 @@ export function apply(ctx, rawConfig = {}) {
       const deps = await resolveDeps(config);
       const result = await decidePreStep({ ctx, config, deps, payload, decision, lifecycle });
       // enabled=false 时的 "skip disabled" 没有诊断价值，别写（任何库内调用都会带出来一堆噪声）。
-      if (config.liveStats !== false && !(result.action === 'skip' && result.reason === 'disabled')) {
+      // 统一用 `=== true`（与 abstainIrrelevant 一致）。
+      // 注意：`liveStats` 上游有 `boolOf(src.liveStats, true)` 保护（未设置 ⇒ true），
+      // 所以 `!== false` 在这里**不是**真陷阱；但**统一写法**可避免将来有人**绕过 boolOf** 时踩坑。
+      if (config.liveStats === true && !(result.action === 'skip' && result.reason === 'disabled')) {
         const storeRootForStats = resolveStoreRoot(config);
         if (config.sampleCards === true && (result.action === 'inject') && result.card?.section) {
           appendCardSample(storeRootForStats, {
