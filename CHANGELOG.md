@@ -17,6 +17,32 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.31（2026-11-07）
+
+### 知识库 85：向后兼容与灰度（Feature Toggle）
+这两刀做行为改动（`abstain` / `markerWithPolarity`）用了同一套手法：
+**先纯函数 → 可选参数（不传 ⇒ 原行为）→ 取不到输入 ⇒ 保守**，结果**一条测试都没破**（1062 条全绿）。
+
+**一手文献（Pete Hodgson，Martin Fowler《Feature Toggles》）**：
+> "**enable existing or legacy behavior when a Feature Flag is Off**"；
+> "test our artifact in **both** states: toggle flipped **On and flipped Off**"；
+> Release Toggles = "**latent code which may never be turned on**"；
+> toggles 是"**inventory which comes with a carrying cost**"。
+
+**本仓这四条的落点（可核）**：
+| 纪律 | 做法 | 证据 |
+|---|---|---|
+| Off 保持旧行为 | 不传 `signalText` ⇒ `stateTokenOf(claim)` | 1062 条没破一条 |
+| 两种状态都测 | On（接线）+ Off（向后兼容） | `test/abstain.test.mjs` |
+| latent code | `abstainIrrelevant` 默认关 | `src/plugin.mjs` |
+| toggle 持有成本 | 每个默认关的功能写死**重开条件** | Q18 / T267 / abstain |
+
+**五条机械判据**：先纯函数再接线；可选参数 Off ⇒ 旧行为；取不到输入 ⇒ 保守；
+**两种状态都测**（Off 没被弄坏最容易漏）；**默认关的功能必须写重开条件**。
+
+### 验证
+`check PASS`（85 篇）。
+
 ## 0.8.30（2026-11-07）
 
 ### 渲染接线完成（知识库 84 真正落地）
