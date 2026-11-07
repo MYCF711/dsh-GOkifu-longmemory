@@ -90,6 +90,10 @@ export function hasRelevantClaim(card, signalText) {
   for (const c of claims) {
     const text = String(c?.text ?? c?.rawText ?? '');
     if (!text) continue;
+    // T366d：**跨语言的失败相关性** —— 中文"失败" + 英文"失败" ⇒ **相关**（不需要词重合）。
+    // `"安装失败"`（中文）与 `"Error: tool call aborted"`（英文）讲的是同一件事，
+    // 但**没有一个共享的词** —— 不映射就会**误杀**（实测 ep-75e7347e）。
+    if (isCrossLingualFailureMatch(signalText, text)) return true;
     if (se.size) {
       for (const e of abstainEntities(text)) if (se.has(e)) return true;
     }
@@ -213,4 +217,33 @@ export function hasReliableHandle(signalText) {
     if (!GENERIC_ZH.has(m[0])) return false; // 有非通用中文段，但**没有硬实体/英文判别词** ⇒ 仍不够"可靠"
   }
   return false;
+}
+
+// ── T366d：跨语言的"失败"信号映射（中文"失败" ↔ 英文 `Error:`）──
+// 误杀根因：`"安装失败"（中文）` 与 `"tool call aborted"（英文）` 讲的是同一件事，
+// 但**没有一个共享的词** ⇒ `bigramRaw < 2` ⇒ 被判为"不相关" ⇒ 误杀。
+// **这是 T242 早就记过的老问题**（"中文任务 vs 英文报错"）—— 语义相关，但字面零重合。
+// 修法：**失败信号跨语言映射** —— 中文的"失败/报错/装不上"与英文的 `Error:`/`failed`/`FAIL`
+// 是**同一类信号**（都在说"这事没成"），**不需要词重合**。
+
+/** 中文的"失败"信号（用户说"这事没成"）。 */
+const FAILURE_ZH = ['失败', '报错', '装不上', '不行', '出错', '错误', '崩溃', '挂了', '跑不起来', '不能用', '无法', '不成功', '没成功', '出问题'];
+
+/** 英文的"失败"信号（`Error:` / `failed` / `FAIL` / 异常名）。 */
+const FAILURE_EN = /\b(error|failed|failure|fail\b|exception|aborted|enoent|eperm|eacces|etimedout|econnrefused|typeerror|syntaxerror|referenceerror|rangeerror|cannot read|not found|could not|unable to)\b/i;
+
+/** 信号里是否含**中文"失败"**信号。 */
+export function hasChineseFailureSignal(text) {
+  const s = String(text ?? '');
+  return FAILURE_ZH.some((w) => s.includes(w));
+}
+
+/** 文本里是否含**英文"失败"**信号（`Error:` / 异常名 / `failed`）。 */
+export function hasEnglishFailureSignal(text) {
+  return FAILURE_EN.test(String(text ?? ''));
+}
+
+/** **跨语言的失败相关性**：信号是中文"失败"，claim 是英文"失败" ⇒ **相关**（不需要词重合）。 */
+export function isCrossLingualFailureMatch(signalText, claimText) {
+  return hasChineseFailureSignal(signalText) && hasEnglishFailureSignal(claimText);
 }

@@ -109,3 +109,14 @@ test('知识库 87 **精化适用条件**：含硬实体 ⇒ 启用；短指令 
   // 纯通用中文长句（没有硬实体/英文判别词）⇒ 不可靠
   assert.equal(hasReliableHandle('帮我看看这个东西现在是什么情况'), false, '通用中文 ⇒ 不可靠');
 });
+
+test('T366d **跨语言失败映射**：中文"安装失败" + 英文"tool call aborted" ⇒ 相关（不误杀）', async () => {
+  const { hasRelevantClaim, isCrossLingualFailureMatch } = await import('../src/rooms/abstain.mjs');
+  // 这是 ep-75e7347e 的真实误杀案例
+  const card = { claims: [{ text: 'Error: tool call aborted' }] };
+  const signal = '安装失败 @tencent-connect/dsh-qqbot@latest 帮我装一下';
+  assert.equal(isCrossLingualFailureMatch(signal, 'Error: tool call aborted'), true, '中文"安装失败" + 英文"aborted" ⇒ 跨语言相关');
+  assert.equal(hasRelevantClaim(card, signal), true, '不能再把这条误判为"不相关"（误杀）');
+  // 但"中文失败" + "英文无关内容" ⇒ 不该误判为相关
+  assert.equal(isCrossLingualFailureMatch('安装失败帮我看看', '今天天气不错，适合出去散步'), false, '英文里没有失败信号 ⇒ 不算相关');
+});
