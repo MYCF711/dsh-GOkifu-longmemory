@@ -44,6 +44,7 @@ import { zstdDecompressSync } from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hasRelevantClaim } from './rooms/abstain.mjs';
 
 import {
   buildMemoryCard,
@@ -705,6 +706,19 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
     return { decision, action: 'skip', reason: 'gates-failed', card, gates, digest, gateIds: failedIds, gateCodes, gateClaimIds, gateLineCount };
   }
   if (!card?.section || !text2) return { decision, action: 'skip', reason: 'no-hit', card, gates, digest };
+
+  // T366：**不相关时沉默**（abstention，知识库 79）。
+  // 卡**不为空**但**没有任何一行与信号相关** ⇒ **显式拒绝**，不注入。
+  // 此前这种情况会**照样注入**（只有"卡为空"才 no-hit），那就是噪声。
+  // 用独立的 `action: 'abstain'`（**不是** skip），让"我们该沉默的时候沉默了几次"**可计数**。
+  // ⚠ **默认关**：`abstainIrrelevant: true` 才启用。
+  // 实测判据边界太多（纯中文信号、单个共享的包名如 `yaml`、中英文混排），
+  // **误杀的代价高于收益** —— 在判据校准到"不误杀"之前，**不在生产里拒**（知识库 55「默认关」）。
+  // 重开条件：在真实考卷上证明「被拒的**全部**是不相关」且「注入率下降全部来自不相关」，
+  //           并给出「误杀率 = 0」的逐条证据。
+  if (config.abstainIrrelevant === true && card?.section && !hasRelevantClaim(card, text)) {
+    return { decision, action: 'abstain', reason: 'no-relevant-claim', card, gates, digest };
+  }
 
   const createUserMessage = await resolveCreateUserMessage(config, deps);
   const message = createUserMessage({
