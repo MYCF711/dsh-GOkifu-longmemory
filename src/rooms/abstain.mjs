@@ -187,3 +187,30 @@ export function markerWithPolarity(claim, polarity) {
   const state = typeof claim?.state === 'string' && claim.state ? claim.state : 'observed';
   return state;
 }
+
+// ── 知识库 87：精化适用条件（不是"全关"，是"只在判据可靠的输入上启用"）──
+/**
+ * 判据在这个信号上**是否可靠**（比 `hasAnySignalHandle` **更严**）。
+ *
+ * 拉卡托斯：反例该让我们"精化适用条件"，不是"全关"。
+ * - 信号里有**硬实体**（文件路径/错误码/包名/仓库）⇒ **可靠**（实体桥是明确的，不会误判）；
+ * - 有 **≥2 个英文判别词** ⇒ **可靠**（有足够的重合面可判）；
+ * - **短指令（<10 字符）或纯通用中文** ⇒ **不可靠** ⇒ **不启用**（保守，不误杀）。
+ *
+ * **在"含硬实体的英文信号"上，判据其实是可靠的** —— 那部分**不该被"默认关"一起埋掉**。
+ */
+export function hasReliableHandle(signalText) {
+  // 硬实体是最强的：有实体桥 ⇒ 判据可靠（"这条 claim 与这个文件/错误码有关"是明确的）
+  if (abstainEntities(signalText).size > 0) return true;
+  // 英文判别词 ≥2 ⇒ 有足够的重合面可判
+  const toks = tokens(signalText);
+  if (toks.size >= 2) return true;
+  // 短指令（<10 字符）⇒ 不可靠（"处理一下"这种没有可判别的东西）
+  const compact = String(signalText ?? '').replace(/\s+/g, '');
+  if (compact.length < 10) return false;
+  // 纯通用中文 ⇒ 不可靠（没有非通用的中文段可判别）
+  for (const m of String(signalText ?? '').matchAll(/[一-鿿]{2,}/g)) {
+    if (!GENERIC_ZH.has(m[0])) return false; // 有非通用中文段，但**没有硬实体/英文判别词** ⇒ 仍不够"可靠"
+  }
+  return false;
+}

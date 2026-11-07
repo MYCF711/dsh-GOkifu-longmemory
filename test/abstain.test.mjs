@@ -95,3 +95,17 @@ test('知识库 84 **渲染接线**：传了 signalText 时，方向相反的 cl
   assert.ok(src.includes('options?.signalText'), '渲染路径必须支持可选的 signalText');
   assert.ok(src.includes('signalText: signal?.text'), 'buildMemoryCard 必须把信号原文传下去');
 });
+
+test('知识库 87 **精化适用条件**：含硬实体 ⇒ 启用；短指令 ⇒ 不启用（不一刀切）', async () => {
+  const { hasReliableHandle } = await import('../src/rooms/abstain.mjs');
+  // 含硬实体（文件路径/错误码）⇒ 判据可靠 ⇒ 启用（这部分不该被"默认关"埋掉）
+  assert.equal(hasReliableHandle('读 E:/Documents/dsh-go/HANDOFF.md 然后写方案'), true, '有文件路径 ⇒ 可靠');
+  assert.equal(hasReliableHandle('报了个 ENOENT，帮我看看'), true, '有错误码 ⇒ 可靠');
+  // 英文判别词 ≥2 ⇒ 可靠
+  assert.equal(hasReliableHandle('optimize the model directory listing please'), true, '≥2 英文判别词 ⇒ 可靠');
+  // 短指令 ⇒ 不可靠 ⇒ 不启用（保守，不误杀）
+  assert.equal(hasReliableHandle('处理一下'), false, '短指令 ⇒ 不可靠');
+  assert.equal(hasReliableHandle('继续'), false);
+  // 纯通用中文长句（没有硬实体/英文判别词）⇒ 不可靠
+  assert.equal(hasReliableHandle('帮我看看这个东西现在是什么情况'), false, '通用中文 ⇒ 不可靠');
+});
