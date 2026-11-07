@@ -569,6 +569,33 @@ export function gateClaimIdsFromGates(gates, limit = 5) {
   return [...new Set(ids)].slice(0, Math.max(1, Number(limit) || 5));
 }
 
+/**
+ * T4：`abstain` 时**说出拒的是哪道门**（可解释的拒绝）。
+ *
+ * 为什么要有这个：单一 `reason: 'no-relevant-claim'` 让模型（和事后审计）**分不清**三种完全不同的处境 ——
+ * 「库里根本没有」「库里有、但只有一局证据、拿不准」「库里有、但全被作用域/时效挡了」。
+ * 这三种情况下该做的事不一样：放弃 / 去核实 / 去别的项目查。
+ *
+ * 判据**全机械**（AGENTS §2.3：计数不是打分，禁止模型评分），按**从具体到泛化**排序：
+ *   ① `cross-scope`      —— walk 命中过，但全被作用域挡掉（库里有，只是不属于本项目）；
+ *   ② `stale`            —— 卡上**每一行**的衰减权重都 < 0.5（全部超过半衰期没被调用）；
+ *   ③ `low-confidence`   —— 卡上**每一行**都是单局 `[observed]`（只有 1 局支撑，拿不准）；
+ *   ④ `no-relevant-claim` —— 兜底：卡上有行，但与信号没有可判别的重合。
+ *
+ * **不改默认行为**：只在 `abstain` **已触发**时细化 `reason` 字符串；
+ * `action` 仍是 `'abstain'`，不注入、不改变任何决策（向后兼容）。
+ */
+export function classifyAbstainReason({ card = null, walkResult = null } = {}) {
+  const claims = Array.isArray(card?.claims) ? card.claims : [];
+  const cross = Number(walkResult?.crossScope ?? 0)
+    + Number(walkResult?.unknownScope ?? 0)
+    + Number(walkResult?.crossScopeWalk ?? 0);
+  if (cross > 0) return 'cross-scope';
+  if (claims.length && claims.every((c) => Number(c?.decay ?? 1) < 0.5)) return 'stale';
+  if (claims.length && claims.every((c) => String(c?.state ?? '') === 'observed')) return 'low-confidence';
+  return 'no-relevant-claim';
+}
+
 async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }) {
   const session = payload?.agent?.session ?? payload?.session ?? null;
   const text = lastUserText(payload?.messages);
@@ -736,7 +763,10 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
   //   ① `hasReliableHandle(text)`：**只在判据可靠的输入上启用**（短指令/纯通用中文 ⇒ 不启用，保守）；
   //   ② `abstainIrrelevant: false` 可显式关掉（回到旧行为，向后兼容）。
   if (config.abstainIrrelevant === true && hasReliableHandle(text) && card?.section && !hasRelevantClaim(card, text)) {
-    return { decision, action: 'abstain', reason: 'no-relevant-claim', card, gates, digest };
+    // T4：**说出拒的是哪道门** —— 单一 reason 分不清「根本没有 / 拿不准 / 被作用域挡了」。
+    // 只细化 `reason` 字符串，`action` 不变 ⇒ 向后兼容（计数口径 `action === 'abstain'` 不动）。
+    const reason = classifyAbstainReason({ card, walkResult });
+    return { decision, action: 'abstain', reason, card, gates, digest };
   }
 
   const createUserMessage = await resolveCreateUserMessage(config, deps);

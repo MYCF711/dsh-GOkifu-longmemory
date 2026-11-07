@@ -1,314 +1,610 @@
 {
- "note": "难负例 = **有表面重合（bigramRaw≥2）但内容无关**的对（DPR 的 BM25 negatives）。**不是**\"来自别的 scope\"的随机负例（那些太容易，判据不会犯错）。",
- "confirmed": [
-  {
-   "pairId": 5,
-   "bigramRaw": 2,
-   "note": "信号=看token额度；claim=Error: glob search failed。**有词重合(bigramRaw=2)但内容无关** —— 判据误判为相关，是典型难负例。"
-  }
+ "version": 2,
+ "supersedes": {
+  "version": 1,
+  "candidatesCount": 134,
+  "note": "v1 只有 1 条 confirmed + 134 条「待标注」候选取自 v1 标注集（该集已被替换，候选 pairId 不再可解析）；本版是逐条标注后的结果。"
+ },
+ "createdAt": 1794056719694,
+ "definition": "难负例 = bigramRaw ≥ 2（与信号有表面字面重合，判据会把它误判为相关）但人工判 irrelevant（内容无关）的对。随机负例（字面不重合）不计入本文件。",
+ "n": 49,
+ "bigramRange": [
+  2,
+  6
  ],
- "candidatesCount": 134,
- "candidates": [
-  {
-   "pairId": 1,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 2,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 5,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 6,
-   "bigramRaw": 4,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 9,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 10,
-   "bigramRaw": 2,
-   "overlap": 11,
-   "status": "待标注"
-  },
-  {
-   "pairId": 11,
-   "bigramRaw": 7,
-   "overlap": 6,
-   "status": "待标注"
-  },
-  {
-   "pairId": 12,
-   "bigramRaw": 6,
-   "overlap": 5,
-   "status": "待标注"
-  },
-  {
-   "pairId": 13,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 14,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 15,
-   "bigramRaw": 31,
-   "overlap": 7,
-   "status": "待标注"
-  },
-  {
-   "pairId": 16,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 17,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 18,
-   "bigramRaw": 3,
-   "overlap": 7,
-   "status": "待标注"
-  },
-  {
-   "pairId": 19,
-   "bigramRaw": 3,
-   "overlap": 7,
-   "status": "待标注"
-  },
-  {
-   "pairId": 20,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 21,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 22,
-   "bigramRaw": 11,
-   "overlap": 42,
-   "status": "待标注"
-  },
-  {
-   "pairId": 23,
-   "bigramRaw": 13,
-   "overlap": 46,
-   "status": "待标注"
-  },
-  {
-   "pairId": 25,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 26,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 27,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 28,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 29,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 30,
-   "bigramRaw": 4,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 32,
-   "bigramRaw": 4,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 33,
-   "bigramRaw": 5,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 34,
-   "bigramRaw": 20,
-   "overlap": 2,
-   "status": "待标注"
-  },
-  {
-   "pairId": 35,
-   "bigramRaw": 6,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 36,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 37,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 38,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 41,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 42,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 45,
-   "bigramRaw": 2,
-   "overlap": 1,
-   "status": "待标注"
-  },
-  {
-   "pairId": 47,
-   "bigramRaw": 4,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 48,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 49,
-   "bigramRaw": 4,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 50,
-   "bigramRaw": 53,
-   "overlap": 6,
-   "status": "待标注"
-  },
-  {
-   "pairId": 51,
-   "bigramRaw": 6,
-   "overlap": 1,
-   "status": "待标注"
-  },
-  {
-   "pairId": 52,
-   "bigramRaw": 3,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 53,
-   "bigramRaw": 65,
-   "overlap": 6,
-   "status": "待标注"
-  },
-  {
-   "pairId": 54,
-   "bigramRaw": 5,
-   "overlap": 0,
-   "status": "待标注"
-  },
-  {
-   "pairId": 57,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
-  },
+ "excludedRandomNegatives": {
+  "n": 14,
+  "note": "跨 scope 随机负例（bigramRaw 0/1）单独统计，太容易、测不出误判（见 docs/调研/81）。"
+ },
+ "note": "这些对是判据误判率的真实来源：bigramRaw ≥ 2 的对在考卷口径下会被当作「卡上有相关内容」。",
+ "pairs": [
   {
    "pairId": 59,
-   "bigramRaw": 2,
-   "overlap": 0,
-   "status": "待标注"
+   "itemId": "repeat:ep-8a73e06b:265",
+   "claimId": "c-17a0940b",
+   "bigramRaw": 6,
+   "overlap": 5,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "是 cannot present/file not found 这类错误，与 edit 前需重读不是同一签名",
+   "signalText": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
+   "claimText": "Error: Cannot present tmp/dsh-gokifu-compact/case-bank/episode-candidates.md: file not found. Check the path, create the file if needed, and retry."
   },
   {
    "pairId": 60,
+   "itemId": "repeat:ep-8a73e06b:265",
+   "claimId": "c-1e6d943c",
+   "bigramRaw": 5,
+   "overlap": 6,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "是图片扩展名读取失败，与文件被改后需重读无关，只是路径词重合",
+   "signalText": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
+   "claimText": "Error: cannot read \"/d/主工作区/projects/.tmp-issue9-push-20261106-1244/assets/icon-fishgirl-draft.png\": the .png extension declares image/png, but the bytes use a different image format; rename the file…"
+  },
+  {
+   "pairId": 61,
+   "itemId": "self:ep-135c7f7d",
+   "claimId": "c-3629fd8d",
    "bigramRaw": 5,
    "overlap": 0,
-   "status": "待标注"
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲 UI 全部二级三级页面适配要用官方素材，与仓库维护标准无关",
+   "signalText": "去找一下成熟项目的github仓库维护标准是怎样的，我感觉我的magpie脚手架仓库的维护标准还是不够好",
+   "claimText": "注意是全部ui，包括所有二级三级页面，如果有更深的，也要全部适配，dsh有官方素材的用官方素材，有官方模板的用官方模板，顺便你看下superagent官方从仓库的界面是怎样的"
+  },
+  {
+   "pairId": 62,
+   "itemId": "self:ep-135c7f7d",
+   "claimId": "c-36feb6c9",
+   "bigramRaw": 5,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲用脚手架做自动登录插件，是拿它做插件，不是改进它的维护标准",
+   "signalText": "去找一下成熟项目的github仓库维护标准是怎样的，我感觉我的magpie脚手架仓库的维护标准还是不够好",
+   "claimText": "我要你按照magpie脚手架仓库去做，当然是要自动弹登陆窗，然后等user登录后自动获取key和完成今日任务，然后要注意，只有检测到任务可做的状态才能去做，不要浪费token"
   },
   {
    "pairId": 63,
-   "bigramRaw": 2,
-   "overlap": 2,
-   "status": "待标注"
+   "itemId": "self:ep-135c7f7d",
+   "claimId": "c-559d36d4",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲设计模式改写系统提示词不好用，与 github 仓库维护标准无关",
+   "signalText": "去找一下成熟项目的github仓库维护标准是怎样的，我感觉我的magpie脚手架仓库的维护标准还是不够好",
+   "claimText": "之前用的是设计模式，我感觉不好用，他是通过改写系统提示词来做的，丢到了我原本的系统提示词，而且我们的项目要求是重写DSH，根本用不上。"
   },
   {
    "pairId": 64,
-   "bigramRaw": 2,
-   "overlap": 2,
-   "status": "待标注"
+   "itemId": "self:ep-1f814ed5",
+   "claimId": "c-03e940bb",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "opposite",
+   "verdict": "irrelevant",
+   "why": "讲有收益的功能默认打开且不给开关，与吃鸡玩法规则无关",
+   "signalText": "我有个想法，你写个方案，然后在方案方向上向我拷问，一次一句。\n想法如下：做一个各种模型一起参与的吃鸡，吃鸡方法采用传统吃鸡，缩圈，混战，留到最后的吃鸡成功。\n规则1：大家在一个巨型屎山代码项目中寻找api key。apikey也有等级品质，对应不用金额，散落在巨型屎山代码项目（地图）中，这个地图所有模型都可见，模型自己选择进入点。找到api key之后模型就能用，模型有自己的初始apikey。模型需要在地图中突进，搜刮新的apikey，也能攻击其他模型，抢夺别人的初始apikey，或者别人手里的key，如果模型的key被抢走，那模型没有key用，就直接死了（没有key用了直接跑不了模型）如果做不到抹除其他模型的key，可以直接优先用别人的key，把key用完就击败了。",
+   "claimText": "如果一个功能有明确收益，损失在可控范围内，且几乎可以无视，应该默认打开，且不提供开关，这是设计初衷就包含的，不应该给开关"
+  },
+  {
+   "pairId": 65,
+   "itemId": "self:ep-1f814ed5",
+   "claimId": "c-3a863532",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "opposite",
+   "verdict": "irrelevant",
+   "why": "讲让专员读旧会话分析痛点，与吃鸡玩法设计无关",
+   "signalText": "我有个想法，你写个方案，然后在方案方向上向我拷问，一次一句。\n想法如下：做一个各种模型一起参与的吃鸡，吃鸡方法采用传统吃鸡，缩圈，混战，留到最后的吃鸡成功。\n规则1：大家在一个巨型屎山代码项目中寻找api key。apikey也有等级品质，对应不用金额，散落在巨型屎山代码项目（地图）中，这个地图所有模型都可见，模型自己选择进入点。找到api key之后模型就能用，模型有自己的初始apikey。模型需要在地图中突进，搜刮新的apikey，也能攻击其他模型，抢夺别人的初始apikey，或者别人手里的key，如果模型的key被抢走，那模型没有key用，就直接死了（没有key用了直接跑不了模型）如果做不到抹除其他模型的key，可以直接优先用别人的key，把key用完就击败了。",
+   "claimText": "你去让专员读本机之前的会话，分析痛点，比如我说中文，有时候这个词有歧义，或者模糊意思，模型应该问清楚，而不是瞎猜。"
+  },
+  {
+   "pairId": 66,
+   "itemId": "self:ep-1f814ed5",
+   "claimId": "c-3d9db8b8",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "opposite",
+   "verdict": "irrelevant",
+   "why": "讲思考死循环时触发压缩，与模型吃鸡玩法无关",
+   "signalText": "我有个想法，你写个方案，然后在方案方向上向我拷问，一次一句。\n想法如下：做一个各种模型一起参与的吃鸡，吃鸡方法采用传统吃鸡，缩圈，混战，留到最后的吃鸡成功。\n规则1：大家在一个巨型屎山代码项目中寻找api key。apikey也有等级品质，对应不用金额，散落在巨型屎山代码项目（地图）中，这个地图所有模型都可见，模型自己选择进入点。找到api key之后模型就能用，模型有自己的初始apikey。模型需要在地图中突进，搜刮新的apikey，也能攻击其他模型，抢夺别人的初始apikey，或者别人手里的key，如果模型的key被抢走，那模型没有key用，就直接死了（没有key用了直接跑不了模型）如果做不到抹除其他模型的key，可以直接优先用别人的key，把key用完就击败了。",
+   "claimText": "你去看下日志，没问题的话就是确实有效，那么应该进行一个检测，当会话进入思考死循环了，就触发一次压缩"
+  },
+  {
+   "pairId": 67,
+   "itemId": "self:ep-1f814ed5",
+   "claimId": "c-3da65333",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "opposite",
+   "verdict": "irrelevant",
+   "why": "讲 superagent 插件打 tag 上传 github，与吃鸡玩法无关",
+   "signalText": "我有个想法，你写个方案，然后在方案方向上向我拷问，一次一句。\n想法如下：做一个各种模型一起参与的吃鸡，吃鸡方法采用传统吃鸡，缩圈，混战，留到最后的吃鸡成功。\n规则1：大家在一个巨型屎山代码项目中寻找api key。apikey也有等级品质，对应不用金额，散落在巨型屎山代码项目（地图）中，这个地图所有模型都可见，模型自己选择进入点。找到api key之后模型就能用，模型有自己的初始apikey。模型需要在地图中突进，搜刮新的apikey，也能攻击其他模型，抢夺别人的初始apikey，或者别人手里的key，如果模型的key被抢走，那模型没有key用，就直接死了（没有key用了直接跑不了模型）如果做不到抹除其他模型的key，可以直接优先用别人的key，把key用完就击败了。",
+   "claimText": "刷新好了，你应该先弄我们的会话级superagent插件，然后打好tag，用脚手架仓库里面的维护标准，上传github，这样直接在本项目的仓库进行测试就行了"
   },
   {
    "pairId": 68,
-   "bigramRaw": 2,
+   "itemId": "self:ep-1f814ed5",
+   "claimId": "c-41756591",
+   "bigramRaw": 3,
    "overlap": 0,
-   "status": "待标注"
+   "polarity": "opposite",
+   "verdict": "irrelevant",
+   "why": "讲 502 该换供应商不换账号，与吃鸡玩法设计无关，只是都有应该一词",
+   "signalText": "我有个想法，你写个方案，然后在方案方向上向我拷问，一次一句。\n想法如下：做一个各种模型一起参与的吃鸡，吃鸡方法采用传统吃鸡，缩圈，混战，留到最后的吃鸡成功。\n规则1：大家在一个巨型屎山代码项目中寻找api key。apikey也有等级品质，对应不用金额，散落在巨型屎山代码项目（地图）中，这个地图所有模型都可见，模型自己选择进入点。找到api key之后模型就能用，模型有自己的初始apikey。模型需要在地图中突进，搜刮新的apikey，也能攻击其他模型，抢夺别人的初始apikey，或者别人手里的key，如果模型的key被抢走，那模型没有key用，就直接死了（没有key用了直接跑不了模型）如果做不到抹除其他模型的key，可以直接优先用别人的key，把key用完就击败了。",
+   "claimText": "应该换供应商，而不是换账号，一个供应商的模型都是同一个，当然会再次拒答"
   },
   {
    "pairId": 69,
+   "itemId": "self:ep-1f814ed5",
+   "claimId": "c-fa96a073",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "opposite",
+   "verdict": "irrelevant",
+   "why": "讲把第三方 go 插件打包成独立 go.exe，与吃鸡玩法设计无关，机械判反向属词面误触发",
+   "signalText": "我有个想法，你写个方案，然后在方案方向上向我拷问，一次一句。\n想法如下：做一个各种模型一起参与的吃鸡，吃鸡方法采用传统吃鸡，缩圈，混战，留到最后的吃鸡成功。\n规则1：大家在一个巨型屎山代码项目中寻找api key。apikey也有等级品质，对应不用金额，散落在巨型屎山代码项目（地图）中，这个地图所有模型都可见，模型自己选择进入点。找到api key之后模型就能用，模型有自己的初始apikey。模型需要在地图中突进，搜刮新的apikey，也能攻击其他模型，抢夺别人的初始apikey，或者别人手里的key，如果模型的key被抢走，那模型没有key用，就直接死了（没有key用了直接跑不了模型）如果做不到抹除其他模型的key，可以直接优先用别人的key，把key用完就击败了。",
+   "claimText": "所以应该把第三方go插件打包成另一个独立的go.exe，由用户通过我们给出的一个自动生成打包器之类的工具做，这样就是每个用户都有自己的一个第三方插件的go.exe，这样是不是能解决问题？"
+  },
+  {
+   "pairId": 70,
+   "itemId": "self:ep-252091a4",
+   "claimId": "c-0c5eaee1",
+   "bigramRaw": 2,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "问是不是只能同时存在一个号，讲账号并发，不是上游扣费",
+   "signalText": "修一下，怎么回事，是不是灵犀上游开始扣费了？",
+   "claimText": "是不是只能同时存在一个号啊？"
+  },
+  {
+   "pairId": 71,
+   "itemId": "self:ep-252091a4",
+   "claimId": "c-2a1d9e2e",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "是分包与坏数据的自测记录，与灵犀上游是否开始扣费无关",
+   "signalText": "修一下，怎么回事，是不是灵犀上游开始扣费了？",
+   "claimText": "PASS [mock] mock:任意分包 + 多字节字符不被切坏 — 720 字，按 1/3/7/64/5/2048 字节切块后一致 FAIL [mock] mock:非 data 噪声忽略；坏 data JSON 明确 502，不伪装超时 — 坏 data 帧应 502，实际 undefined：{\"error\":{\"message\":\"灵犀上游返回了无法解析的 JSON 数据帧\",\"typ…"
+  },
+  {
+   "pairId": 72,
+   "itemId": "self:ep-252091a4",
+   "claimId": "c-c30e4101",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲百智云登录问题要伪装浏览器，另一个供应商另一类故障",
+   "signalText": "修一下，怎么回事，是不是灵犀上游开始扣费了？",
+   "claimText": "百智云404，你看下上游是怎么处理登录问题的，是不是要伪装成默认浏览器？"
+  },
+  {
+   "pairId": 73,
+   "itemId": "self:ep-252091a4",
+   "claimId": "c-eb9c413a",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲重新获取模型能不能更新旧路由，与上游扣费/报错不同",
+   "signalText": "修一下，怎么回事，是不是灵犀上游开始扣费了？",
+   "claimText": "旧路由的0我下次重新获取一下模型是不是就可以更新了？"
+  },
+  {
+   "pairId": 74,
+   "itemId": "self:ep-25d39e67",
+   "claimId": "c-31826f39",
+   "bigramRaw": 2,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲灵犀 tok/s 虚高的旧修复，与 magpie 网关整体失效不是同一故障",
+   "signalText": "修复一下magpie网关失效的问题",
+   "claimText": "我记得之前修过一次灵犀的tok/s虚高问题，那次修复被会退了吗？"
+  },
+  {
+   "pairId": 75,
+   "itemId": "self:ep-25d39e67",
+   "claimId": "c-580cb483",
+   "bigramRaw": 2,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲网关里 tok/s 显示不准，是另一个症状，与网关失效的根因无关",
+   "signalText": "修复一下magpie网关失效的问题",
+   "claimText": "所以依旧不能让magpie里面网关中的每次请求的tok/s显示接近正确？"
+  },
+  {
+   "pairId": 76,
+   "itemId": "self:ep-2ddf0a19",
+   "claimId": "c-1e023109",
    "bigramRaw": 6,
-   "overlap": 10,
-   "status": "待标注"
+   "overlap": 0,
+   "polarity": "same",
+   "verdict": "irrelevant",
+   "why": "讲 TUI 原生光标与关掉默认配置，只重合关掉了多少这类字面，与邮箱推送无关",
+   "signalText": "为什么这个报错要一直推送到我的邮箱，能不能关掉？还有我自己作为is和pr的发起方的时候能不能不要发送啊？被我自己的信息刷爆邮箱了",
+   "claimText": "这个，说是有原生光标，但是我只能看到我自己的鼠标，你到底关掉了多少TUI官方默认打开的配置？"
+  },
+  {
+   "pairId": 77,
+   "itemId": "self:ep-2ddf0a19",
+   "claimId": "c-9c713214",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "same",
+   "verdict": "irrelevant",
+   "why": "讲把 pwsh 关掉跑一小时看数据，与邮箱推送刷爆无关",
+   "signalText": "为什么这个报错要一直推送到我的邮箱，能不能关掉？还有我自己作为is和pr的发起方的时候能不能不要发送啊？被我自己的信息刷爆邮箱了",
+   "claimText": "行，我把pwsh直接关掉跑一个小时看看数据，到底能不能脱离pwsh"
+  },
+  {
+   "pairId": 78,
+   "itemId": "self:ep-2ddf0a19",
+   "claimId": "c-e1cde845",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "same",
+   "verdict": "irrelevant",
+   "why": "讲拿 magicrew 让子代理查项目是否停更，与邮箱推送无关",
+   "signalText": "为什么这个报错要一直推送到我的邮箱，能不能关掉？还有我自己作为is和pr的发起方的时候能不能不要发送啊？被我自己的信息刷爆邮箱了",
+   "claimText": "你测试一下，就拿magicrew让子代理去找找，结果就是该项目已经停止更新，你测试一下能不能指导这个结果"
+  },
+  {
+   "pairId": 79,
+   "itemId": "self:ep-2ddf0a19",
+   "claimId": "c-eb326a25",
+   "bigramRaw": 5,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲把路径迁到 D 盘免得迁移丢失，与邮箱推送无关，只重合能不能把",
+   "signalText": "为什么这个报错要一直推送到我的邮箱，能不能关掉？还有我自己作为is和pr的发起方的时候能不能不要发送啊？被我自己的信息刷爆邮箱了",
+   "claimText": "这个如果我到时候迁移整个D:\\DeepSeek Harness\\的时候就会丢失，能不能把路径改到D:\\DeepSeek Harness\\里面去？"
+  },
+  {
+   "pairId": 80,
+   "itemId": "self:ep-2ddf0a19",
+   "claimId": "c-fcdbf78c",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "same",
+   "verdict": "irrelevant",
+   "why": "讲关掉分支保护与逐条删分支，与邮箱推送无关，只因关掉一词被机械判同向",
+   "signalText": "为什么这个报错要一直推送到我的邮箱，能不能关掉？还有我自己作为is和pr的发起方的时候能不能不要发送啊？被我自己的信息刷爆邮箱了",
+   "claimText": "1.我关掉了分支保护，你看下能不能直接删，我现在能一条条删."
+  },
+  {
+   "pairId": 81,
+   "itemId": "self:ep-601f0764",
+   "claimId": "c-36d8c8df",
+   "bigramRaw": 2,
+   "overlap": 0,
+   "polarity": "same",
+   "verdict": "irrelevant",
+   "why": "讲邮箱推送刷爆，与 502 路由到别的供应商无关",
+   "signalText": "为什么又是老毛病啊？502应该路由到别路由组内的其他供应商啊",
+   "claimText": "为什么这个报错要一直推送到我的邮箱，能不能关掉？"
+  },
+  {
+   "pairId": 82,
+   "itemId": "self:ep-601f0764",
+   "claimId": "c-4cad8455",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "opposite",
+   "verdict": "irrelevant",
+   "why": "讲团队模式与 kimi/deepseek 分工，与 502 路由组无关",
+   "signalText": "为什么又是老毛病啊？502应该路由到别路由组内的其他供应商啊",
+   "claimText": "你也用了这么久团队了，也接触了很多次kimi，你应该能了解我为什么总想用团队了，kimi k3.1确实很强，但是太慢了，而执行层用deepseek很快也很稳，只需要在方案和任务书这种时候让kimi对deepseek进行补强就行了，我该怎么做？"
+  },
+  {
+   "pairId": 83,
+   "itemId": "self:ep-62bcb7d2",
+   "claimId": "c-3da65333",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲 superagent 插件打 tag 上传 github，与本任务读 AGENTS 完善文件不同",
+   "signalText": "你读本地的AGENTS和相关文件，然后完善这些文件，这些都是deepseekv4.1f自己写的，自己在执行，你实时写入的AGENTS能及时载入他们的会话引导方向。要求就是完成我当时提出的目标",
+   "claimText": "刷新好了，你应该先弄我们的会话级superagent插件，然后打好tag，用脚手架仓库里面的维护标准，上传github，这样直接在本项目的仓库进行测试就行了"
+  },
+  {
+   "pairId": 84,
+   "itemId": "self:ep-62bcb7d2",
+   "claimId": "c-b2e0cc53",
+   "bigramRaw": 5,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲门禁插件文件该怎么设计，不是给本仓 AGENTS 补一条规则",
+   "signalText": "你读本地的AGENTS和相关文件，然后完善这些文件，这些都是deepseekv4.1f自己写的，自己在执行，你实时写入的AGENTS能及时载入他们的会话引导方向。要求就是完成我当时提出的目标",
+   "claimText": "门禁功能缺失，目前是依赖user自己写好AGENTS，而实际上很多仓库的门禁需求其实差不多，反而配置一个门禁文件在插件文件夹内，或者home内，作为插件读取的文件，可以由user主动或要求agent去写。"
+  },
+  {
+   "pairId": 85,
+   "itemId": "self:ep-62bcb7d2",
+   "claimId": "c-b3a27873",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲会话名显示成字符串，与读文件完善 AGENTS 无关",
+   "signalText": "你读本地的AGENTS和相关文件，然后完善这些文件，这些都是deepseekv4.1f自己写的，自己在执行，你实时写入的AGENTS能及时载入他们的会话引导方向。要求就是完成我当时提出的目标",
+   "claimText": "然后这个地方显示的会话是字符串，能不能换成我看到的？"
+  },
+  {
+   "pairId": 86,
+   "itemId": "self:ep-75e7347e",
+   "claimId": "c-a9028362",
+   "bigramRaw": 2,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲白色官方主题挑色，与安装 qqbot 插件失败无关，只有帮我/看一下等泛词重合",
+   "signalText": "安装失败\n@tencent-connect/dsh-qqbot@latest\n帮我装一下 tencent-connect/dsh-qqbot dsh-qqbot",
+   "claimText": "我想看这个白色的官方主题，帮我挑一下看看，估计是我切换了终端启动器自己的默认颜色卡导致的"
+  },
+  {
+   "pairId": 87,
+   "itemId": "self:ep-7bba753b",
+   "claimId": "c-07f0f51a",
+   "bigramRaw": 5,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲不要吝啬 token 与团队成本，与本局禁图片进上下文、逆向 monkey code 无关",
+   "signalText": "本工作区上一个会话因为i上下文中有大量图片，反复透传导致智力低下，你不允许有任何图片进入上下文，然后你逆向本地e/monkey code软件，完成AGENTS中的目标，magpie插件完全按照magpie脚手架仓库的规则来做",
+   "claimText": "我说不要吝啬token是因为大肥鱼抠门惯了，会因为抠门导致模型评分降低，不爱用工具，喜欢手写，降低效率，你写的规则是让他考虑全局token消耗，但是没有考虑到效率问题，这会导致大肥鱼不喜欢开团队模式，因为这显然会增加成本，而我需要的就是付出相应的代价但是提高工作效率，减少时间成本"
+  },
+  {
+   "pairId": 88,
+   "itemId": "self:ep-7bba753b",
+   "claimId": "c-3370be80",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲把 tok/s 写死 200，与插件脚手架规则无关，只是重合 magpie/插件",
+   "signalText": "本工作区上一个会话因为i上下文中有大量图片，反复透传导致智力低下，你不允许有任何图片进入上下文，然后你逆向本地e/monkey code软件，完成AGENTS中的目标，magpie插件完全按照magpie脚手架仓库的规则来做",
+   "claimText": "太麻烦了，直接在插件把最大tok/s写死200行不行，既然你不能在不改magpie的前提下本地计算"
+  },
+  {
+   "pairId": 89,
+   "itemId": "self:ep-7bba753b",
+   "claimId": "c-3c117e7d",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲归档语义是会话结束而非成败，与本局任务无关",
+   "signalText": "本工作区上一个会话因为i上下文中有大量图片，反复透传导致智力低下，你不允许有任何图片进入上下文，然后你逆向本地e/monkey code软件，完成AGENTS中的目标，magpie插件完全按照magpie脚手架仓库的规则来做",
+   "claimText": "归档就说明user觉得会话已经结束，注意是结束，不是成功和失败，这意味着你不需要去衡量成功和失败，因为很多时候user只是试探性的问一个问题。"
+  },
+  {
+   "pairId": 90,
+   "itemId": "self:ep-7bba753b",
+   "claimId": "c-e18a80ec",
+   "bigramRaw": 5,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲记忆召回相关度与压缩职责边界，与逆向 monkey code 软件不是同一任务",
+   "signalText": "本工作区上一个会话因为i上下文中有大量图片，反复透传导致智力低下，你不允许有任何图片进入上下文，然后你逆向本地e/monkey code软件，完成AGENTS中的目标，magpie插件完全按照magpie脚手架仓库的规则来做",
+   "claimText": "应该要保证召回相关度，然后你的下沉是GOkifu上下文压缩插件，不踩坑是上下文压缩该保证的事情。"
+  },
+  {
+   "pairId": 91,
+   "itemId": "self:ep-8a73e06b",
+   "claimId": "c-058969df",
+   "bigramRaw": 4,
+   "overlap": 3,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "是 k30-panel 仓库的分支名报错，与 compact 归档验证是不同的仓库与任务",
+   "signalText": "D:\\主工作区\\repos\\dsh-GOkifu-compact\\evidence\\归档收尾-验证单-2026-11-02.md\n继续任务，那个会话我已经归档，你去验证",
+   "claimText": "fatal: '\\主工作区\\repos\\dsh-GOkifu-k30-panel:task/k30-panel-guard' is not a valid branch name hint: See 'git help check-ref-format' hint: Disable this message with \"git config set advice.refSyntax false\""
+  },
+  {
+   "pairId": 92,
+   "itemId": "self:ep-8a73e06b",
+   "claimId": "c-0ff294ae",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲会话归档后是否该做收尾压缩（插件功能需求），不是验证这张归档收尾单",
+   "signalText": "D:\\主工作区\\repos\\dsh-GOkifu-compact\\evidence\\归档收尾-验证单-2026-11-02.md\n继续任务，那个会话我已经归档，你去验证",
+   "claimText": "会话完成后user主动归档，是不是应该做一个收尾压缩？"
+  },
+  {
+   "pairId": 93,
+   "itemId": "self:ep-8a73e06b",
+   "claimId": "c-5b5483a2",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲 superagent 的显示样式改造，与归档收尾验证无关",
+   "signalText": "D:\\主工作区\\repos\\dsh-GOkifu-compact\\evidence\\归档收尾-验证单-2026-11-02.md\n继续任务，那个会话我已经归档，你去验证",
+   "claimText": "我需要的是一个标识，就像定式任务会在工作区里面的标题左边有一个时钟标识一样，正在运行的会话有一个旋转圆环一样，能不能让superagent的显示改一个样式？"
+  },
+  {
+   "pairId": 94,
+   "itemId": "self:ep-a1400ad0",
+   "claimId": "c-03858bea",
+   "bigramRaw": 2,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "是压缩插件的发行说明，与找 apk 破解版无关，只是版本/发布等泛词重合",
+   "signalText": "海绵宝宝大闹蟹皇堡的手机apk破解版帮我找一个，扫一下有没有病毒和后门就i行了",
+   "claimText": "# 发布说明 · 1.17.6（2026-11-02） > 相对 **1.17.5**。这版没有改压缩算法本身，改的是**「该发生的事有没有真的发生」**——"
+  },
+  {
+   "pairId": 95,
+   "itemId": "self:ep-a1400ad0",
+   "claimId": "c-1341e654",
+   "bigramRaw": 2,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲手机版 DSH 用 GO 写，与找手机 apk 破解版是两件事，只重合手机版",
+   "signalText": "海绵宝宝大闹蟹皇堡的手机apk破解版帮我找一个，扫一下有没有病毒和后门就i行了",
+   "claimText": "我记得好像有个手机版本的DSH是用GO写的，你看看参照一下"
+  },
+  {
+   "pairId": 96,
+   "itemId": "self:ep-a9f16ff0",
+   "claimId": "c-33b28220",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲抄官方功能做插件这个泛泛想法，不指向 workbuddy 供应商提取",
+   "signalText": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的workbuddy的国服和国际服供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商，要把magpie社区有的功能都兼顾，完全超越https://github.com/magpie-community/plugins s://github.com/betsy20/magpie-jet-hub magpie-jet-hub s://github.com/magpie-community/plugins github.com/betsy20 github.com/magpie-community magpie-community",
+   "claimText": "记录一下，下次抄一些官方没有的功能做成插件。"
+  },
+  {
+   "pairId": 97,
+   "itemId": "self:ep-a9f16ff0",
+   "claimId": "c-d38f856f",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲在隐私组织 fork 仓库免得泄露，与把供应商做成代理插件不同",
+   "signalText": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的workbuddy的国服和国际服供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商，要把magpie社区有的功能都兼顾，完全超越https://github.com/magpie-community/plugins s://github.com/betsy20/magpie-jet-hub magpie-jet-hub s://github.com/magpie-community/plugins github.com/betsy20 github.com/magpie-community magpie-community",
+   "claimText": "那就别管了，在组织里面自己fork，然后路径走自己的fork版本，注意是在隐私仓库里面fork，放在那个隐私组织里面，不要泄露出去"
+  },
+  {
+   "pairId": 98,
+   "itemId": "self:ep-bc4ab3cb",
+   "claimId": "c-36d8c8df",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲邮箱被推送刷爆，与查 token 额度无关，只是这个报错等泛词重合",
+   "signalText": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到 s://opc.fiime.cn/zh-cn/download opc.fiime.cn/zh-cn",
+   "claimText": "为什么这个报错要一直推送到我的邮箱，能不能关掉？"
+  },
+  {
+   "pairId": 99,
+   "itemId": "self:ep-bc4ab3cb",
+   "claimId": "c-5a8f04be",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲百智云的注册顺序与凭证登录，不同站点不同动作，只有凭证/登录字面重合",
+   "signalText": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到 s://opc.fiime.cn/zh-cn/download opc.fiime.cn/zh-cn",
+   "claimText": "还是有问题，注册顺序反了，应该是走猴子这里快速注册，然后用猴子的凭证登录百智云，因为百智云相当于中转站，不支持直接注册"
+  },
+  {
+   "pairId": 100,
+   "itemId": "self:ep-bc4ab3cb",
+   "claimId": "c-82093a61",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲 steam++ 代理下 token 能否用、去 mykey 换凭证，与查 opc 额度是两回事",
+   "signalText": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到 s://opc.fiime.cn/zh-cn/download opc.fiime.cn/zh-cn",
+   "claimText": "我开了steam++全局代理，应该能直接连github，然后你再看看token能不能用，不能用就去mykey里面复制替换掉旧的"
+  },
+  {
+   "pairId": 101,
+   "itemId": "self:ep-bc4ab3cb",
+   "claimId": "c-b4593821",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲关掉 8899 与 magicrew 凭证刷新登录，不是 opc 站点的额度查询这个动作",
+   "signalText": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到 s://opc.fiime.cn/zh-cn/download opc.fiime.cn/zh-cn",
+   "claimText": "我把那个8899的关闭了，然后你把插件同步到最新吧，magicrew的账号凭证应该是有用的，直接刷新登录"
+  },
+  {
+   "pairId": 102,
+   "itemId": "self:ep-bde12afa",
+   "claimId": "c-8c38e71e",
+   "bigramRaw": 4,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲继续优化 GOkifu 插件，只是提到更新过 dsh 版本，与查 rc.1 更新内容无关",
+   "signalText": "看下DSH的0.2.2-rc.1版本更新了什么，有没有必要更新",
+   "claimText": "开自动任务，找到本机之前关于GOkifu的所有记录和会话记录，然后继续优化插件，我更新了dsh版本，所以会话丢失了，你只能自己找之前的了，都在D盘"
+  },
+  {
+   "pairId": 103,
+   "itemId": "self:ep-bf742774",
+   "claimId": "c-988509ed",
+   "bigramRaw": 3,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲某个模型能不能反代，与 DeepSeek Harness Creator 是什么无关",
+   "signalText": "DeepSeek Harness Creator去看下这个是什么？干嘛的？",
+   "claimText": "你看下这个模型能不能反代"
+  },
+  {
+   "pairId": 104,
+   "itemId": "self:ep-bf742774",
+   "claimId": "c-bbdb207d",
+   "bigramRaw": 3,
+   "overlap": 2,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲绝对路径迁移会报错，与了解 Creator 这个产品无关",
+   "signalText": "DeepSeek Harness Creator去看下这个是什么？干嘛的？",
+   "claimText": "这就是问题了，走的绝对路径，如果我迁移到新的pc，目录在e盘，那就会直接报错，而我直接把工作区准备放在D:\\DeepSeek Harness下面，和home同级，为什么不能走相对路径？"
+  },
+  {
+   "pairId": 105,
+   "itemId": "self:ep-c0a5847a",
+   "claimId": "c-024b2bda",
+   "bigramRaw": 5,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "只靠 magpie/凭证 词面重合；讲的是 magpie 账号隔离，与读 HANDOFF 写方案无关",
+   "signalText": "E:/Documents/dsh-go/HANDOFF.md\n读这个交接文件，然后写方案，一个问题一个问题的拷问我：只在方向上提问。\n初始目标：用GO实现DSH，初衷保持DSH的官方初衷：一切皆插件。\n你可以先搜集本机相关内容，保存到工作区内，然后根据方案编写AGENTS e:/documents/dsh-go/handoff.md handoff.md documents/dsh-go dsh-go",
+   "claimText": "5:// ① **按账号隔离**：同一个站点可以登多个账号（magpie 里就是 `magicrew` / 13:// · 两槽都空时从 magpie 存的凭据接管一次 18:// ⚠ 全插件只有这个文件是 key 的来源。magpie 的 `auth.refresh` 和 loader 都走"
+  },
+  {
+   "pairId": 106,
+   "itemId": "self:ep-c0a5847a",
+   "claimId": "c-838c4933",
+   "bigramRaw": 5,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "是 dsh-GOkifu-compact 交接文件的版本校验报错，与 DSH-GO 的 HANDOFF 不是同一份产物",
+   "signalText": "E:/Documents/dsh-go/HANDOFF.md\n读这个交接文件，然后写方案，一个问题一个问题的拷问我：只在方向上提问。\n初始目标：用GO实现DSH，初衷保持DSH的官方初衷：一切皆插件。\n你可以先搜集本机相关内容，保存到工作区内，然后根据方案编写AGENTS e:/documents/dsh-go/handoff.md handoff.md documents/dsh-go dsh-go",
+   "claimText": "Error: includes: 当前状态块必须写当前版本 1.18.2 needle: **1.18.2** in: # dsh-GOkifu-compact · 交接文件"
+  },
+  {
+   "pairId": 107,
+   "itemId": "self:ep-d70b7c2f",
+   "claimId": "c-2830f9be",
+   "bigramRaw": 5,
+   "overlap": 0,
+   "polarity": "unclear",
+   "verdict": "irrelevant",
+   "why": "讲挑 team 插件要能指定 agent 预设，与本局插件重启提示不同",
+   "signalText": "好了，刚刚是因为热切换导致所有工具全部丢失，现在只有bash能用了，应该在插件中增加提示，要求更改后重启才能生效，而不是更改后直接把工具剥离丢失 bash",
+   "claimText": "找一个好用的team插件，要求能够指定成员的agent预设，模型，而不是通过提示词模拟，成员是真正的agent预设模式，有自己的系统提示词和tools，skill"
   }
- ],
- "method": "从这些 bigramRaw≥2 的候选里，**人工判\"不相关\"**的，就是难负例 —— 它们骗过了判据。"
+ ]
 }

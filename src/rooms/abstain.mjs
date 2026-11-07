@@ -94,6 +94,9 @@ export function hasRelevantClaim(card, signalText) {
     // `"安装失败"`（中文）与 `"Error: tool call aborted"`（英文）讲的是同一件事，
     // 但**没有一个共享的词** —— 不映射就会**误杀**（实测 ep-75e7347e）。
     if (isCrossLingualFailureMatch(signalText, text)) return true;
+    // T5：**跨语言的成功相关性** —— 中文"跑通了" + 英文 `PASS` / `[exit code: 0]` ⇒ **相关**。
+    // 与上面失败那条同构；不加这一条，"成功/完成"类的中英文配对会被判成不相关（误杀）。
+    if (isCrossLingualSuccessMatch(signalText, text)) return true;
     if (se.size) {
       for (const e of abstainEntities(text)) if (se.has(e)) return true;
     }
@@ -246,6 +249,42 @@ export function hasEnglishFailureSignal(text) {
 /** **跨语言的失败相关性**：信号是中文"失败"，claim 是英文"失败" ⇒ **相关**（不需要词重合）。 */
 export function isCrossLingualFailureMatch(signalText, claimText) {
   return hasChineseFailureSignal(signalText) && hasEnglishFailureSignal(claimText);
+}
+
+// ── T5：跨语言的"成功/完成"信号映射（中文"跑通了" ↔ 英文 `PASS`）──
+// 与失败映射**同构**：同一类信号（"这事成了"）不需要词重合。
+// 为什么单独一组词、且**比失败表更保守**：
+//   - `通过` 单独**不进表** —— 它在中文里兼作介词（"通过代理访问"），单用会把无关内容判成相关；
+//   - `完成` 也偏宽（"完成任务"≠成功），只收**完成语义明确**的词。
+// 这两个词是**故意排除**的，不是漏了（见 `test/abstain.test.mjs` 的反例）。
+
+/** 中文的"成功/完成"信号。 */
+const SUCCESS_ZH = ['成功', '跑通', '装好', '搞定', '修好', '已完成', '全部通过', '测试通过', '通过了', '没问题了', '能用了'];
+
+/** 英文的"成功/完成"信号（`PASS` / `success` / 全绿 / `[exit code: 0]`）。 */
+const SUCCESS_EN = /\b(pass|passed|passes|passing|success|successful|succeed|succeeded|all green)\b|\[exit code:\s*0\]/i;
+
+/** 信号里是否含**中文"成功"**信号。 */
+export function hasChineseSuccessSignal(text) {
+  const s = String(text ?? '');
+  return SUCCESS_ZH.some((w) => s.includes(w));
+}
+
+/** 文本里是否含**英文"成功"**信号（`PASS` / `success` / `[exit code: 0]`）。 */
+export function hasEnglishSuccessSignal(text) {
+  return SUCCESS_EN.test(String(text ?? ''));
+}
+
+/**
+ * **跨语言的成功相关性**：信号是中文"成功"，claim 是英文"成功" ⇒ **相关**（不需要词重合）。
+ *
+ * 与 `isCrossLingualFailureMatch` **同一形态**：同样只认「中文信号 + 英文 claim」这一个方向
+ * （信号来自用户原话，claim 来自英文工具输出；反方向没有实际来源）。
+ * **不误判**：英文一侧必须先**有**成功信号 —— 无关英文内容不会命中
+ * （`isCrossLingualSuccessMatch('成功了', '今天天气不错')` === false）。
+ */
+export function isCrossLingualSuccessMatch(signalText, claimText) {
+  return hasChineseSuccessSignal(signalText) && hasEnglishSuccessSignal(claimText);
 }
 
 // ── 知识库 90：冷却（主人纠正："不被调用就冷却，等于没写"）──

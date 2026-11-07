@@ -121,6 +121,72 @@ test('T366d **跨语言失败映射**：中文"安装失败" + 英文"tool call 
   assert.equal(isCrossLingualFailureMatch('安装失败帮我看看', '今天天气不错，适合出去散步'), false, '英文里没有失败信号 ⇒ 不算相关');
 });
 
+test('T5 **跨语言成功映射**：中文"跑通了" + 英文 `PASS` / `[exit code: 0]` ⇒ 相关（不误杀）', async () => {
+  const { hasRelevantClaim, isCrossLingualSuccessMatch, hasChineseSuccessSignal, hasEnglishSuccessSignal } = await import('../src/rooms/abstain.mjs');
+
+  // ① 中文"成功" + 英文"成功" ⇒ 相关
+  assert.equal(isCrossLingualSuccessMatch('测试跑通了', 'all tests passed'), true, '中文"跑通" + 英文"passed" ⇒ 跨语言相关');
+  assert.equal(isCrossLingualSuccessMatch('装好了', '[exit code: 0]'), true, 'exit code 0 也是成功信号');
+  assert.equal(hasChineseSuccessSignal('这次终于成功了'), true);
+  assert.equal(hasEnglishSuccessSignal('Build success'), true);
+
+  // ② **不误判**：中文"成功" + 英文**无关内容** ⇒ 不算相关
+  assert.equal(isCrossLingualSuccessMatch('成功了', '今天天气不错，适合出去散步'), false, '英文里没有成功信号 ⇒ 不算相关');
+  assert.equal(isCrossLingualSuccessMatch('成功了', 'Error: tool call aborted'), false, '英文是**失败**信号 ⇒ 不是成功相关');
+
+  // ③ **故意排除的词**（这条是 tombstone 的反面）：`通过` 兼作介词，单用不算成功信号
+  assert.equal(hasChineseSuccessSignal('通过代理访问这个地址'), false, '"通过"单独不算成功信号（兼作介词，会误判）');
+  assert.equal(hasChineseSuccessSignal('测试通过'), true, '但"测试通过"这种完成语义明确的算');
+
+  // ④ 端到端：接进 hasRelevantClaim 之后不再误杀
+  const card = { claims: [{ text: 'all tests passed (green)' }] };
+  assert.equal(hasRelevantClaim(card, '测试跑通了，帮我记一下'), true, '成功类跨语言配对不能被判成不相关');
+});
+
+test('T4 **可解释的拒绝**：abstain 的 reason 按判据分类，不是单一字符串', async () => {
+  const { classifyAbstainReason } = await import('../src/plugin.mjs');
+
+  // ① 跨作用域：walk 命中过，但全被挡掉
+  assert.equal(
+    classifyAbstainReason({ card: { claims: [{ state: 'observed', decay: 1 }] }, walkResult: { crossScope: 3 } }),
+    'cross-scope',
+    '跨域命中过 ⇒ 该说"去别的项目查"',
+  );
+
+  // ② 陈旧：卡上每一行都衰减到 0.5 以下
+  assert.equal(
+    classifyAbstainReason({ card: { claims: [{ state: 'semantic', decay: 0.2 }, { state: 'semantic', decay: 0.4 }] }, walkResult: {} }),
+    'stale',
+    '全部超过半衰期 ⇒ 陈旧',
+  );
+
+  // ③ 低置信：卡上每一行都是单局 [observed]
+  assert.equal(
+    classifyAbstainReason({ card: { claims: [{ state: 'observed', decay: 0.9 }, { state: 'observed', decay: 1 }] }, walkResult: {} }),
+    'low-confidence',
+    '只有 1 局支撑 ⇒ 拿不准',
+  );
+
+  // ④ 兜底
+  assert.equal(
+    classifyAbstainReason({ card: { claims: [{ state: 'semantic', decay: 1 }] }, walkResult: {} }),
+    'no-relevant-claim',
+    '有分量但不相关的行 ⇒ 兜底',
+  );
+
+  // ⑤ **向后兼容**：没有卡/没有 walkResult 也不炸，且仍给得出一个合法 reason
+  const legal = ['cross-scope', 'stale', 'low-confidence', 'no-relevant-claim'];
+  assert.ok(legal.includes(classifyAbstainReason({})), '空输入也必须返回合法分类');
+  assert.ok(legal.includes(classifyAbstainReason({ card: null, walkResult: null })));
+
+  // ⑥ **不改默认行为**：只有一行是 observed（其余不是）⇒ 不算 low-confidence（every 不是 some）
+  assert.equal(
+    classifyAbstainReason({ card: { claims: [{ state: 'observed', decay: 1 }, { state: 'semantic', decay: 1 }] }, walkResult: {} }),
+    'no-relevant-claim',
+    '混合状态不算低置信（判据是 every 不是 some）',
+  );
+});
+
 test('知识库 90 **冷却**：距最后注入 >30 天 ⇒ 冷却；最近被调用 ⇒ 不冷却', async () => {
   const { isCold } = await import('../src/rooms/abstain.mjs');
   const now = Date.now();
