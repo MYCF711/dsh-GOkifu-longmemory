@@ -105,6 +105,34 @@ export const MARKERS_LINE = '# markers: [semantic]=≥3 局且无反例 · [cand
 export const POINTER_SUPPORT_LIMIT = 1;
 
 /**
+ * 三级交付的**生产默认值**（单一来源）。
+ *
+ * `buildMemoryCard` / `collectEntries` 的默认参数、`src/plugin.mjs` 的 `DEFAULT_CONFIG`
+ * 全读这一个常量 —— 免得出现「函数默认关、插件默认开」两套默认值各写一份
+ * （D5 的 `!== false` 陷阱就是同一个坑：**未设置**被当成**开启**）。
+ *
+ * 默认值本身是**行为开关**：`true` = 生产链路给指针行（与 `evidence/T3-pointer-tier.md` 的
+ * 前后对照口径一致）；`false` = 与 0.8.46 逐字节一致（只作 A/B 对照）。
+ */
+export const POINTER_TIER_DEFAULT = false;
+
+/**
+ * 指针行正文的**固定尾段**（单一来源：`pointerBodyOf` 渲染它，`POINTER_BODY_RE` 用它判定）。
+ * 「原文未给」是这张卡的事实（该坐标有原文、卡上没有给），不是对模型的安排。
+ */
+const POINTER_BODY_TAIL = '原文未给';
+
+/**
+ * 指针行正文的**唯一形态**：`<N> 局支撑 · 原文未给`。
+ *
+ * 消费方是 A6 文字层的机械豁免（`scripts/audit-card-samples.mjs` 的 `isPointerBody`）：
+ * 指针行**故意**没有逐字正文（正文位置只有计数），所以它既不进 A6 分子、也不进分母
+ * —— 与 `unreadable` / `unresolved` 同类（「没得核」，不是「核不过」）。
+ * 判据是归一化后**逐字等于**这个形态，不是「包含」：少一个字符都不豁免。
+ */
+export const POINTER_BODY_RE = new RegExp(`^\\d+ 局支撑 · ${POINTER_BODY_TAIL}$`);
+
+/**
  * 这一条 claim 是否「没把握 ⇒ 只给指针」。
  * 纯函数、只看计数与状态标记；不看模型评分、不看信号、不看时间。
  * @param {object} claim
@@ -126,7 +154,8 @@ export function isPointerCandidate(claim) {
  */
 export function pointerBodyOf(claim) {
   const n = Array.isArray(claim?.support) ? claim.support.length : 0;
-  return `${n > 0 ? n : 1} 局支撑 · 原文未给`;
+  // 尾段与 `POINTER_BODY_RE` 共用同一个常量（单一来源；测试钉住两者一致）。
+  return `${n > 0 ? n : 1} 局支撑 · ${POINTER_BODY_TAIL}`;
 }
 
 /**
@@ -757,11 +786,10 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
   // 而当前宿主只有 CLI 进程、没有真实流量，注入记录不可靠 ⇒ 默认关，不误杀。
   // 开启后，距最后注入超过 `coldAfterDays` 天的 claim **不再出现在卡片上**（**但不删**，可逆）。
   coldAfterDays = null,
-  // T3：**三级交付**的第二级开关（默认关）。
+  // T3：**三级交付**的第二级开关（默认值 = `POINTER_TIER_DEFAULT`，单一来源）。
   // `true` ⇒ `isPointerCandidate` 成立的条目只给指针（`episode + seq + occurredAt`），正文不渲染。
-  // 默认关的理由：打开它会改变注入文本（少给正文），必须有前后对照与线上重开条件
-  // （`evidence/T3-pointer-tier.md`）；关掉时卡片与 0.8.46 逐字节一致。
-  pointerTier = false,
+  // 关掉时卡片与 0.8.46 逐字节一致 —— 这是"旧消费方不会炸"的唯一保证。
+  pointerTier = POINTER_TIER_DEFAULT,
 }) {
   const entries = [];
   let droppedNoProvenance = 0;
@@ -1076,8 +1104,9 @@ const CLIP_STEPS = Object.freeze([TEXT_CLIP, TIGHT_CLIP]);
  * @param {number}   [p.budgetTokens] token 预算（默认 500；口径 = indexLine + section）
  * @param {string}   [p.indexPath]   覆盖 index 路径
  * @param {number}   [p.episodeCount] 覆盖「N 局」
- * @param {boolean}  [p.pointerTier] T3：三级交付的第二级开关（默认 false = 与 0.8.46 逐字节一致）。
- *   `true` ⇒ `isPointerCandidate` 成立的条目只给指针（`episode + seq + occurredAt`），正文不渲染。
+ * @param {boolean}  [p.pointerTier] T3：三级交付的第二级开关（默认 = `POINTER_TIER_DEFAULT`）。
+ *   `true` ⇒ `isPointerCandidate` 成立的条目只给指针（`episode + seq + occurredAt`），正文不渲染；
+ *   `false` ⇒ 与 0.8.46 逐字节一致（A/B 对照与紧急回退）。
  * @returns {{indexLine:string, section:string|null, claims:Array, omissions:string|null,
  *            tokens:number, shadow:true, omittedCount:number, hitCount:number,
  *            indexTokens:number, limit:number, budgetTokens:number, cardVersion:number,
@@ -1107,7 +1136,7 @@ export function buildMemoryCard({
   f3OnCard = true,
   // T3：**三级交付**的第二级开关（默认关）。`true` ⇒ 没把握的条目只给指针（正文不渲染）。
   // 关掉时输出与 0.8.46 逐字节一致 —— 这是"旧消费方不会炸"的唯一保证。
-  pointerTier = false,
+  pointerTier = POINTER_TIER_DEFAULT,
 } = {}) {
   const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
   const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
@@ -1677,6 +1706,8 @@ export default {
   INDEX_LINE_RE,
   MARKERS_LINE,
   POINTER_SUPPORT_LIMIT,
+  POINTER_TIER_DEFAULT,
+  POINTER_BODY_RE,
   isPointerCandidate,
   pointerBodyOf,
   tierOf,

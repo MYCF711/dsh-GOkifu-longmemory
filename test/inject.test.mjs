@@ -23,6 +23,7 @@ import {
   ENTRY_LIMIT,
   IMPERATIVE_PATTERNS,
   INDEX_LINE_RE,
+  POINTER_BODY_RE,
   POINTER_SUPPORT_LIMIT,
   PROVENANCE_LINE_RE,
   TIGHT_CLIP,
@@ -50,6 +51,8 @@ import {
 } from '../src/rooms/inject.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
 import { runGates } from '../src/rooms/gates.mjs';
+// T3 ⑩：A6 文字层（`scripts/audit-card-samples.mjs`）的指针豁免判据 —— 与注入同一条链，测试也同一份口径。
+import { auditRows } from '../scripts/audit-card-samples.mjs';
 // T3：三级交付不能把「相关性判定」一起打掉 —— 指针行仍带正文（结构化字段），abstain 照旧能判。
 import { hasRelevantClaim } from '../src/rooms/abstain.mjs';
 
@@ -1962,4 +1965,124 @@ test('T3 ⑨: pointerBodyOf 只写计数（不写断言、不写「下一步」�
   for (const body of [pointerBodyOf({ support: [{}] }), pointerBodyOf({ support: [{}, {}] })]) {
     assert.equal(auditImperatives(body).length, 0, `指针正文不许含指令式片段：${body}`);
   }
+  // T3 ⑩ 的判据与产出必须**同源**（`POINTER_BODY_RE` 与 `pointerBodyOf` 共用尾段常量）：
+  for (const n of [0, 1, 2, 7]) {
+    const body = pointerBodyOf({ support: Array.from({ length: n }, () => ({})) });
+    assert.match(body, POINTER_BODY_RE, `产出必须满足判据：${body}`);
+  }
+  // 判据是「逐字等于」不是「包含」：少一个字符 / 多一段都不豁免
+  assert.doesNotMatch('1 局支撑', POINTER_BODY_RE);
+  assert.doesNotMatch('1 局支撑 · 原文未给。', POINTER_BODY_RE);
+  assert.doesNotMatch('1 局支撑 · 原文未给（补充）', POINTER_BODY_RE);
+  assert.doesNotMatch('package.json 的 engines.node 是 >=23.8', POINTER_BODY_RE);
 });
+
+// ---------------------------------------------------------------------------
+// T3 ⑩ · A6 文字层的机械豁免（指针行「没得核」，不是「核不过」）
+//
+// 三级交付打开后，`observed` 且只有 1 局支撑的行**只给坐标**（正文位置写计数）。
+// 拿它回查事件原文必然记成 notFound（假红）⇒ 必须豁免；但豁免**不能是 `if (pointer) skip`**：
+//   ① 判据 = 卡片正文**逐字等于** `pointerBodyOf` 的唯一产出形态（改一个字就不豁免）；
+//   ② 必须**自证**：留样的 `pointerCount` / `tier` 来自产出 `section` 的同一张卡，对不上就红；
+//   ③ 坐标与日期照常核（豁免只针对正文层）。
+// ---------------------------------------------------------------------------
+
+/** 造一张「1 行指针 + 1 行全文」的真卡（渲染走 buildMemoryCard，不手搓 section）。 */
+function makeA6Fixture() {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-a6-'));
+  const store = createStore({ root, now: T(20) });
+  store.ensureDirs();
+  store.putMany('episodes', [episode('ep-aaaaaaa1', 21, 3), episode('ep-aaaaaaa2', 22, 1)]);
+  const POINTER_CLAIM_TEXT = '指针这一行故意没有正文（A6 不该拿它去核原文）';
+  const CONTENT_CLAIM_TEXT = '测试入口是 node test/run.mjs 而不是 npm test';
+  store.putMany('claims', [
+    // 没把握：observed + 1 局支撑 ⇒ 卡上只给指针
+    claim({ id: 'c-a6000001', kind: 'fact', text: POINTER_CLAIM_TEXT, day: 21, state: 'observed', support: [{ episode: 'ep-aaaaaaa1', seq: 41 }] }),
+    // 有把握：candidate ⇒ 给全文，A6 照常核
+    claim({ id: 'c-a6000002', kind: 'pattern', text: CONTENT_CLAIM_TEXT, day: 22, state: 'candidate', support: [{ episode: 'ep-aaaaaaa2', seq: 12 }] }),
+  ]);
+  const events = {
+    // 指针那条的**原文确实存在**（只是卡上没给）—— 所以"免掉"不等于"原文不存在"。
+    'ep-aaaaaaa1': [{ seq: 41, time: T(21), data: { text: POINTER_CLAIM_TEXT } }],
+    'ep-aaaaaaa2': [{ seq: 12, time: T(22), data: { text: CONTENT_CLAIM_TEXT } }],
+  };
+  return { root, store, events, POINTER_CLAIM_TEXT, CONTENT_CLAIM_TEXT };
+}
+
+function withA6Fixture(fn) {
+  const fx = makeA6Fixture();
+  return Promise.resolve(fn(fx)).finally(() => rmSync(fx.root, { recursive: true, force: true }));
+}
+
+const A6_HITS = () => [
+  hit({ episodeId: 'ep-aaaaaaa1', seq: 41, claimId: 'c-a6000001', why: ['a6'], day: 21 }),
+  hit({ episodeId: 'ep-aaaaaaa2', seq: 12, claimId: 'c-a6000002', why: ['a6'], day: 22 }),
+];
+
+test('T3 ⑩: 指针行不进 A6 分子分母；有正文的行照常核；留样自证一致 ⇒ 绿', () => withA6Fixture(async ({ store, events }) => {
+  const card = buildMemoryCard({ walkResult: walkOf(A6_HITS()), store, scope: SCOPE, now: T(24), pointerTier: true });
+  assert.equal(card.tier, 'content', '两行里一行有全文 ⇒ 卡片级 content');
+  assert.equal(card.pointerCount, 1);
+
+  const episodes = new Map(store.list('episodes').map((x) => [x.record.id, x.record]));
+  const claims = store.list('claims').map((x) => x.record);
+  const row = { at: T(24), scope: SCOPE, tokens: card.tokens, section: card.section, tier: card.tier, pointerCount: card.pointerCount };
+  const out = await auditRows({ rows: [row], episodes, loadEvents: async (id) => events[id] ?? [], claims });
+
+  assert.equal(out.refs, 2, '两行都解析出来了（指针不是省略）');
+  assert.equal(out.textPointer, 1, '指针行单列计数');
+  assert.equal(out.a6Denominator, 1, 'A6 分母 = 引用 2 − 指针 1（与 unreadable/unresolved 同口径）');
+  assert.equal(out.textOk, 1, '有正文的那一行照常核过');
+  assert.equal(out.textNotFound, 0, '指针行**不许**被记成 notFound（那才是假红）');
+  assert.equal(out.dateOk, 2, '日期层照常核（豁免只针对正文层）');
+  assert.equal(out.pointerMismatchCards, 0);
+  assert.equal(out.exitCode, 0, `A6 必须仍然是绿的：${JSON.stringify({...out, details: undefined})}`);
+}));
+
+test('T3 ⑩ tombstone: 正文改一个字就不豁免（判据是「逐字等于」，不是「包含」）', () => withA6Fixture(async ({ store, events }) => {
+  const card = buildMemoryCard({ walkResult: walkOf(A6_HITS()), store, scope: SCOPE, now: T(24), pointerTier: true });
+  const episodes = new Map(store.list('episodes').map((x) => [x.record.id, x.record]));
+  const claims = store.list('claims').map((x) => x.record);
+  const tampered = { at: T(24), scope: SCOPE, tokens: card.tokens, tier: card.tier, pointerCount: card.pointerCount,
+    section: String(card.section).replace('原文未给', '原文未给（改过）') };
+
+  const out = await auditRows({ rows: [tampered], episodes, loadEvents: async (id) => events[id] ?? [], claims });
+  assert.equal(out.textPointer, 0, '改过正文 ⇒ 不是指针形态 ⇒ 不豁免（判据不是「包含 原文未给」）');
+  // 不豁免 ⇒ 这一行**回到分母**（与 T3 ⑩ 的 1 对照）⇒ 证明豁免是逐字判据，不是整行跳过
+  assert.equal(out.a6Denominator, 2, '没被豁免的行必须进 A6 分母（否则就是"静默跳过"）');
+  assert.equal(out.textOk, 2, '两行都核过（正文在库里，所以是 ok 而不是 notFound）');
+  assert.equal(out.textNotFound, 0);
+  assert.equal(out.exitCode, 0);
+}));
+
+test('T3 ⑩ 自证: 声明数对不上 / tier 对不上 ⇒ 红；留样没有该字段 ⇒ 只记「未自证」（未知 ≠ 已失效）', () => withA6Fixture(async ({ store, events }) => {
+  const card = buildMemoryCard({ walkResult: walkOf(A6_HITS()), store, scope: SCOPE, now: T(24), pointerTier: true });
+  const episodes = new Map(store.list('episodes').map((x) => [x.record.id, x.record]));
+  const claims = store.list('claims').map((x) => x.record);
+  const loadEvents = async (id) => events[id] ?? [];
+  const base = { at: T(24), scope: SCOPE, tokens: card.tokens, section: card.section };
+
+  // ① 离线重抽路径（`scripts/a6-text-level.mjs`）自己造行、不带 pointerCount ⇒ 记「未自证」，不红
+  const legacy = await auditRows({ rows: [base], episodes, loadEvents, claims });
+  assert.equal(legacy.textPointer, 1, '正文判据仍然生效（该豁免的照常豁免）');
+  assert.equal(legacy.pointerUnverifiedCards, 1, '缺字段 ⇒ 单列「未自证」（不拿缺字段冒充判据通过）');
+  assert.equal(legacy.pointerMismatchCards, 0);
+  assert.equal(legacy.exitCode, 0, '未知 ≠ 已失效（与 unreadable 同一条纪律）');
+
+  // ② 声明的指针行数与解析结果不一致 ⇒ 红（自证失败）
+  const mismatch = await auditRows({ rows: [{ ...base, tier: card.tier, pointerCount: 2 }], episodes, loadEvents, claims });
+  assert.equal(mismatch.pointerMismatchCards, 1);
+  assert.equal(mismatch.exitCode, 1);
+
+  // ③ 卡片级 tier 与解析结果不一致（说 content 却每行都是指针）⇒ 红
+  const allPointerRow = {
+    ...base,
+    section: String(card.section).split('\n').filter((l) => !l.includes('测试入口')).join('\n'),
+    tier: 'content',
+    pointerCount: 1,
+  };
+  const badTier = await auditRows({ rows: [allPointerRow], episodes, loadEvents, claims });
+  assert.equal(badTier.tierMismatch, undefined, 'detail 是聚合用的（取汇总）');
+  assert.equal(badTier.pointerMismatchCards, 1, '说 content 却每行都是指针 ⇒ 自证失败');
+  assert.equal(badTier.exitCode, 1);
+}));
