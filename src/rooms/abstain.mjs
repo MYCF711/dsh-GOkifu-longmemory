@@ -247,3 +247,27 @@ export function hasEnglishFailureSignal(text) {
 export function isCrossLingualFailureMatch(signalText, claimText) {
   return hasChineseFailureSignal(signalText) && hasEnglishFailureSignal(claimText);
 }
+
+// ── 知识库 90：冷却（主人纠正："不被调用就冷却，等于没写"）──
+/**
+ * 一条记忆是否**该冷却**（长期未被调用 ⇒ 不再出现在上下文，**但不删**）。
+ *
+ * **判据**：距**最后一次被注入**（`counters.lastInjectedAt`，无则用 `recordedAt`）**超过 `coldAfterDays` 天**。
+ *
+ * ⚠ **不要按 `counters.injections === 0` 判** —— 那可能是"**被调用了但没被记录**"
+ * （当前宿主只有 CLI 进程、没有真实流量时，所有 claim 的 `injections` 都是 0，
+ * 按 `=== 0` 判会把它们**全杀掉**，那是误杀）。
+ *
+ * **"冷却"是"不再出现"，不是"不存在"**：库仍然完整，只是**不再占用上下文**；
+ * 将来被调用了，可以"热"回来（**可逆**）。
+ *
+ * @param {object} claim
+ * @param {number} now epoch ms
+ * @param {{coldAfterDays?:number}} [opts] 默认 **30 天**
+ */
+export function isCold(claim, now, { coldAfterDays = 30 } = {}) {
+  const last = Number(claim?.counters?.lastInjectedAt ?? claim?.recordedAt ?? claim?.occurredAt ?? 0);
+  if (!Number.isFinite(last) || last <= 0) return false; // 没有时间 ⇒ 判不了 ⇒ 不冷却（保守）
+  if (!Number.isFinite(now)) return false;
+  return now - last > coldAfterDays * 86400000;
+}

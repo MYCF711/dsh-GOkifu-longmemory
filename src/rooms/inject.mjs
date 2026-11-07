@@ -19,7 +19,7 @@ import { extractErrorKey } from './topic.mjs';
 import { loadSignatureIndex, lookupSignature } from './sigindex.mjs';
 // T347：F3 是 claim 文本的**纯函数** ⇒ 读时派生兜底，历史 claim（无该字段）也能上卡，且不动数据。
 import { deriveFalsifiableWhen } from './extract.mjs';
-import { markerWithPolarity, detectPolarity } from './abstain.mjs';
+import { markerWithPolarity, detectPolarity, isCold } from './abstain.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -666,11 +666,17 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
   costIndex = null,
   // T347：F3 上卡开关（默认开；关掉只用于 A/B 对照或紧急回退）
   f3OnCard = true,
+  // 知识库 90：**冷却**（主人纠正："不被调用就冷却，等于没写"）。
+  // **默认关**（`null` ⇒ 不过滤）：因为"冷却"依赖"注入记录"，
+  // 而当前宿主只有 CLI 进程、没有真实流量，注入记录不可靠 ⇒ 默认关，不误杀。
+  // 开启后，距最后注入超过 `coldAfterDays` 天的 claim **不再出现在卡片上**（**但不删**，可逆）。
+  coldAfterDays = null,
 }) {
   const entries = [];
   let droppedNoProvenance = 0;
   let droppedNoText = 0;
   let droppedSoftPreference = 0;
+  let droppedCold = 0;
   let droppedImperative = 0;
   const seen = new Set();
   const cap = Math.max(ENTRY_LIMIT * 8, 40);
@@ -686,6 +692,14 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
     // Q19-B 预置（默认关）：只保留 hard 约束，丢弃 soft（理由句/闲聊/复述）
     if (preferenceHardOnly && claim && claim.kind === 'preference' && claim.level !== 'hard') {
       droppedSoftPreference += 1;
+      continue;
+    }
+    // 知识库 90：**冷却**（主人纠正："不被调用就冷却，等于没写"）。
+    // `coldAfterDays` **默认关**（不设 ⇒ 不过滤，因为"冷却"依赖"注入记录"，
+    // 而当前宿主只有 CLI 进程、没有真实流量，注入记录不可靠 ⇒ 默认关，不误杀）。
+    // **冷却 = 不再出现在卡片上，但不删**（原件永不删，可逆：将来被调用了就"热"回来）。
+    if (Number.isFinite(coldAfterDays) && coldAfterDays > 0 && claim && isCold(claim, now, { coldAfterDays })) {
+      droppedCold = (droppedCold ?? 0) + 1;
       continue;
     }
     const entry = claim
