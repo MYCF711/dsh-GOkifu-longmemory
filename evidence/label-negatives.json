@@ -1,0 +1,205 @@
+{
+ "n": 20,
+ "rows": [
+  {
+   "pairId": "neg-1",
+   "signal": "E:/Documents/dsh-go/HANDOFF.md\n读这个交接文件，然后写方案，一个问题一个问题的拷问我：只在方向上提问。\n初始目标：用GO实现DSH，初衷保持DSH的官方初衷：一切皆插件。\n你可以先搜集本机相关内容，保存到工作区内，然后根据方案编写AGENTS e:/documents/dsh-go/handoff.md handoff.md documents/dsh-go dsh-",
+   "claimId": "c-00248579",
+   "claimText": "Error: unknown job bash-49fb11d400eb4696",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-2",
+   "signal": "E:/Documents/dsh-go/HANDOFF.md\n读这个交接文件，然后写方案，一个问题一个问题的拷问我：只在方向上提问。\n初始目标：用GO实现DSH，初衷保持DSH的官方初衷：一切皆插件。\n你可以先搜集本机相关内容，保存到工作区内，然后根据方案编写AGENTS e:/documents/dsh-go/handoff.md handoff.md documents/dsh-go dsh-",
+   "claimId": "c-00a2178a",
+   "claimText": "Error: writing under C:/Windows/Fonts/msyh.ttc would destroy the running runtime or this profile's plugins; recovery tools live inside the target",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-3",
+   "signal": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到 s://opc.fiime.cn/zh-cn/download opc.fiime.cn/zh-cn",
+   "claimId": "c-00abad1a",
+   "claimText": "=== Metadata 目录 === total 12836 drwxr-xr-x 1 WeiCong 197121 0 Nov 5 21:36 .",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-4",
+   "signal": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到 s://opc.fiime.cn/zh-cn/download opc.fiime.cn/zh-cn",
+   "claimId": "c-00d76725",
+   "claimText": "Error: ENOENT: no such file or directory, open 'C:\\tmp\\rewrite\\replace.txt' at Object.readFileSync (node:fs:484:20) at [eval]:3:16",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-5",
+   "signal": "海绵宝宝大闹蟹皇堡的手机apk破解版帮我找一个，扫一下有没有病毒和后门就i行了",
+   "claimId": "c-00f68083",
+   "claimText": "✗ C172 「2 分钟总览」必须与 CHANGELOG / HANDOFF / live-folds.json 同步（此前无人守） ✗ C305 进度页现状摘要必须与实测同步（门禁门数、测试数、欠账花费、判据入口） 0",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-6",
+   "signal": "海绵宝宝大闹蟹皇堡的手机apk破解版帮我找一个，扫一下有没有病毒和后门就i行了",
+   "claimId": "c-013b02c6",
+   "claimText": "完全逆向完全逆向，找到5%的根因，不要偷懒！",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-7",
+   "signal": "扫一下我的github仓库，做一下脱敏，尤其是最小上传的一些",
+   "claimId": "c-019a52a3",
+   "claimText": "ok verify: OK · 文件 1281 · 字节 1950576 · 错误 0 · 告警 0 rebuild: FAIL · 派生变更 0 · 未变 0 · skipped 0",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-8",
+   "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的workbuddy的国服和国际服供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商，要把magpie社区有的功能都兼顾，完全超越https://github.com/magpie-community/plugins s://github.com/betsy20/magpie-jet-",
+   "claimId": "c-01b1ecf1",
+   "claimText": "Error: ENOENT: no such file or directory, open 'D:\\tmp\\magpie-plugins-after-waf.json' at Object.readFileSync (node:fs:484:20) at [eval]:1:46",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-9",
+   "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的workbuddy的国服和国际服供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商，要把magpie社区有的功能都兼顾，完全超越https://github.com/magpie-community/plugins s://github.com/betsy20/magpie-jet-",
+   "claimId": "c-01f27abe",
+   "claimText": "/usr/bin/bash: line 1: cd: /d/DeepSeek Harness/Desktop/resources/app.asar/dsh: Not a directory [exit code: 1]",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-10",
+   "signal": "D:\\主工作区\\repos\\dsh-GOkifu-compact\\evidence\\归档收尾-验证单-2026-11-02.md\n继续任务，那个会话我已经归档，你去验证",
+   "claimId": "c-026275cd",
+   "claimText": "文档一致性通过：MAINTENANCE / AGENTS / CHANGELOG 的版本与测试条数一致。 自测通过：故意不一致时检查器会报错。 ✖ 对齐场景 exit=0",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-11",
+   "signal": "然后加个定时任务，每小时唤醒一次，可以调整goal，持续推进项目",
+   "claimId": "c-03d6ac4c",
+   "claimText": "SyntaxError: invalid syntax. Perhaps you forgot a comma? [exit code: 1]",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-12",
+   "signal": "然后加个定时任务，每小时唤醒一次，可以调整goal，持续推进项目",
+   "claimId": "c-0b2317fb",
+   "claimText": "TypeError: can't compare offset-naive and offset-aware datetimes",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-13",
+   "signal": "开启superagent模式，做好定时任务，写好goal，把任务清单列出来，写好AGENTS，记住最小交付房间理论，不要粉色大象。直接开跑吧，开一个私人仓库，然后按照magpie脚手架仓库的仓库维护准则进行维护。每次功能的实现都进行版本发布，写明更新内容。不过不要发npm。 npm",
+   "claimId": "c-7a57b3c6",
+   "claimText": "total 13 drwxr-xr-x 1 WeiCong 197121 0 Nov 1 20:14 . drwxr-xr-x 1 WeiCong 197121 0 Nov 1 20:14 ..",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-14",
+   "signal": "重启好了，你再看看工具调用",
+   "claimId": "c-00248579",
+   "claimText": "Error: unknown job bash-49fb11d400eb4696",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-15",
+   "signal": "重启好了，你再看看工具调用",
+   "claimId": "c-008c3e04",
+   "claimText": "[notice] A new release of pip is available: 26.2.1 -> 26.2.2 [notice] To update, run: python.exe -m pip install --upgrade pip",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-16",
+   "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的monkey code相关供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商 s://github.com/betsy20/magpie-jet-hub magpie-jet-hub github.com/betsy20",
+   "claimId": "c-00a2178a",
+   "claimText": "Error: writing under C:/Windows/Fonts/msyh.ttc would destroy the running runtime or this profile's plugins; recovery tools live inside the target",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-17",
+   "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的monkey code相关供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商 s://github.com/betsy20/magpie-jet-hub magpie-jet-hub github.com/betsy20",
+   "claimId": "c-00abad1a",
+   "claimText": "=== Metadata 目录 === total 12836 drwxr-xr-x 1 WeiCong 197121 0 Nov 5 21:36 .",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-18",
+   "signal": "你读本地的AGENTS和相关文件，然后完善这些文件，这些都是deepseekv4.1f自己写的，自己在执行，你实时写入的AGENTS能及时载入他们的会话引导方向。要求就是完成我当时提出的目标",
+   "claimId": "c-00f68083",
+   "claimText": "✗ C172 「2 分钟总览」必须与 CHANGELOG / HANDOFF / live-folds.json 同步（此前无人守） ✗ C305 进度页现状摘要必须与实测同步（门禁门数、测试数、欠账花费、判据入口） 0",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-19",
+   "signal": "你读本地的AGENTS和相关文件，然后完善这些文件，这些都是deepseekv4.1f自己写的，自己在执行，你实时写入的AGENTS能及时载入他们的会话引导方向。要求就是完成我当时提出的目标",
+   "claimId": "c-013b02c6",
+   "claimText": "完全逆向完全逆向，找到5%的根因，不要偷懒！",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  },
+  {
+   "pairId": "neg-20",
+   "signal": "magpie的灵犀插件修复一下报错不走magpie只能路由自动跳过之类的机制而是直接给DSH输出报错导致任务终止的bug\n{\n  \"id\": \"chatcmpl-lingxi-1793632740\",\n  \"model\": \"deepseek-v4.1-flash\",\n  \"choices\": [\n    {\n      \"type\": \"tool_call\",\n      \"id\": \"call",
+   "claimId": "c-019a52a3",
+   "claimText": "ok verify: OK · 文件 1281 · 字节 1950576 · 错误 0 · 告警 0 rebuild: FAIL · 派生变更 0 · 未变 0 · skipped 0",
+   "bigramRaw": null,
+   "overlap": null,
+   "isNegative": true,
+   "note": "**负例**：claim 来自**另一个 scope**（与信号不同项目），用于测误判率。"
+  }
+ ]
+}
