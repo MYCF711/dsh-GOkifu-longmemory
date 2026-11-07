@@ -55,3 +55,17 @@ test('T366c 方向判据：没有方向 ⇒ unclear（不许硬判）', async ()
   const { detectPolarity } = await import('../src/rooms/abstain.mjs');
   assert.equal(detectPolarity('读一下 HANDOFF.md 然后写方案', 'Error: failed to push some refs'), 'unclear');
 });
+
+test('知识库 83：**任何"率"都必须同时报可判率**，可判率太低 ⇒ 不可用于决策', async () => {
+  const { polarityReport } = await import('../src/rooms/abstain.mjs');
+  const r = polarityReport({ same: 5, opposite: 2, unclear: 183 });
+  assert.equal(r.total, 190);
+  assert.equal(r.decidable, 7);
+  assert.ok(Math.abs(r.decidability - 7 / 190) < 1e-9, '可判率 = 7/190');
+  assert.equal(r.usableForDecision, false, '可判率 3.7% ⇒ **不可用于决策**');
+  assert.ok(r.text.includes('可判率'), '报告里必须带可判率（省略 = 误导）');
+  assert.ok(r.text.includes('不可用于决策'), '必须显式标注"不可用于决策"');
+  // 可判率高 ⇒ 才可用于决策
+  const ok = polarityReport({ same: 60, opposite: 10, unclear: 30 });
+  assert.equal(ok.usableForDecision, true, '可判率 70% ⇒ 可用于决策');
+});

@@ -1912,5 +1912,14 @@
   "same": 5,
   "opposite": 2,
   "unclear": 183
+ },
+ "polarityReport": {
+  "opposite": 2,
+  "decidable": 7,
+  "total": 190,
+  "oppositeRate": 0.010526315789473684,
+  "decidability": 0.03684210526315789,
+  "usableForDecision": false,
+  "text": "反向记忆率 1.1%（2/190）· 可判率 3.7%（7/190）· **不可用于决策**（可判率不足，只能作局部观察）"
  }
 }

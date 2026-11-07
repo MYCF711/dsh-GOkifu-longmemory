@@ -143,3 +143,29 @@ export function detectPolarity(signalText, claimText) {
   if (sigNegate && claimSuppress) return 'same';
   return 'unclear';
 }
+
+// ── 知识库 83：任何"率"都必须**同时报可判率**，可判率太低 ⇒ **不可用于决策** ──
+/**
+ * 方向统计的报告（**率 + 可判率 + 决策可用性** 三件套）。
+ * 只报"反向记忆率 1.1%"而不报"可判率 3.7%"= 误导（知识库 83）。
+ *
+ * @param {{same?:number,opposite?:number,unclear?:number}} counts
+ * @param {{decidabilityFloor?:number}} [opts] 可判率下限（默认 0.30 = 30%），低于 ⇒ **不可用于决策**
+ */
+export function polarityReport(counts, { decidabilityFloor = 0.30 } = {}) {
+  const same = counts.same ?? 0;
+  const opposite = counts.opposite ?? 0;
+  const unclear = counts.unclear ?? 0;
+  const total = same + opposite + unclear;
+  const decidable = same + opposite;
+  const decidability = total ? decidable / total : 0;
+  const oppositeRate = total ? opposite / total : 0;
+  const usable = decidability >= decidabilityFloor && decidable > 0;
+  return {
+    opposite, decidable, total,
+    oppositeRate,
+    decidability,
+    usableForDecision: usable,
+    text: `反向记忆率 ${(oppositeRate * 100).toFixed(1)}%（${opposite}/${total}）· 可判率 ${(decidability * 100).toFixed(1)}%（${decidable}/${total}）· ${usable ? '可用于决策' : '**不可用于决策**（可判率不足，只能作局部观察）'}`,
+  };
+}
