@@ -271,3 +271,31 @@ export function isCold(claim, now, { coldAfterDays = 30 } = {}) {
   if (!Number.isFinite(now)) return false;
   return now - last > coldAfterDays * 86400000;
 }
+
+// ── 知识库 91：衰减（连续权重，而不是"冷却"的二元开关）──
+/**
+ * 一条记忆的**衰减权重**（0..1，**随时间指数衰减**）。
+ *
+ * **"冷却"是二元的**（出现 / 不出现），**"衰减"是连续的**（权重随时间降低）。
+ * 记忆的真实行为是**随时间衰减**，而不是"突然出现/消失"。
+ *
+ * 判据（机械）：
+ * - 以**最后一次被注入**（`lastInjectedAt`，无则用 `recordedAt`）为起点；
+ * - **权重 = 0.5 ^ (距今天数 / halfLifeDays)**（指数衰减，`halfLifeDays` 是"半衰期"）；
+ * - **被调用时重置**（`lastInjectedAt` 更新 ⇒ 权重回到 1）。
+ *
+ * **冷却可以是"衰减到某个阈值以下 ⇒ 不再出现"**（衰减的特例），
+ * 但**衰减本身更有用**：**权重低的排在后面**，而不是"突然消失"。
+ *
+ * @param {object} claim
+ * @param {number} now epoch ms
+ * @param {{halfLifeDays?:number}} [opts] 半衰期（默认 **30 天**：30 天后权重降到 0.5）
+ * @returns {number} 0..1（1 = 刚被调用，越接近 0 = 越久没被调用）
+ */
+export function decayWeight(claim, now, { halfLifeDays = 30 } = {}) {
+  const last = Number(claim?.counters?.lastInjectedAt ?? claim?.recordedAt ?? claim?.occurredAt ?? 0);
+  if (!Number.isFinite(last) || last <= 0) return 1; // 没有时间 ⇒ 不衰减（保守，当作"新"）
+  if (!Number.isFinite(now) || !Number.isFinite(halfLifeDays) || halfLifeDays <= 0) return 1;
+  const days = Math.max(0, (now - last) / 86400000);
+  return Math.pow(0.5, days / halfLifeDays);
+}
