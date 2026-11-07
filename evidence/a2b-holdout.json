@@ -589,7 +589,7 @@
       "signalSource": "root",
       "episode": "ep-1e976ca9",
       "scopeKey": "w:d:/DeepSeek Harness/大肥鱼工作区/海绵宝宝单机版制作",
-      "signal": "session-a1400ad0-65e3-4fe9-bcfe-873dc27e3cfb继续这个会话的任务",
+      "signal": "session-<REDACTED-UUID>继续这个会话的任务",
       "expectedClaimIds": 9,
       "rendered": 4,
       "related": 4,
