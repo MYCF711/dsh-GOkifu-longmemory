@@ -8,3 +8,4 @@ evidence/shadow/
 # 巡检生成物（每轮刷新，别跟踪；arena-report 缺它会自动降级）
 evidence/metrics-guard.json
 evidence/T268-messages.jsonl
+.agent-teams/

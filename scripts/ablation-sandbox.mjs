@@ -34,7 +34,32 @@ const POINTER = path.join(SANDBOX_ROOT, 'current.txt');
 
 // 只挡**朝外**或**动本机**的动词。改副本文件的题照跑 —— 副本本来就是拿来改坏的；
 // 把「会写盘的题」全剔掉，恰恰会丢掉最容易复现失败的那批题。
-const DANGER = /(\bgh\s+(pr|release|api)\b|\bnpm\s+publish\b|\bmagpie\b|\btaskkill\b|Stop-Process|Start-Process|\bgit\s+push\b|\bgit\s+remote\b|--force)/i;
+// T9 事故（2026-11-08）：原表只挡 `gh pr|release|api`，漏了 `gh repo edit` / `gh issue create`
+// —— 本机 gh 已登录且带 repo scope，那道题会**真在 GitHub 上建 issue**（对外、不可撤）。
+// `gh` 的写子命令**全部**挡掉（pr/release/api/repo/issue/label/workflow/project/run），
+// 只读的 `gh view/list/status/checks/diff` 不在这个名单里，不受影响。
+// `gh` 的**写子命令**全挡；只读子命令（`pr checks` / `issue list` / `repo view`）不许误伤。
+const DANGER = /(\bgh\s+(?:(?:pr|issue|release|repo|label|workflow|project|run)\s+(?:create|edit|merge|close|delete|comment|review|run|enable|disable|ready|lock|pin|set-|add|remove)|api\b|release\s+create)|\bnpm\s+publish\b|\bmagpie\b|\btaskkill\b|Stop-Process|Start-Process|\bgit\s+push\b|\bgit\s+remote\b|--force)/i;
+
+// 写盘标志：重定向 / heredoc / python 以写模式开文件 / write 工具。
+const WRITE_MARK = /(>>|>\s*[^\s|]+\s*(?:<<|$)|\bcat\s*>|\bopen\([^)]*['"][wa]|\bwrite\s+\S)/;
+
+/**
+ * 题里若**带写盘动作**且引用了**副本之外**的绝对工作区路径 ⇒ 会脏真仓，剔除。
+ * prepare 只把 ROOT 改写成副本；其它仓（如 `/d/主工作区/...`）没有副本，写过去就是真写。
+ * 只读题（grep/read/git show 等）不受影响。
+ */
+export function writesOutsideSandbox(prompt, rewrittenRoot) {
+  const p = String(prompt ?? '');
+  if (!WRITE_MARK.test(p)) return false;
+  const abs = p.match(/(?:[A-Za-z]:)?[\/\\][\w./\\一-鿿 -]{6,}/g) ?? [];
+  const root = String(rewrittenRoot ?? '').split('\\').join('/');
+  return abs.some((a) => {
+    const n = a.split('\\').join('/');
+    if (!/^(?:[A-Za-z]:[\/\\]|\/[a-z]\/)/i.test(a)) return false; // 只认绝对路径
+    return !n.startsWith(root) && !/^\/(?:tmp|dev|proc|etc|usr|var)\//.test(n);
+  });
+}
 
 const opt = (name, dflt = null) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -102,7 +127,9 @@ function prepare() {
     const prompt = String(t.taskPrompt ?? '');
     if (!prompt) { dropped += 1; continue; }
     if (DANGER.test(prompt)) { dropped += 1; continue; }
-    tasks.push({ ...t, taskPrompt: prompt.split(from).join(to) });
+    const rewritten = prompt.split(from).join(to);
+    if (writesOutsideSandbox(rewritten, to)) { dropped += 1; continue; }
+    tasks.push({ ...t, taskPrompt: rewritten });
   }
   fs.writeFileSync(path.join(dir, 'tasks.json'), JSON.stringify(tasks, null, 2));
   console.log(`[prepare] 题 ${tasks.length} 条（剔除危险/空题 ${dropped} 条）`);

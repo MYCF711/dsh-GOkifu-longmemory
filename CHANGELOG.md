@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.50（2026-11-08）
+
+### T9 安全闸：ablation 沙箱不许真发出去、不许写真仓
+
+**版本说明**：`scripts/ablation-sandbox.mjs` 行为修正（安全）⇒ patch。
+
+**事故**：T9 批次里有题是 `gh repo edit … --enable-issues && gh issue create …`，
+旧 DANGER 只挡 `gh pr|release|api`，**漏了 `gh repo edit` / `gh issue create`**；
+本机 gh 已登录且带 repo scope ⇒ 那题会**真在 GitHub 上建 issue**。成员在跑批途中发现上报，
+立即 kill 批次；`gh issue list` 核实**没有任何 issue 被发出**。
+
+**修两处**：
+
+1. DANGER 改为「gh 的**写子命令**全挡」（create/edit/merge/close/delete/comment/review/run/enable/disable 等），
+   只读的 `pr checks` / `issue list` / `repo view` **不误伤**；
+2. 新增 `writesOutsideSandbox`：带写盘动作且引用**副本外**绝对路径的题剔除 ——
+   prepare 只把 ROOT 改写成副本，其它仓（`/d/主工作区/…`）没有副本，写过去就是真写。
+
+**测试**：新增 `test/ablation-sandbox.test.mjs` 三条（含 tombstone），全绿。
+**已知代价**：本批 prepare 用的中间版正则偏宽，`gh pr checks` 类只读题被多剔几条（损失样本量，不影响安全），下轮恢复。
+
 ## 0.8.49（2026-11-07）
 
 ### T7 · A1.opposite 轴（PR #489）
