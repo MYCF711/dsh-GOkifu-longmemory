@@ -16,7 +16,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -1328,9 +1328,91 @@ test('T282 ④: 真实 pre-step 语料只写 <storeRoot>/corpus/messages.jsonl',
 test('T365 卡样本必须带 signalPreview（没有信号就无法审计"这张卡是否该注入"）', async () => {
   const src = await import('node:fs').then((m) => m.readFileSync('src/plugin.mjs', 'utf8'));
   assert.ok(src.includes('signalPreview:'), '卡样本必须带 signalPreview 字段');
-  // 必须在外层作用域用 lastUserText 现取（外层没有 decidePreStep 的局部 text 变量）
-  assert.ok(src.includes("signalPreview: String(lastUserText(payload?.messages) ?? '').slice(0, 160)"),
-    '信号必须来自 lastUserText(payload.messages)（外层作用域），不能用 decidePreStep 的局部 text');
+  // T10：字段由 `cardSampleSignal(payload?.messages)` 产出（同一句话里现取 lastUserText）。
+  // 外层没有 decidePreStep 的局部 `text` 变量，所以必须在这里现取。
+  assert.ok(src.includes('...cardSampleSignal(payload?.messages)'),
+    '信号必须来自 cardSampleSignal(payload.messages)（外层作用域），不能用 decidePreStep 的局部 text');
+  assert.ok(!/signalPreview:\s*String\(lastUserText\(payload\?\.messages\) \?\? ''\)\.slice\(0, 160\)/.test(src),
+    'T10：不许退回「只留前 160 字」—— 那会让离线相关性审计全部失真（T6 §4.1）');
+});
+
+// ---------------------------------------------------------------------------
+// T10 · signalPreview 存**完整信号**（上限 4KB ≥ 门槛 2KB）
+//
+// 背景（T6 §4.1 实测）：`card-samples.jsonl` 的 `signalPreview` 是「中位 0 / max 160」——
+// 旧行压根没这个字段（T365 之前写的），有字段的全被截在 160 字 ⇒ 拿它做「这张卡该不该注入」
+// 的离线审计时，「信号不全」被误读成「内容不相关」。
+//
+// 这一组是 tombstone：把 `cardSampleSignal` 改回截 160，或把 `signalPreviewTruncated` 去掉，
+// 或把字段从卡样本里摘掉，都会红。
+// ---------------------------------------------------------------------------
+import { CARD_SAMPLE_SIGNAL_LIMIT, cardSampleSignal } from '../src/plugin.mjs';
+
+test('T10 ①: cardSampleSignal 不再截 160 —— 600 字的信号整段留下，且不谎报截断', () => {
+  assert.ok(CARD_SAMPLE_SIGNAL_LIMIT >= 2048, `上限必须 ≥2KB，实际 ${CARD_SAMPLE_SIGNAL_LIMIT}`);
+  const long = 'T10 完整信号 ' + 'signal-body-'.repeat(50); // > 600 字，> 160
+  const out = cardSampleSignal([userMessage(long)]);
+  assert.equal(out.signalPreview, long, '160 字以内/以上的完整信号都必须原样留下');
+  assert.ok(out.signalPreview.length > 160, '长度必须能超过 160（旧实现的天花板）');
+  assert.equal(out.signalPreviewTruncated, false, '没超上限就不许标记截断（否则审计又会误判）');
+});
+
+test('T10 ②: 超过上限才截，且**明示**截断（边界 + 取的是最后一条 user 消息）', () => {
+  const exact = 'x'.repeat(CARD_SAMPLE_SIGNAL_LIMIT);
+  const atBoundary = cardSampleSignal([userMessage(exact)]);
+  assert.equal(atBoundary.signalPreview.length, CARD_SAMPLE_SIGNAL_LIMIT, '正好到上限不算截断');
+  assert.equal(atBoundary.signalPreviewTruncated, false);
+
+  const over = cardSampleSignal([userMessage('y'.repeat(CARD_SAMPLE_SIGNAL_LIMIT + 7)), userMessage('z'.repeat(CARD_SAMPLE_SIGNAL_LIMIT + 5))]);
+  assert.equal(over.signalPreview.length, CARD_SAMPLE_SIGNAL_LIMIT, '超上限截到上限');
+  assert.equal(over.signalPreview, 'z'.repeat(CARD_SAMPLE_SIGNAL_LIMIT), '信号 = **最后一条** user 消息（与判定同一条）');
+  assert.equal(over.signalPreviewTruncated, true);
+  const shortLast = cardSampleSignal([userMessage('y'.repeat(CARD_SAMPLE_SIGNAL_LIMIT + 7)), userMessage('z'.repeat(5))]);
+  assert.equal(shortLast.signalPreview, 'z'.repeat(5), '取最后一条：前一条再长也不算这一轮的信号');
+  const overOne = cardSampleSignal([{ role: 'user', content: [{ type: 'text', text: 'w'.repeat(CARD_SAMPLE_SIGNAL_LIMIT + 1) }] }]);
+  assert.equal(overOne.signalPreviewTruncated, true, '超一个字也要明示截断');
+});
+
+test('T10 ③: 向后兼容 —— 空消息取值不抛；库不存在仍不写（旧行缺字段照常可读）', async () => {
+  assert.deepEqual(cardSampleSignal(undefined), { signalPreview: '', signalPreviewTruncated: false });
+  assert.deepEqual(cardSampleSignal([]), { signalPreview: '', signalPreviewTruncated: false });
+  const { appendCardSample } = await import('../src/plugin.mjs');
+  const missing = path.join(tmpdir(), `kifu-t10-missing-${Date.now()}`);
+  appendCardSample(missing, { digest: 'd10' });
+  assert.equal(existsSync(path.join(missing, 'card-samples.jsonl')), false, '库不存在时不许把"无库"变成"有库"');
+});
+
+test('T10 ④ 接线: 真注入时卡样本里的 signalPreview 是完整信号（不是 160 字截断）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    const { session } = makeSession(workspace);
+    apply(ctx, baseConfig({ storeRoot, sampleCards: true, liveStats: true, probeValidity: false }));
+    // 向后兼容：**旧样本必须逐字不变**（append-only）。先放一行 T365 之前的形状（没有 signalPreview）。
+    const legacyLine = JSON.stringify({ at: 1, pid: 1, digest: 'legacy', tokens: 3, section: '<memory-ledger>old</memory-ledger>' });
+    writeFileSync(path.join(storeRoot, 'card-samples.jsonl'), `${legacyLine}\n`);
+    // 信号里带命中词（yaml）+ 足够长的尾巴，确保既会注入、又能看出截断与否。
+    const signal = `yaml 装不上 ${'长尾巴-'.repeat(80)}`; // ≈ 250 字 > 160
+    assert.ok(signal.length > 160 && signal.length < CARD_SAMPLE_SIGNAL_LIMIT);
+    const claimed = [userMessage(signal)];
+    const out = await runHook({ hooks, payload: { agent: { session }, messages: claimed }, decision: enterDecision([...claimed]) });
+    assert.equal(out.messages.length, 2, '有命中就必须注入（否则这条测试什么都没测到）');
+
+    const file = path.join(storeRoot, 'card-samples.jsonl');
+    assert.ok(existsSync(file), '注入成功就要落一张卡样本');
+    const lines = readFileSync(file, 'utf8').trim().split('\n');
+    assert.equal(lines[0], legacyLine, '旧样本必须逐字不变（append-only，不重写历史行）');
+    assert.equal(JSON.parse(lines[0]).signalPreview, undefined,
+      '旧行缺 signalPreview 仍可读（向后兼容：缺字段 = 该行早于 T365）');
+    assert.equal(lines.length, 2, '新样本只追加一行');
+    const row = JSON.parse(readFileSync(file, 'utf8').trim().split('\n').at(-1));
+    assert.equal(row.signalPreview, signal, '卡样本里的信号必须是**完整**的当轮信号');
+    assert.ok(row.signalPreview.length > 160, '长度必须超过 160（旧实现的天花板）');
+    assert.equal(row.signalPreviewTruncated, false);
+    assert.equal(row.pid, process.pid, '原有字段不许丢（审计按 pid 切新旧进程）');
+  } finally {
+    cleanup();
+  }
 });
 
 // ---------------------------------------------------------------------------

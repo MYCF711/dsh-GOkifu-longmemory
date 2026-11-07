@@ -596,10 +596,17 @@ export function gateClaimIdsFromGates(gates, limit = 5) {
  */
 export function classifyAbstainReason({ card = null, walkResult = null } = {}) {
   const claims = Array.isArray(card?.claims) ? card.claims : [];
-  const cross = Number(walkResult?.crossScope ?? 0)
-    + Number(walkResult?.unknownScope ?? 0)
-    + Number(walkResult?.crossScopeWalk ?? 0);
-  if (cross > 0) return 'cross-scope';
+  // T12 修①：`cross-scope` 的口径是「**本次 walk 命中的条目全被作用域挡掉**」。
+  // 原判据把 `crossScopeWalk`（= 整库遍历里被作用域挡掉的命中**总数**，实测恒 200–1000）也加了进来，
+  // ⇒ `cross > 0` 恒真，33/33 全塌成 `cross-scope`，"卡上有行但与信号不相关"永远归因不出来（T11 §六）。
+  // 现在只认**本次**的丢弃数（`crossScope` / `unknownScope`，来自 `filterHitsByScope`），
+  // 且要求**没有一条活着进卡**（`hits` 为空）—— 卡里已经有行，就说明"库里有、只是不属于本项目"不成立。
+  // 调用方没给 `hits`（离线脚本 / 老单测）时保持旧语义，避免调用面悄悄变成"永不返回 cross-scope"。
+  const droppedByScope = Number(walkResult?.crossScope ?? 0) + Number(walkResult?.unknownScope ?? 0);
+  const noInScopeHit = Array.isArray(walkResult?.hits) ? walkResult.hits.length === 0 : true;
+  if (droppedByScope > 0 && noInScopeHit) return 'cross-scope';
+  // T12 修②：`stale` 读 `c.decay`，而 `buildMemoryCard` 的 `card.claims` 投影现在**带 decay**
+  // （`src/rooms/inject.mjs` 的 claims 投影）；此前投影不含该字段 ⇒ `Number(undefined ?? 1)` 恒 1 ⇒ 死码。
   if (claims.length && claims.every((c) => Number(c?.decay ?? 1) < 0.5)) return 'stale';
   if (claims.length && claims.every((c) => String(c?.state ?? '') === 'observed')) return 'low-confidence';
   return 'no-relevant-claim';
@@ -1080,6 +1087,38 @@ export function appendLiveStats(storeRoot, row) {
   } catch { /* 心跳失败不影响决策 */ }
 }
 
+// ---------------------------------------------------------------------------
+// T10 · 卡样本里的信号：**存完整信号**（上限 4096 字符）
+//
+// 为什么改：T6 §4.1 实测 `card-samples.jsonl` 的 `signalPreview` 是「中位 0 / max 160」——
+// 绝大多数旧行**根本没有这个字段**（T365 之前写的），有的那些全被截在 160 字。
+// 拿它对账「这张卡该不该注入」时，会把「信号不全」误读成「内容不相关」（T6 因此只能改从会话日志重建）。
+//
+// 为什么**不**无限存：`appendCardSample` 有 8 MB 上限，一条 user 消息里贴进整份日志（几十 KB）时
+// 按原文全存 ⇒ 数百条样本就把文件撑满、抽样**提前静默停止**。
+// 上限值取 4096（**≥ T10 的「至少 2KB」**）：本机 `corpus/messages.jsonl` 的 495 条真实 pre-step 信号
+// 长度中位 **1106** / p90 2843 / p95 3352（脱敏后的文本，语料自身封顶 4000）⇒ 4096 基本等于「完整」，
+// 而 2048 会再截掉 16.4% 的真实信号 —— 那还是"审计失真"，只是程度轻一点。
+// 超出上限的部分不假装完整：`signalPreviewTruncated: true` 明示「原文更长」。
+// 注意：**文件名/字段名不变**（`signalPreview`），旧行缺新字段仍可读（缺 = 该行早于本版本）。
+// ---------------------------------------------------------------------------
+
+/** 卡样本信号的字符上限（T10：完整信号、至少 2KB；4096 覆盖真实信号的 p95）。 */
+export const CARD_SAMPLE_SIGNAL_LIMIT = 4096;
+
+/**
+ * 卡样本的 `signalPreview` 字段（T10）：**完整信号**，最多 `CARD_SAMPLE_SIGNAL_LIMIT` 字符。
+ *
+ * 取的是与判定**同一条**信号：`lastUserText(messages)`（`decidePreStep` 里的 `text` 就是它）。
+ * 返回 `{ signalPreview, signalPreviewTruncated }`：多给一个布尔，让离线脚本能区分
+ * 「原文就这么短」与「原文更长、只留了前 4KB」—— 这正是 T6 踩的那个坑（截断被当成完整）。
+ */
+export function cardSampleSignal(messages, { limit = CARD_SAMPLE_SIGNAL_LIMIT } = {}) {
+  const full = String(lastUserText(messages) ?? '');
+  const max = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : CARD_SAMPLE_SIGNAL_LIMIT;
+  return { signalPreview: full.slice(0, max), signalPreviewTruncated: full.length > max };
+}
+
 /** 注入质量抽样：只写 sidecar；失败不影响注入（2026-11-04）。 */
 export function appendCardSample(storeRoot, row) {
   try {
@@ -1406,10 +1445,11 @@ export function apply(ctx, rawConfig = {}) {
             section: String(result.card.section),
             // T365：**留样必须带信号**，否则"这张卡是否该注入"**无法审计**。
             // 没有信号 ⇒ "不相关时沉默"这条原则**根本无法验证**（只能看到卡，看不到为什么给）。
-            // 只留前 160 字符（信号可能很长），足够判"内容是否相关"。
+            // T10：从「只留前 160 字」改为**完整信号**（上限 4KB，另带 `signalPreviewTruncated` 明示截断）——
+            // 160 字让 T6 的离线审计全部失真（中位 0 / max 160），见 `cardSampleSignal` 的注释。
             // 注意作用域：这里是**外层**（不是 decidePreStep 内部），没有局部 `text`；
             // 必须用同文件的 `lastUserText(payload?.messages)` 现取（它就是 decidePreStep 用的那一条）。
-            signalPreview: String(lastUserText(payload?.messages) ?? '').slice(0, 160),
+            ...cardSampleSignal(payload?.messages),
             // T3：**指针行的自证字段** —— A6 文字层要把指针行排除出分子分母，
             // 排除前必须能核对「这张卡本来有几条指针行」，否则豁免等于"静默跳过"。
             // 两个字段都来自产出 `section` 的**同一张卡对象**（不是重新统计 section）。
@@ -1491,6 +1531,8 @@ export default {
   sanitizeConfig,
   messageText,
   lastUserText,
+  CARD_SAMPLE_SIGNAL_LIMIT,
+  cardSampleSignal,
   digestOf,
   insertAfterClaimed,
   cardText,
