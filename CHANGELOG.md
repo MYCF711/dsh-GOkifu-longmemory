@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.19（2026-11-07）
+
+### 知识库 80：判据校准（阈值按目标误杀率反推）
+本仓的关键阈值**都是拍脑袋定的**（`bigramRaw ≥ 2`、`overlap ≥ 1`、abstain 判据），
+**每一个都答不上"对应的误杀率是多少"**。abstain 默认关，正是因为**无法证明误杀率 = 0**。
+
+**一手文献**（Guo / Pleiss / Sun / Weinberger，ICML 2017）：
+> 校准 = "predicting probability estimates **representative of the true correctness likelihood**"；
+> 模型常"**poorly calibrated**"；"**single-parameter** variant of Platt Scaling… surprisingly effective"。
+
+**机械方法**：① 先建标注集（≥100 对，人工标"相关/不相关"）；
+② 逐阈值算**误杀率与误判率**（**分开算**，代价不对称）；
+③ 按目标误杀率反推阈值 —— **没有"零误杀又高效"的阈值 ⇒ 默认关**。
+
+**自我坦白**：定 `bigramRaw ≥ 2` 时**上面任何一步都没走**，那个阈值是**未校准**的。
+abstain 默认关，正是对这个无知的诚实反应。
+
+### 验证
+`check PASS`（80 篇）。
+
 ## 0.8.18（2026-11-07）
 
 ### 显式拒绝 `abstain`（**默认关**）
