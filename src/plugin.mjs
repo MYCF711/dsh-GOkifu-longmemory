@@ -44,7 +44,7 @@ import { zstdDecompressSync } from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { hasRelevantClaim } from './rooms/abstain.mjs';
+import { hasRelevantClaim, hasReliableHandle } from './rooms/abstain.mjs';
 
 import {
   buildMemoryCard,
@@ -716,7 +716,12 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
   // **误杀的代价高于收益** —— 在判据校准到"不误杀"之前，**不在生产里拒**（知识库 55「默认关」）。
   // 重开条件：在真实考卷上证明「被拒的**全部**是不相关」且「注入率下降全部来自不相关」，
   //           并给出「误杀率 = 0」的逐条证据。
-  if (config.abstainIrrelevant === true && card?.section && !hasRelevantClaim(card, text)) {
+  // 知识库 87：**精化适用条件**（不是"全关"，是"只在判据可靠的输入上启用"）。
+  // 拉卡托斯：反例该让我们"精化适用条件"，不是"全关"。
+  // `hasReliableHandle(text)` = 信号里有硬实体（文件路径/错误码/包名）或 ≥2 英文判别词 ——
+  // **在这些输入上判据是可靠的**，不该被"默认关"一起埋掉；
+  // 短指令 / 纯通用中文 ⇒ 不可靠 ⇒ **不启用**（保守，不误杀）。
+  if (config.abstainIrrelevant === true && hasReliableHandle(text) && card?.section && !hasRelevantClaim(card, text)) {
     return { decision, action: 'abstain', reason: 'no-relevant-claim', card, gates, digest };
   }
 
