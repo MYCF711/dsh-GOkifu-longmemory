@@ -10,7 +10,8 @@
    "signal": "E:/Documents/dsh-go/HANDOFF.md\n读这个交接文件，然后写方案，一个问题一个问题的拷问我：只在方向上提问。\n初始目标：用GO实现DSH，初衷保持DSH的官方初衷：一切皆插件。\n你可以先搜集本机相关内容，保存到工作区内，然后根据方案编写AGENTS e:/documents/dsh-go/handoff.md handoff.md documents/dsh-go dsh-",
    "claimText": "error: failed to push some refs to 'https://github.com/MYCF711/dsh-go.git' [status: completed, exit code: 0]",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 2,
@@ -19,7 +20,8 @@
    "signal": "E:/Documents/dsh-go/HANDOFF.md\n读这个交接文件，然后写方案，一个问题一个问题的拷问我：只在方向上提问。\n初始目标：用GO实现DSH，初衷保持DSH的官方初衷：一切皆插件。\n你可以先搜集本机相关内容，保存到工作区内，然后根据方案编写AGENTS e:/documents/dsh-go/handoff.md handoff.md documents/dsh-go dsh-",
    "claimText": "fatal: ../dsh-ui/AGENTS.md: '../dsh-ui/AGENTS.md' is outside repository at 'D:/DeepSeek Harness/default-workspace/DSH-GO' [exit code: 1]",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 5,
@@ -28,7 +30,8 @@
    "signal": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到 s://opc.fiime.cn/zh-cn/download opc.fiime.cn/zh-cn",
    "claimText": "Error: glob search failed (exit 2): rg: /d/DeepSeek Harness/反代/tmp/ai-coding-free-20261105: IO error for operation on /d/DeepSeek Harness/反代/tmp/ai-coding-free-20261105: 系统找不到指定的路径。 (os error 3)",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 6,
@@ -37,7 +40,8 @@
    "signal": "https://opc.fiime.cn/zh-cn/download\n这个网页我登录了，你直接拿凭证，然后看下我有多少token额度？为什么我找不到 s://opc.fiime.cn/zh-cn/download opc.fiime.cn/zh-cn",
    "claimText": "我把那个8899的关闭了，然后你把插件同步到最新吧，magicrew的账号凭证应该是有用的，直接刷新登录",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 7,
@@ -46,7 +50,8 @@
    "signal": "海绵宝宝大闹蟹皇堡的手机apk破解版帮我找一个，扫一下有没有病毒和后门就i行了",
    "claimText": "FileNotFoundError: [Errno 2] No such file or directory: 'D:/DeepSeek Harness/default-workspace/tmp/apk-audit/spongebob/op_ui6.xml'",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 8,
@@ -55,7 +60,8 @@
    "signal": "海绵宝宝大闹蟹皇堡的手机apk破解版帮我找一个，扫一下有没有病毒和后门就i行了",
    "claimText": "mCurrentFocus=Window{e90afbc u0 com.gh.gamecenter/com.gh.gamecenter.DownloadManagerActivity} === 测试 GMS 下载源 === apkpure: 000",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 9,
@@ -64,7 +70,8 @@
    "signal": "扫一下我的github仓库，做一下脱敏，尤其是最小上传的一些",
    "claimText": "FAIL network | GitHub API 请求: EOF | OK auth | HTTP 401: Bad credentials | （gh 登录失效：跑 gh auth login，或在面板填 OK notfound | HTTP 404: Not Found | （仓库不存在或没权限：检查 owner/name）",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 10,
@@ -73,7 +80,8 @@
    "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的workbuddy的国服和国际服供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商，要把magpie社区有的功能都兼顾，完全超越https://github.com/magpie-community/plugins s://github.com/betsy20/magpie-jet-",
    "claimText": "error: run with HOME=$(mktemp -d) bun test at <anonymous> (D:\\DeepSeek Harness\\反代\\work buddy\\magpie-workbuddy\\tests\\community\\checkin.test.mjs:9:91) (fail) (unnamed) [1.40ms]",
    "bigramRaw": 2,
-   "overlap": 11
+   "overlap": 11,
+   "polarity": "unclear"
   },
   {
    "pairId": 11,
@@ -82,7 +90,8 @@
    "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的workbuddy的国服和国际服供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商，要把magpie社区有的功能都兼顾，完全超越https://github.com/magpie-community/plugins s://github.com/betsy20/magpie-jet-",
    "claimText": "在我们自己的workbuddy仓库里面就是github仓库里面那个，更新到最新最全的功能，然后把开关放在top位置，默认挡位就是开",
    "bigramRaw": 7,
-   "overlap": 6
+   "overlap": 6,
+   "polarity": "unclear"
   },
   {
    "pairId": 12,
@@ -91,7 +100,8 @@
    "signal": "D:\\主工作区\\repos\\dsh-GOkifu-compact\\evidence\\归档收尾-验证单-2026-11-02.md\n继续任务，那个会话我已经归档，你去验证",
    "claimText": "/usr/bin/bash: -c: line 1: syntax error near unexpected token `newline' /usr/bin/bash: -c: line 1: `cd /d/主工作区/repos/dsh-GOkifu-compact && node test/run.mjs evidence-consistency 2>&1 | grep -A 3 \"C17…",
    "bigramRaw": 6,
-   "overlap": 5
+   "overlap": 5,
+   "polarity": "unclear"
   },
   {
    "pairId": 13,
@@ -100,7 +110,8 @@
    "signal": "然后加个定时任务，每小时唤醒一次，可以调整goal，持续推进项目",
    "claimText": "继续，不要因为需要重启而卡住，继续推进不需要重启的任务",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 14,
@@ -109,7 +120,8 @@
    "signal": "然后加个定时任务，每小时唤醒一次，可以调整goal，持续推进项目",
    "claimText": "只在定式任务约束吧，定时任务应该是优先于home AGENTS的",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 15,
@@ -118,7 +130,8 @@
    "signal": "开启superagent模式，做好定时任务，写好goal，把任务清单列出来，写好AGENTS，记住最小交付房间理论，不要粉色大象。直接开跑吧，开一个私人仓库，然后按照magpie脚手架仓库的仓库维护准则进行维护。每次功能的实现都进行版本发布，写明更新内容。不过不要发npm。 npm",
    "claimText": "开启superagent模式，做好定时任务，写好goal，把任务清单列出来，写好AGENTS，记住最小交付房间理论，不要粉色大象。",
    "bigramRaw": 31,
-   "overlap": 7
+   "overlap": 7,
+   "polarity": "same"
   },
   {
    "pairId": 16,
@@ -127,7 +140,8 @@
    "signal": "重启好了，你再看看工具调用",
    "claimText": "你继续优化，不要老是停下来，然后再去看看deepseek官方团队的论文，在它的基础上再看看有没有新的进步空间",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 17,
@@ -136,7 +150,8 @@
    "signal": "重启好了，你再看看工具调用",
    "claimText": "好了，刚刚是因为热切换导致所有工具全部丢失，现在只有bash能用了，应该在插件中增加提示，要求更改后重启才能生效，而不是更改后直接把工具剥离丢失",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 18,
@@ -145,7 +160,8 @@
    "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的monkey code相关供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商 s://github.com/betsy20/magpie-jet-hub magpie-jet-hub github.com/betsy20",
    "claimText": "fatal: unable to access 'https://github.com/MYCF711/magpie-plugin-scaffold.git/': Failed to connect to github.com:443 after 21104 ms: Could not connect to server [status: completed, exit code: 0]",
    "bigramRaw": 3,
-   "overlap": 7
+   "overlap": 7,
+   "polarity": "unclear"
   },
   {
    "pairId": 19,
@@ -154,7 +170,8 @@
    "signal": "https://github.com/Betsy20/magpie-Jet-Hub把这个仓库里面的monkey code相关供应商提取出来，按照我自己仓库的magpie脚手架仓库做成代理供应商 s://github.com/betsy20/magpie-jet-hub magpie-jet-hub github.com/betsy20",
    "claimText": "fatal: unable to access 'https://github.com/MYCF711/magpie-plugin-scaffold.git/': Recv failure: Connection was reset [exit code: 128]",
    "bigramRaw": 3,
-   "overlap": 7
+   "overlap": 7,
+   "polarity": "unclear"
   },
   {
    "pairId": 20,
@@ -163,7 +180,8 @@
    "signal": "你读本地的AGENTS和相关文件，然后完善这些文件，这些都是deepseekv4.1f自己写的，自己在执行，你实时写入的AGENTS能及时载入他们的会话引导方向。要求就是完成我当时提出的目标",
    "claimText": "error: pathspec 'bash' did not match any file(s) known to git error: pathspec '会话有自己的' did not match any file(s) known to git error: pathspec 'cwd，否则模型两边困惑",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 21,
@@ -172,7 +190,8 @@
    "signal": "你读本地的AGENTS和相关文件，然后完善这些文件，这些都是deepseekv4.1f自己写的，自己在执行，你实时写入的AGENTS能及时载入他们的会话引导方向。要求就是完成我当时提出的目标",
    "claimText": "所以应该把第三方go插件打包成另一个独立的go.exe，由用户通过我们给出的一个自动生成打包器之类的工具做，这样就是每个用户都有自己的一个第三方插件的go.exe，这样是不是能解决问题？",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 22,
@@ -181,7 +200,8 @@
    "signal": "magpie的灵犀插件修复一下报错不走magpie只能路由自动跳过之类的机制而是直接给DSH输出报错导致任务终止的bug\n{\n  \"id\": \"chatcmpl-lingxi-1793632740\",\n  \"model\": \"deepseek-v4.1-flash\",\n  \"choices\": [\n    {\n      \"type\": \"tool_call\",\n      \"id\": \"call",
    "claimText": "=== skipBrowser 修复的最终确认 === const res = await request(`${host}/api/v1/flows/models`, { headers: headersFor(token, org, host) }, { skipBrowser: true }) const body = await read(res)",
    "bigramRaw": 11,
-   "overlap": 42
+   "overlap": 42,
+   "polarity": "unclear"
   },
   {
    "pairId": 23,
@@ -190,7 +210,8 @@
    "signal": "magpie的灵犀插件修复一下报错不走magpie只能路由自动跳过之类的机制而是直接给DSH输出报错导致任务终止的bug\n{\n  \"id\": \"chatcmpl-lingxi-1793632740\",\n  \"model\": \"deepseek-v4.1-flash\",\n  \"choices\": [\n    {\n      \"type\": \"tool_call\",\n      \"id\": \"call",
    "claimText": "*/\\\\nasync function withFetch(impl, fn) {\\\\n const original = globalThis.fetch\\\\n globalThis.fetch = impl\\\\n try {\\\\n return await fn()\\\\n } finally {\\\\n globalThis.fetch = original\\\\n }\\\\n}\\\\n\\\\nfun…",
    "bigramRaw": 13,
-   "overlap": 46
+   "overlap": 46,
+   "polarity": "unclear"
   },
   {
    "pairId": 24,
@@ -199,7 +220,8 @@
    "signal": "账号还是重新登录状态，欠费就行了，为什么要重新登录？",
    "claimText": "5:// ① **按账号隔离**：同一个站点可以登多个账号（magpie 里就是 `magicrew` / 13:// · 两槽都空时从 magpie 存的凭据接管一次 18:// ⚠ 全插件只有这个文件是 key 的来源。magpie 的 `auth.refresh` 和 loader 都走",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 25,
@@ -208,7 +230,8 @@
    "signal": "为什么又是老毛病啊？502应该路由到别路由组内的其他供应商啊",
    "claimText": "供应商插件规定检查 · D:\\tmp\\wps-lingxi-push-062",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 26,
@@ -228,7 +251,8 @@
    "signal": "看下DSH的0.2.2-rc.1版本更新了什么，有没有必要更新",
    "claimText": "OLD=/d/DeepSeek Harness/Desktop-0.2.2-rc.1 CLEAN=/d/DeepSeek Harness/default-workspace/tmp/dsh-latest-upgrade/staging-clean BACKUP=/d/DeepSeek Harness/default-workspace/archive/backups/20261106-offic…",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 28,
@@ -237,7 +261,8 @@
    "signal": "看下DSH的0.2.2-rc.1版本更新了什么，有没有必要更新",
    "claimText": "Error: old_string was not found in \"/d/DeepSeek Harness/default-workspace/tmp/dsh-upgrade-0.2.2-rc.1/production/apply-upgrade.ps1\"",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 29,
@@ -246,7 +271,8 @@
    "signal": "既然插件无法算tok/s，magpie也无法算tok/s，那在DSH算总没问题吧？DSH这边是接收方，你看下能不能在dsh算灵犀的模型的tok/s然后返回magpie",
    "claimText": "PASS [mock] mock:任意分包 + 多字节字符不被切坏 — 720 字，按 1/3/7/64/5/2048 字节切块后一致 FAIL [mock] mock:非 data 噪声忽略；坏 data JSON 明确 502，不伪装超时 — 坏 data 帧应 502，实际 undefined：{\"error\":{\"message\":\"灵犀上游返回了无法解析的 JSON 数据帧\",\"typ…",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 30,
@@ -255,7 +281,8 @@
    "signal": "既然插件无法算tok/s，magpie也无法算tok/s，那在DSH算总没问题吧？DSH这边是接收方，你看下能不能在dsh算灵犀的模型的tok/s然后返回magpie",
    "claimText": "能不能在magpie本体动手？",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 31,
@@ -264,7 +291,8 @@
    "signal": "\"E:\\AStudio\\AStudio.exe\"看一下有没有具体的模型请求目录，我在软件GUI只有auto e:\\astudio\\astudio.exe astudio.exe",
    "claimText": "Error: cross-origin redirect to https://cn.bing.com is not followed automatically; retry against that URL directly",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 32,
@@ -273,7 +301,8 @@
    "signal": "\"E:\\AStudio\\AStudio.exe\"看一下有没有具体的模型请求目录，我在软件GUI只有auto e:\\astudio\\astudio.exe astudio.exe",
    "claimText": "然后再优化一下模型目录获取，不要获取用不了的模型",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 33,
@@ -293,7 +322,8 @@
    "signal": "为什么这个报错要一直推送到我的邮箱，能不能关掉？还有我自己作为is和pr的发起方的时候能不能不要发送啊？被我自己的信息刷爆邮箱了",
    "claimText": "为什么这个报错要一直推送到我的邮箱，能不能关掉？",
    "bigramRaw": 20,
-   "overlap": 2
+   "overlap": 2,
+   "polarity": "same"
   },
   {
    "pairId": 35,
@@ -302,7 +332,8 @@
    "signal": "你的压缩方法是GOkifu插件提供的压缩方法吗？",
    "claimText": "我已经压缩了你看下压缩方法是DSH默认的压缩方法还是GOkifu的压缩方法？",
    "bigramRaw": 6,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 36,
@@ -311,7 +342,8 @@
    "signal": "你的压缩方法是GOkifu插件提供的压缩方法吗？",
    "claimText": "开自动任务，找到本机之前关于GOkifu的所有记录和会话记录，然后继续优化插件，我更新了dsh版本，所以会话丢失了，你只能自己找之前的了，都在D盘",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 37,
@@ -320,7 +352,8 @@
    "signal": "找一下DSH插件tag里面有没有提示词优化的插件",
    "claimText": "之前做过一次系统提示词的整理和规范，里面提到过一个向外的约束，我当时认为没用否决了，现在可能需要做出限制，即对别人的仓库进行的PR和is都需要我授权，而且pr绝对不能强制推送",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 38,
@@ -329,7 +362,8 @@
    "signal": "找一下DSH插件tag里面有没有提示词优化的插件",
    "claimText": "你理解我的意图之后优化提示词怎么写，不要完全照抄我的内容。",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 39,
@@ -338,7 +372,8 @@
    "signal": "有没有用GO重构的音乐播放器呢？现在的音乐播放都很大，我现在用的是千千静听社区版，就是不好看",
    "claimText": "11: * 1. `worldstate.touch(paths)` 收到的是**单个路径字符串**（engine 的 `st.touchPath`）， 30:import { createWorldTracker } from \"../src/rooms/world.mjs\"; 101: const w = createWorldTracker({ cwd: \"D:/proj\" });",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 40,
@@ -347,7 +382,8 @@
    "signal": "有没有用GO重构的音乐播放器呢？现在的音乐播放都很大，我现在用的是千千静听社区版，就是不好看",
    "claimText": "展开后只能看到数据，不能修改，而且这部分的UI结构是不是没采用DSH官方的ui结构树？",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 41,
@@ -356,7 +392,8 @@
    "signal": "为什么我老是弹这个确认？dsh的会话调用这个可以不弹吗？",
    "claimText": "然后这个地方显示的会话是字符串，能不能换成我看到的？",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 42,
@@ -365,7 +402,8 @@
    "signal": "为什么我老是弹这个确认？dsh的会话调用这个可以不弹吗？",
    "claimText": "我需要的是一个标识，就像定式任务会在工作区里面的标题左边有一个时钟标识一样，正在运行的会话有一个旋转圆环一样，能不能让superagent的显示改一个样式？",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 43,
@@ -374,7 +412,8 @@
    "signal": "用rust或者go语言重构DSH有多难？成果能降低DSH的多少内存消耗？",
    "claimText": "/usr/bin/bash: line 12: rustc: command not found [exit code: 127]",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 44,
@@ -383,7 +422,8 @@
    "signal": "用rust或者go语言重构DSH有多难？成果能降低DSH的多少内存消耗？",
    "claimText": "class:module-missing · Error: Cannot find module '@deepseek-ai/dsh/package.json' Require stack: - D:\\DeepSeek Harness\\default-workspace\\projects\\dsh\\plugins\\ptc-domain-presets\\[eval]",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 45,
@@ -392,7 +432,8 @@
    "signal": "本工作区上一个会话因为i上下文中有大量图片，反复透传导致智力低下，你不允许有任何图片进入上下文，然后你逆向本地e/monkey code软件，完成AGENTS中的目标，magpie插件完全按照magpie脚手架仓库的规则来做",
    "claimText": "ReferenceError: sessionCookieOf is not defined at file:///D:/DeepSeek%20Harness/%E5%8F%8D%E4%BB%A3/monkey%20code/magpie-monkeycode/src/session-login.mjs:230:50 at ModuleJob.run (node:internal/modules…",
    "bigramRaw": 2,
-   "overlap": 1
+   "overlap": 1,
+   "polarity": "unclear"
   },
   {
    "pairId": 46,
@@ -401,7 +442,8 @@
    "signal": "修复一下magpie网关失效的问题",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 47,
@@ -410,7 +452,8 @@
    "signal": "修复一下magpie网关失效的问题",
    "claimText": "magpie的灵犀插件修复一下报错不走magpie只能路由自动跳过之类的机制而是直接给DSH输出报错导致任务终止的bug",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 48,
@@ -419,7 +462,8 @@
    "signal": "为什么每次灵犀的上下文中的图片都要重新过一遍识图？？？那不是消耗爆炸吗？",
    "claimText": "所以依旧不能让magpie里面网关中的每次请求的tok/s显示接近正确？",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 49,
@@ -428,7 +472,8 @@
    "signal": "为什么每次灵犀的上下文中的图片都要重新过一遍识图？？？那不是消耗爆炸吗？",
    "claimText": "怎么这么啰嗦，我问你，为什么灵犀的tok/s算不准？",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 50,
@@ -437,7 +482,8 @@
    "signal": "好了，刚刚是因为热切换导致所有工具全部丢失，现在只有bash能用了，应该在插件中增加提示，要求更改后重启才能生效，而不是更改后直接把工具剥离丢失 bash",
    "claimText": "好了，刚刚是因为热切换导致所有工具全部丢失，现在只有bash能用了，应该在插件中增加提示，要求更改后重启才能生效，而不是更改后直接把工具剥离丢失",
    "bigramRaw": 53,
-   "overlap": 6
+   "overlap": 6,
+   "polarity": "same"
   },
   {
    "pairId": 51,
@@ -446,7 +492,8 @@
    "signal": "好了，刚刚是因为热切换导致所有工具全部丢失，现在只有bash能用了，应该在插件中增加提示，要求更改后重启才能生效，而不是更改后直接把工具剥离丢失 bash",
    "claimText": "- **R17 运行时接管方案已事故，不要作为交付路径**：`src/rooms/takeover.mjs` + `src/ui.mjs` 的 `installTakeover` + `lib/client.js`/`test/*` 这套改动上线后重启，会话的 bash/read/write 等 preset 内工具全部消失（只剩宿主级工具）＝ preset 生成树挂载失败；",
    "bigramRaw": 6,
-   "overlap": 1
+   "overlap": 1,
+   "polarity": "unclear"
   },
   {
    "pairId": 52,
@@ -455,7 +502,8 @@
    "signal": "修一下，怎么回事，是不是灵犀上游开始扣费了？",
    "claimText": "PASS [mock] mock:任意分包 + 多字节字符不被切坏 — 720 字，按 1/3/7/64/5/2048 字节切块后一致 FAIL [mock] mock:非 data 噪声忽略；坏 data JSON 明确 502，不伪装超时 — 坏 data 帧应 502，实际 undefined：{\"error\":{\"message\":\"灵犀上游返回了无法解析的 JSON 数据帧\",\"typ…",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 53,
@@ -464,7 +512,8 @@
    "signal": "之前做过一次系统提示词的整理和规范，里面提到过一个向外的约束，我当时认为没用否决了，现在可能需要做出限制，即对别人的仓库进行的PR和is都需要我授权，而且pr绝对不能强制推送",
    "claimText": "之前做过一次系统提示词的整理和规范，里面提到过一个向外的约束，我当时认为没用否决了，现在可能需要做出限制，即对别人的仓库进行的PR和is都需要我授权，而且pr绝对不能强制推送",
    "bigramRaw": 65,
-   "overlap": 6
+   "overlap": 6,
+   "polarity": "same"
   },
   {
    "pairId": 54,
@@ -473,7 +522,8 @@
    "signal": "之前做过一次系统提示词的整理和规范，里面提到过一个向外的约束，我当时认为没用否决了，现在可能需要做出限制，即对别人的仓库进行的PR和is都需要我授权，而且pr绝对不能强制推送",
    "claimText": "持续吸收知识，蒸馏，用来优化我们的GOkifu，然后你需要分清楚哪些是压缩compact的任务，哪些不是，不要把AGENTS、tools、系统提示词等其他地方涵盖的功能越权覆盖。",
    "bigramRaw": 5,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 55,
@@ -482,7 +532,8 @@
    "signal": "为什么是圆的？magpie的框是圆角方框",
    "claimText": "FileNotFoundError: [Errno 2] No such file or directory: 'C:\\\\Users\\\\Administrator\\\\.config\\\\magpie\\\\plugins\\",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 56,
@@ -491,7 +542,8 @@
    "signal": "为什么是圆的？magpie的框是圆角方框",
    "claimText": "FileNotFoundError: [Errno 2] No such file or directory: '/d/DeepSeek Harness/反代/work buddy/magpie-workbuddy/package.json'",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 57,
@@ -500,7 +552,8 @@
    "signal": "帮我去magpie里面找一下我们这个ai ysiscode的消费情况，帮我估算一下一个月的0.5usd额度大概能用多少token",
    "claimText": "QuotaShapeError: 所有窗口都不参与路由（全是 aside: true 或 textOnly）—— 这个账号会在路由页显示「剩余额度未知」，而且一律排在已知账号之后。至少留一条带 used 的窗口（哪怕百分比没有信息量），否则智能路由里就没有这个号 at usage (file:///D:/DeepSeek%20Harness/%E5%8F%8D%E4%BB%A3/AIysis%2…",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 58,
@@ -509,7 +562,8 @@
    "signal": "帮我去magpie里面找一下我们这个ai ysiscode的消费情况，帮我估算一下一个月的0.5usd额度大概能用多少token",
    "claimText": "SyntaxError: Unexpected token ',' at checkSyntax (node:internal/main/check_syntax:72:5)",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 59,
@@ -518,7 +572,8 @@
    "signal": "去找一下成熟项目的github仓库维护标准是怎样的，我感觉我的magpie脚手架仓库的维护标准还是不够好",
    "claimText": "FAIL network | GitHub API 请求: EOF | OK auth | HTTP 401: Bad credentials | （gh 登录失效：跑 gh auth login，或在面板填 OK notfound | HTTP 404: Not Found | （仓库不存在或没权限：检查 owner/name）",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 60,
@@ -527,7 +582,8 @@
    "signal": "去找一下成熟项目的github仓库维护标准是怎样的，我感觉我的magpie脚手架仓库的维护标准还是不够好",
    "claimText": "注意是全部ui，包括所有二级三级页面，如果有更深的，也要全部适配，dsh有官方素材的用官方素材，有官方模板的用官方模板，顺便你看下superagent官方从仓库的界面是怎样的",
    "bigramRaw": 5,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 61,
@@ -536,7 +592,8 @@
    "signal": "magpie的更新下载速度又变慢了，之前修过一次，你找到根因，然后给修复方案。我看过你再执行",
    "claimText": "=== OurPlay 官网/下载源可达性 === https://www.ourplay.net -> 000 https://ourplay.net -> 301",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 62,
@@ -545,7 +602,8 @@
    "signal": "magpie的更新下载速度又变慢了，之前修过一次，你找到根因，然后给修复方案。我看过你再执行",
    "claimText": "mCurrentFocus=Window{e90afbc u0 com.gh.gamecenter/com.gh.gamecenter.DownloadManagerActivity} === 测试 GMS 下载源 === apkpure: 000",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 63,
@@ -554,7 +612,8 @@
    "signal": "DeepSeek Harness Creator去看下这个是什么？干嘛的？",
    "claimText": "class:module-missing · Error: Cannot find module '@deepseek-ai/dsh/package.json' Require stack: - D:\\DeepSeek Harness\\default-workspace\\projects\\dsh\\plugins\\ptc-domain-presets\\[eval]",
    "bigramRaw": 2,
-   "overlap": 2
+   "overlap": 2,
+   "polarity": "unclear"
   },
   {
    "pairId": 64,
@@ -563,7 +622,8 @@
    "signal": "DeepSeek Harness Creator去看下这个是什么？干嘛的？",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 2,
-   "overlap": 2
+   "overlap": 2,
+   "polarity": "unclear"
   },
   {
    "pairId": 65,
@@ -572,7 +632,8 @@
    "signal": "https://github.com/DIYgod/RSSHub\n这个是干嘛的 s://github.com/diygod/rsshub github.com/diygod",
    "claimText": "=== OurPlay 官网/下载源可达性 === https://www.ourplay.net -> 000 https://ourplay.net -> 301",
    "bigramRaw": 1,
-   "overlap": 1
+   "overlap": 1,
+   "polarity": "unclear"
   },
   {
    "pairId": 66,
@@ -581,7 +642,8 @@
    "signal": "https://github.com/DIYgod/RSSHub\n这个是干嘛的 s://github.com/diygod/rsshub github.com/diygod",
    "claimText": "error: failed to push some refs to 'https://github.com/MYCF711/magpie-plugin-scaffold.git' --- 远端: [exit code: 1]",
    "bigramRaw": 1,
-   "overlap": 4
+   "overlap": 4,
+   "polarity": "unclear"
   },
   {
    "pairId": 67,
@@ -590,7 +652,8 @@
    "signal": "找一些这些里面有没有每日额度或者每月额度，不充钱就能用的，或者免费额度的。上次找过一次。再找一次",
    "claimText": "=== 已经 2 分半了，再验一次稳定性 === 04:20:15 200 0.016834s",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 68,
@@ -599,7 +662,8 @@
    "signal": "找一些这些里面有没有每日额度或者每月额度，不充钱就能用的，或者免费额度的。上次找过一次。再找一次",
    "claimText": "剩余额度也不对，这些是额度上限，如果每天都用，甚至用不完上限，应该按账号积分去算",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 69,
@@ -608,7 +672,8 @@
    "signal": "<goal_round>\nObjective: \"按 dsh-ui/PLAN.md §8 的分层（L0 壳 / L1 契约 / L2 ds-core / L3 ds-shell / L4 部件 / L5 第三方插件）把界面线继续往上搭：① 收下已完成的两个并行产物（消息流对齐官方 .bubble/.callRow/.thinking、第三方插件样例 dsdemo）并合并验证 ② 侧栏与状态栏细节对",
    "claimText": "error: Your local changes to the following files would be overwritten by checkout: docs/tool-failure-rate.md Please commit your changes or stash them before you switch branches.",
    "bigramRaw": 6,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 70,
@@ -617,7 +682,8 @@
    "signal": "<goal_round>\nObjective: \"按 dsh-ui/PLAN.md §8 的分层（L0 壳 / L1 契约 / L2 ds-core / L3 ds-shell / L4 部件 / L5 第三方插件）把界面线继续往上搭：① 收下已完成的两个并行产物（消息流对齐官方 .bubble/.callRow/.thinking、第三方插件样例 dsdemo）并合并验证 ② 侧栏与状态栏细节对",
    "claimText": "Error: complete and blocked require a direct human turn or the current goal round",
    "bigramRaw": 5,
-   "overlap": 13
+   "overlap": 13,
+   "polarity": "unclear"
   },
   {
    "pairId": 71,
@@ -626,7 +692,8 @@
    "signal": "你的系统提示词里面关于时间和token是怎么说的？",
    "claimText": "Error: grep search failed (exit 2): rg: /d/DeepSeek Harness/home/profiles/upgrade-probe-production/node_modules/dsh-github-bridge: 系统找不到指定的文件。 (os error 2) rg: /d/DeepSeek Harness/home/profiles/upgra…",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 72,
@@ -635,7 +702,8 @@
    "signal": "你的系统提示词里面关于时间和token是怎么说的？",
    "claimText": "Error: glob search failed (exit 2): rg: /d/DeepSeek Harness/Desktop/resources/app.asar/dsh: IO error for operation on /d/DeepSeek Harness/Desktop/resources/app.asar/dsh: 系统找不到指定的路径。 (os error 3)",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 73,
@@ -644,7 +712,8 @@
    "signal": "修一下之前的realme手机上的大肥鱼聊天bot，今天断掉了",
    "claimText": "✗ [R2] projects/device/realme-bot 缺 node.json（group 的直接子目录必须是节点） ✗ [R7] device/drivers-b850: sourcePath 不存在 D:\\主工作区\\projects\\drivers-b850-stealth-ice ✗ [R7] device/lan13: sourcePath 不存在 D:\\主工作区\\proje…",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 74,
@@ -653,7 +722,8 @@
    "signal": "修一下之前的realme手机上的大肥鱼聊天bot，今天断掉了",
    "claimText": "cp: cannot create regular file '/d/DeepSeek Harness/default-workspace/projects/device/realme-bot/': Not a directory [exit code: 1]",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 75,
@@ -662,7 +732,8 @@
    "signal": "我记得之前修过一次灵犀的tok/s虚高问题，那次修复被会退了吗？重新修一下。好像是因为思考部分不计入toks",
    "claimText": "DSH这边是接收方，你看下能不能在dsh算灵犀的模型的tok/s然后返回magpie",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 76,
@@ -671,7 +742,8 @@
    "signal": "我记得之前修过一次灵犀的tok/s虚高问题，那次修复被会退了吗？重新修一下。好像是因为思考部分不计入toks",
    "claimText": "怎么这么啰嗦，我问你，为什么灵犀的tok/s算不准？",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 77,
@@ -680,7 +752,8 @@
    "signal": "之前说要把宿主和dsh-TUI直接兼容的成果在哪里？",
    "claimText": "Error: glob search failed (exit 2): rg: /d/DeepSeek Harness/default-workspace/dsh-TUI-upstream-src/tmp/W200: IO error for operation on /d/DeepSeek Harness/default-workspace/dsh-TUI-upstream-src/tmp/W…",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 78,
@@ -689,7 +762,8 @@
    "signal": "之前说要把宿主和dsh-TUI直接兼容的成果在哪里？",
    "claimText": "Error: ENOENT: no such file or directory, symlink 'D:\\DeepSeek Harness\\DeepSeek Harnessdefault-workspacedsh-TUI-upstream-src' -> 'D:\\DeepSeek Harness\\DeepSeek Harnesshome-tuiprofilesdsh-tui ode_modul…",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 79,
@@ -698,7 +772,8 @@
    "signal": "整理一下我现在magpie里面真实在用的插件，把里面的通用代码提取出来，然后择优（如有相似）更新到magpie脚手架仓库",
    "claimText": "version 0.4.0 供应商插件规定检查 · D:\\DeepSeek Harness\\反代\\magpie-trustoken-auth",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 80,
@@ -707,7 +782,8 @@
    "signal": "整理一下我现在magpie里面真实在用的插件，把里面的通用代码提取出来，然后择优（如有相似）更新到magpie脚手架仓库",
    "claimText": "能不能让hub兼容magpie供应商插件？",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 81,
@@ -716,7 +792,8 @@
    "signal": "\"E:\\Alysis Code\\Alysis Code.exe\"把这个软件的不充钱账号可用deepseek系模型按照脚手架仓库反代成接近官方原生api调用的体验 e:\\alysis",
    "claimText": "QuotaShapeError: 所有窗口都不参与路由（全是 aside: true 或 textOnly）—— 这个账号会在路由页显示「剩余额度未知」，而且一律排在已知账号之后。至少留一条带 used 的窗口（哪怕百分比没有信息量），否则智能路由里就没有这个号 at usage (file:///D:/DeepSeek%20Harness/%E5%8F%8D%E4%BB%A3/AIysis%2…",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 82,
@@ -725,7 +802,8 @@
    "signal": "\"E:\\Alysis Code\\Alysis Code.exe\"把这个软件的不充钱账号可用deepseek系模型按照脚手架仓库反代成接近官方原生api调用的体验 e:\\alysis",
    "claimText": "Error: old_string was not found in \"/d/DeepSeek Harness/default-workspace/tmp/dsh-upgrade-0.2.2-rc.1/production/apply-upgrade.ps1\"",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 83,
@@ -734,7 +812,8 @@
    "signal": "\"F:\\Steamcommunity_302\\Steamcommunity_302.exe\"\n我到底要怎么配才能让我自己能加速github，又能让magpie那边不因为开了加速而崩溃，然后DHS里面的会话能正确用github？？ f:\\steamcommunity_302\\steamcommunity_302.exe steamcommunity_302.exe",
    "claimText": "Error: grep search failed (exit 2): rg: /d/DeepSeek Harness/home/profiles/upgrade-probe-production/node_modules/dsh-github-bridge: 系统找不到指定的文件。 (os error 2) rg: /d/DeepSeek Harness/home/profiles/upgra…",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 84,
@@ -743,7 +822,8 @@
    "signal": "\"F:\\Steamcommunity_302\\Steamcommunity_302.exe\"\n我到底要怎么配才能让我自己能加速github，又能让magpie那边不因为开了加速而崩溃，然后DHS里面的会话能正确用github？？ f:\\steamcommunity_302\\steamcommunity_302.exe steamcommunity_302.exe",
    "claimText": "error: failed to push some refs to 'https://github.com/MYCF711/magpie-plugin-scaffold.git' --- 远端: [exit code: 1]",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 85,
@@ -752,7 +832,8 @@
    "signal": "<goal_round>\nObjective: \"以 magpie 脚手架仓库（MYCF711/magpie-plugin-scaffold）为根本，参考 github.com/411304344/opencode-cnb-account 的 CNB 实现，在 D:\\\\\\\\DeepSeek Harness\\\\\\\\反代\\\\\\\\magpie-cnb-auth 打造一个可交付的 magpie CNB 供",
    "claimText": "=== schannel 里的 skipBrowser === --- Files '/d/DeepSeek Harness/'$'\\345\\217\\215\\344\\273\\243''/magpie-amgicrew-auth/src/schannel.mjs' and /c/Users/Administrator/.config/magpie/plugins/node_modules/magp…",
    "bigramRaw": 6,
-   "overlap": 19
+   "overlap": 19,
+   "polarity": "unclear"
   },
   {
    "pairId": 86,
@@ -761,7 +842,8 @@
    "signal": "<goal_round>\nObjective: \"以 magpie 脚手架仓库（MYCF711/magpie-plugin-scaffold）为根本，参考 github.com/411304344/opencode-cnb-account 的 CNB 实现，在 D:\\\\\\\\DeepSeek Harness\\\\\\\\反代\\\\\\\\magpie-cnb-auth 打造一个可交付的 magpie CNB 供",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 9,
-   "overlap": 14
+   "overlap": 14,
+   "polarity": "unclear"
   },
   {
    "pairId": 87,
@@ -770,7 +852,8 @@
    "signal": "aipy的自动签到功能里面有一个完成五次任务的，弄完之后会不会去领取奖励？然后这个签到不会去检测有没有完成吗？怎么每触发一次就去发五个任务，明明账号已经完成每日任务了",
    "claimText": "Error: ENOENT: no such file or directory, open 'D:\\tmp\\aipy-sniff.log' at Object.readFileSync (node:fs:484:20) at Object.<anonymous> (C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\aipy-parse.cjs:2:14)",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 88,
@@ -779,7 +862,8 @@
    "signal": "aipy的自动签到功能里面有一个完成五次任务的，弄完之后会不会去领取奖励？然后这个签到不会去检测有没有完成吗？怎么每触发一次就去发五个任务，明明账号已经完成每日任务了",
    "claimText": "补了没进展就应该等完成，然后去领奖励，然后签到也做了吗？",
    "bigramRaw": 5,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 89,
@@ -788,7 +872,8 @@
    "signal": "去看一下灵犀这个私密组织仓库的插件在更新什么？作者说在跑对抗，你看下是不是在浪费token？",
    "claimText": "version 0.4.0 供应商插件规定检查 · D:\\DeepSeek Harness\\反代\\magpie-trustoken-auth",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 90,
@@ -797,7 +882,8 @@
    "signal": "去看一下灵犀这个私密组织仓库的插件在更新什么？作者说在跑对抗，你看下是不是在浪费token？",
    "claimText": "你看一下本机另外一个DSH用GO重构的项目，准备把插件做成GO语言的接口，要不要学magpie的？",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 91,
@@ -806,7 +892,8 @@
    "signal": "为什么一个ego消耗这么多cpu算例？",
    "claimText": "--- ego skill --- [exit code: 2]",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 92,
@@ -815,7 +902,8 @@
    "signal": "为什么一个ego消耗这么多cpu算例？",
    "claimText": "\"C:\\Program Files\\Citro Labs\\ego lite\\Application\\ego.exe\" --headless=new --disable-gpu --screenshot=\"E:\\Documents\\deepseek-harness\\default-workspace\\panel-shot.png\" --window-size=980,1500 --hide-scr…",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 93,
@@ -824,7 +912,8 @@
    "signal": "把这个发仓库并公开吧",
    "claimText": "===== 把 legacy 转为 private（关闭公开泄漏面）===== ===== 验证 ===== PRIVATE",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 94,
@@ -833,7 +922,8 @@
    "signal": "把这个发仓库并公开吧",
    "claimText": "那就别管了，在组织里面自己fork，然后路径走自己的fork版本，注意是在隐私仓库里面fork，放在那个隐私组织里面，不要泄露出去",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 95,
@@ -842,7 +932,8 @@
    "signal": "这两个口碑很好吗？是不是可以下载下来，把系统提示词扒出来学一下",
    "claimText": "Error: grep search failed (exit 2): rg: /d/DeepSeek Harness/home/profiles/upgrade-probe-production/node_modules/dsh-github-bridge: 系统找不到指定的文件。 (os error 2) rg: /d/DeepSeek Harness/home/profiles/upgra…",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 96,
@@ -851,7 +942,8 @@
    "signal": "这两个口碑很好吗？是不是可以下载下来，把系统提示词扒出来学一下",
    "claimText": "Error: glob search failed (exit 2): rg: /d/DeepSeek Harness/Desktop/resources/app.asar/dsh: IO error for operation on /d/DeepSeek Harness/Desktop/resources/app.asar/dsh: 系统找不到指定的路径。 (os error 3)",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 97,
@@ -860,7 +952,8 @@
    "signal": "处理一下我的收件箱，完成的就勾选完成，剩余未完成的告诉我内容",
    "claimText": "=== 残留旧段名（应全 0）=== 判断口径 0 报告内容 0",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 98,
@@ -869,7 +962,8 @@
    "signal": "处理一下我的收件箱，完成的就勾选完成，剩余未完成的告诉我内容",
    "claimText": "=== PAC 内容里的 api.github.com 上下文 === \"api.github.com\"",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 99,
@@ -878,7 +972,8 @@
    "signal": "出现一个问题，你排查一下，我截图发送的图片会被识别，但是却作为user文字进入模型，导致模型以为没有图片，只有图片中的文字，而且还是我发的文字，这也解释了为什么我之前总是发一个带截图的任务的时候总是不理我，而理截图",
    "claimText": "Error: glob search failed (exit 2): rg: /c/Users/Administrator/Downloads: IO error for operation on /c/Users/Administrator/Downloads: 系统找不到指定的文件。 (os error 2)",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 100,
@@ -887,7 +982,8 @@
    "signal": "出现一个问题，你排查一下，我截图发送的图片会被识别，但是却作为user文字进入模型，导致模型以为没有图片，只有图片中的文字，而且还是我发的文字，这也解释了为什么我之前总是发一个带截图的任务的时候总是不理我，而理截图",
    "claimText": "之前在外面运行的时刻可以点击，但是卡在5%，现在是不能点击！",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 101,
@@ -896,7 +992,8 @@
    "signal": "看一下\"E:\\codar-desktop\\Codar科搭.exe\"这个软件的v4.1f模型是不是1017版本的 e:\\codar-desktop\\codar",
    "claimText": "error: Executable not found in $PATH: \"C:WindowsSystem32curl.exe\" at emitError (node:events:50:13) at <anonymous> (node:child_process:779:20)",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 102,
@@ -905,7 +1002,8 @@
    "signal": "看一下\"E:\\codar-desktop\\Codar科搭.exe\"这个软件的v4.1f模型是不是1017版本的 e:\\codar-desktop\\codar",
    "claimText": "Error: writing under C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe would destroy the running runtime or this profile's plugins; recovery tools live inside the target",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 103,
@@ -914,7 +1012,8 @@
    "signal": "安装失败\n@tencent-connect/dsh-qqbot@latest\n帮我装一下 tencent-connect/dsh-qqbot dsh-qqbot",
    "claimText": "=== 验证 === 通过 4 · 警告 0 · 失败 0 文档时新性检查全过",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 104,
@@ -923,7 +1022,8 @@
    "signal": "安装失败\n@tencent-connect/dsh-qqbot@latest\n帮我装一下 tencent-connect/dsh-qqbot dsh-qqbot",
    "claimText": "Error: 只有 10 条失败边时兜底必须全列，实际 3（预算 576） at tests.L4/L5 边界：失败边 ≤10 时两档同文，必须全列，且不许印省略汇总行 (file:///D:/%E4%B8%BB%E5%B7%A5%E4%BD%9C%E5%8C%BA/repos/dsh-GOkifu-compact/test/ledger.test.mjs:213:31) at file:///…",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 105,
@@ -932,7 +1032,8 @@
    "signal": "我想到一个问题，团队模式总是约束lead不要自己去干活，让成员和子代理去干活，但是总是上下文一长就忘记。即使在系统提示此和AGNETS都反复提及，还是会忘记。能不能通过把执行工具包装成SDK，ptc作为运行时，这样只要他想干活，就只有SDK能用，SDK则是整套派活流程？",
    "claimText": "=== PAC 内容里的 api.github.com 上下文 === \"api.github.com\"",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 106,
@@ -941,7 +1042,8 @@
    "signal": "我想到一个问题，团队模式总是约束lead不要自己去干活，让成员和子代理去干活，但是总是上下文一长就忘记。即使在系统提示此和AGNETS都反复提及，还是会忘记。能不能通过把执行工具包装成SDK，ptc作为运行时，这样只要他想干活，就只有SDK能用，SDK则是整套派活流程？",
    "claimText": "这句还有一个问题导致一个奇特的现状：deepseek模型很抠门，就是你，太抠门了，之前省token，所以我要求不要吝啬token，结果不满意，我又说效率最重要，时间更值钱，结果你只听到时间值钱，开始省时间.....",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 107,
@@ -950,7 +1052,8 @@
    "signal": "\"E:\\Chatbox\\Chatbox.exe\"严格按照magpie脚手架仓库的规则反代这个项目 e:\\chatbox\\chatbox.exe chatbox.exe",
    "claimText": "version 0.4.0 供应商插件规定检查 · D:\\DeepSeek Harness\\反代\\magpie-trustoken-auth",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 108,
@@ -959,7 +1062,8 @@
    "signal": "\"E:\\Chatbox\\Chatbox.exe\"严格按照magpie脚手架仓库的规则反代这个项目 e:\\chatbox\\chatbox.exe chatbox.exe",
    "claimText": "ReferenceError: rate is not defined at entryOf (file:///D:/DeepSeek%20Harness/%E5%8F%8D%E4%BB%A3/magpie-chatbox-ai/src/context.mjs:149:9) at Module.staticModels (file:///D:/DeepSeek%20Harness/%E5%8F%…",
    "bigramRaw": 2,
-   "overlap": 5
+   "overlap": 5,
+   "polarity": "unclear"
   },
   {
    "pairId": 109,
@@ -968,7 +1072,8 @@
    "signal": "{\n  \"id\": \"chatcmpl-lingxi-1793587914\",\n  \"model\": \"deepseek-v4.1-flash\",\n  \"choices\": [\n    {\n      \"type\": \"message\",\n      \"content\": \"\",\n      \"reasoning\": \"Now 2 reference candidates (tool:github",
    "claimText": "Error: old_string matched 2 times in \"/d/DeepSeek Harness/default-workspace/DSH-GO/tmp/real-chain-headless-wefimz9b/overlay.json\"; provide a more specific old_string or set replace_all to true",
    "bigramRaw": 8,
-   "overlap": 16
+   "overlap": 16,
+   "polarity": "unclear"
   },
   {
    "pairId": 110,
@@ -977,7 +1082,8 @@
    "signal": "{\n  \"id\": \"chatcmpl-lingxi-1793587914\",\n  \"model\": \"deepseek-v4.1-flash\",\n  \"choices\": [\n    {\n      \"type\": \"message\",\n      \"content\": \"\",\n      \"reasoning\": \"Now 2 reference candidates (tool:github",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 9,
-   "overlap": 17
+   "overlap": 17,
+   "polarity": "unclear"
   },
   {
    "pairId": 111,
@@ -986,7 +1092,8 @@
    "signal": "选哪个api性能最好？",
    "claimText": "=== skipBrowser 修复的最终确认 === const res = await request(`${host}/api/v1/flows/models`, { headers: headersFor(token, org, host) }, { skipBrowser: true }) const body = await read(res)",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 112,
@@ -995,7 +1102,8 @@
    "signal": "选哪个api性能最好？",
    "claimText": "**\\\"这里/这一行/左边/最底部\\\"出现即用户已指定元素，不要再确认，直接当目标动手，交付物里写清改的是哪个容器；",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 113,
@@ -1004,7 +1112,8 @@
    "signal": "查一下是那个应用或者可能是DSH里面的会话，为什么一个灯光控件要这么大内存？",
    "claimText": "Error: old_string was not found in \"/d/DeepSeek Harness/default-workspace/tmp/dsh-upgrade-0.2.2-rc.1/production/apply-upgrade.ps1\"",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 114,
@@ -1013,7 +1122,8 @@
    "signal": "查一下是那个应用或者可能是DSH里面的会话，为什么一个灯光控件要这么大内存？",
    "claimText": "Error: cannot read \"/d/DeepSeek Harness/default-workspace/projects/dsh/plugins/ptc-domain-presets/AGENTS.md\": not found",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 115,
@@ -1022,7 +1132,8 @@
    "signal": "去找一下当前magpie里面没有，但是有每日免费额度、积分这种不充钱就能用deepseek v4.1f模型的软件",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 116,
@@ -1031,7 +1142,8 @@
    "signal": "这个b插件的设置怎么老是自动恢复默认呢？我调成了只在侧边栏显示，对话框不显示，就是一直回滚的？",
    "claimText": "那是使用我们插件的其他客户，以后统称客户，是其他pc用我们产品的人叫客户",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 117,
@@ -1040,7 +1152,8 @@
    "signal": "这个b插件的设置怎么老是自动恢复默认呢？我调成了只在侧边栏显示，对话框不显示，就是一直回滚的？",
    "claimText": "这个b插件的设置怎么老是自动恢复默认呢？",
    "bigramRaw": 16,
-   "overlap": 1
+   "overlap": 1,
+   "polarity": "same"
   },
   {
    "pairId": 118,
@@ -1049,7 +1162,8 @@
    "signal": "为什么我打开DSH的配置文件会报错呢？",
    "claimText": "Error: grep search failed (exit 2): rg: D:\\DeepSeek Harness\\tmp\\dsh-diag\\asar-out\\dsh\\lib: IO error for operation on D:\\DeepSeek Harness\\tmp\\dsh-diag\\asar-out\\dsh\\lib: 系统找不到指定的文件。 (os error 2)",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 119,
@@ -1058,7 +1172,8 @@
    "signal": "你是fork出来的会话，我还是想知道这个词整个网关崩溃的根因是什么？为什么一个magicrew崩溃能把整个网关拖崩溃？当时是所有供应商都不出字",
    "claimText": "version 0.4.0 供应商插件规定检查 · D:\\DeepSeek Harness\\反代\\magpie-trustoken-auth",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 120,
@@ -1067,7 +1182,8 @@
    "signal": "你是fork出来的会话，我还是想知道这个词整个网关崩溃的根因是什么？为什么一个magicrew崩溃能把整个网关拖崩溃？当时是所有供应商都不出字",
    "claimText": "=== 签到记录 === --- magicrew-auto-magicrew-intl.json --- --- magicrew-auto-magicrew.json ---",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 121,
@@ -1076,7 +1192,8 @@
    "signal": "把这三个插件的图标弄一下，去找官方的，给我看预览效果就行了",
    "claimText": "version 0.4.0 供应商插件规定检查 · D:\\DeepSeek Harness\\反代\\magpie-trustoken-auth",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 122,
@@ -1085,7 +1202,8 @@
    "signal": "把这三个插件的图标弄一下，去找官方的，给我看预览效果就行了",
    "claimText": "能不能让hub兼容magpie供应商插件？",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 123,
@@ -1094,7 +1212,8 @@
    "signal": "处理一下啊这个bug，我们现在magpie中在用的我自己做的插件，全部检测一遍，UA全部换成官方自己的ua",
    "claimText": "version 0.4.0 供应商插件规定检查 · D:\\DeepSeek Harness\\反代\\magpie-trustoken-auth",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 124,
@@ -1103,7 +1222,8 @@
    "signal": "处理一下啊这个bug，我们现在magpie中在用的我自己做的插件，全部检测一遍，UA全部换成官方自己的ua",
    "claimText": "我要你按照magpie脚手架仓库去做，当然是要自动弹登陆窗，然后等user登录后自动获取key和完成今日任务，然后要注意，只有检测到任务可做的状态才能去做，不要浪费token",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 125,
@@ -1112,7 +1232,8 @@
    "signal": "修一下codar的报错",
    "claimText": "16:// 2. authorize() 立刻返回 —— 等用户放在 callback() 里 === codar login module === page-bind.mjs",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 126,
@@ -1121,7 +1242,8 @@
    "signal": "修一下codar的报错",
    "claimText": "修一下，不要走静态表，走实时捕获模型表",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 127,
@@ -1130,7 +1252,8 @@
    "signal": "修改一下当前工作区的AGENTS，做好区分，之前的plan是宿主plan，你可以参考，你要做一个UIplan，专门做ui。基于之前的方案可以知道，我们要的是一个一切皆插件的DSH重新编译的产品。你认为GUI部分重新编译用哪个语言更好，单个还是混合？然后你看下官方的壳是怎样的？我们要不要做成每个部分都是插件？你去找现成的产品进行参考，然后对我进行一条一条的拷问，方向上的",
    "claimText": "替换 False -> prompt = \"以下是父会话最近说过的话（供参考，不要照抄）：\" + \" cmd/dshd/subagent.go:103:86: string literal not terminated",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 128,
@@ -1139,7 +1262,8 @@
    "signal": "修改一下当前工作区的AGENTS，做好区分，之前的plan是宿主plan，你可以参考，你要做一个UIplan，专门做ui。基于之前的方案可以知道，我们要的是一个一切皆插件的DSH重新编译的产品。你认为GUI部分重新编译用哪个语言更好，单个还是混合？然后你看下官方的壳是怎样的？我们要不要做成每个部分都是插件？你去找现成的产品进行参考，然后对我进行一条一条的拷问，方向上的",
    "claimText": "把TUI版本完善一下，然后win进程里面统合到DSH TUI GO这个应用名称下，不要散乱，另一个边在做的GUI也是一样",
    "bigramRaw": 7,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 129,
@@ -1148,7 +1272,8 @@
    "signal": "\"E:\\Downloads\\dsh-providers-hub-0.2.1-rc.2.tgz\"看下这是dsh go（手机版dsh）的插件，你觉得是继续做手机版hub好还是做magpie的手机版，然后接magpie插件，再在dsh go里面用好 e:\\downloads\\dsh-providers-hub-0.2.1-rc.2.tgz dsh-providers-hub-0.2.1-rc.2.tgz",
    "claimText": "version 0.4.0 供应商插件规定检查 · D:\\DeepSeek Harness\\反代\\magpie-trustoken-auth",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 130,
@@ -1157,7 +1282,8 @@
    "signal": "\"E:\\Downloads\\dsh-providers-hub-0.2.1-rc.2.tgz\"看下这是dsh go（手机版dsh）的插件，你觉得是继续做手机版hub好还是做magpie的手机版，然后接magpie插件，再在dsh go里面用好 e:\\downloads\\dsh-providers-hub-0.2.1-rc.2.tgz dsh-providers-hub-0.2.1-rc.2.tgz",
    "claimText": "能不能让hub兼容magpie供应商插件？",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 132,
@@ -1166,7 +1292,8 @@
    "signal": "修一下是哪个插件的问题",
    "claimText": "意思就是吐过我要TUI+rust宿主，以后我需要哪个插件都要去重构？",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 133,
@@ -1175,7 +1302,8 @@
    "signal": "修一下是哪个插件的问题",
    "claimText": "你交给团队成员去专门调研git bash这个插件的SDK化，然后出方案，看下能不能给上游提交pr",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 134,
@@ -1184,7 +1312,8 @@
    "signal": "去品鉴一下这个up主的产品，，他控诉deepseek的superagent插件是对他的抄袭，笑死我了，你去把他的和官方的对比一下",
    "claimText": "注意是全部ui，包括所有二级三级页面，如果有更深的，也要全部适配，dsh有官方素材的用官方素材，有官方模板的用官方模板，顺便你看下superagent官方从仓库的界面是怎样的",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 135,
@@ -1193,7 +1322,8 @@
    "signal": "去品鉴一下这个up主的产品，，他控诉deepseek的superagent插件是对他的抄袭，笑死我了，你去把他的和官方的对比一下",
    "claimText": "那是使用我们插件的其他客户，以后统称客户，是其他pc用我们产品的人叫客户",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 136,
@@ -1202,7 +1332,8 @@
    "signal": "去看一下现在的magpie版本签到还会不会阻塞网关了，不会的话再看一下我的magicrew版本对不对，对的话告诉我，我把供应商打开并且签到试试看",
    "claimText": "5:// ① **按账号隔离**：同一个站点可以登多个账号（magpie 里就是 `magicrew` / 13:// · 两槽都空时从 magpie 存的凭据接管一次 18:// ⚠ 全插件只有这个文件是 key 的来源。magpie 的 `auth.refresh` 和 loader 都走",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 137,
@@ -1211,7 +1342,8 @@
    "signal": "去看一下现在的magpie版本签到还会不会阻塞网关了，不会的话再看一下我的magicrew版本对不对，对的话告诉我，我把供应商打开并且签到试试看",
    "claimText": "fatal: unable to access 'https://github.com/MYCF711/magpie-magicrew-auth.git/': schannel: server closed abruptly (missing close_notify) [exit code: 128]",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 138,
@@ -1220,7 +1352,8 @@
    "signal": "billion-context\n把这个项目的DSH版本和我们先做的产品做一个功能上的全面对比，告诉我具体到功能项上面的优劣",
    "claimText": "class:module-missing · Error: Cannot find module '@deepseek-ai/dsh/package.json' Require stack: - D:\\DeepSeek Harness\\default-workspace\\projects\\dsh\\plugins\\ptc-domain-presets\\[eval]",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 139,
@@ -1229,7 +1362,8 @@
    "signal": "billion-context\n把这个项目的DSH版本和我们先做的产品做一个功能上的全面对比，告诉我具体到功能项上面的优劣",
    "claimText": "如果一个功能有明确收益，损失在可控范围内，且几乎可以无视，应该默认打开，且不提供开关，这是设计初衷就包含的，不应该给开关",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 140,
@@ -1238,7 +1372,8 @@
    "signal": "为什么我的邮箱全是这种信息？这个为什么一直报错，不管哪个仓库",
    "claimText": "改吧，仓库CI不要了，CI以后走本地的",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 141,
@@ -1247,7 +1382,8 @@
    "signal": "为什么我的邮箱全是这种信息？这个为什么一直报错，不管哪个仓库",
    "claimText": "仓库拒绝pr，只能提交is",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 142,
@@ -1256,7 +1392,8 @@
    "signal": "是不是别的软件都能重写解决内存占用问题，只有浏览器必须要用webview？",
    "claimText": "✗ [R2] projects/device/realme-bot 缺 node.json（group 的直接子目录必须是节点） ✗ [R7] device/drivers-b850: sourcePath 不存在 D:\\主工作区\\projects\\drivers-b850-stealth-ice ✗ [R7] device/lan13: sourcePath 不存在 D:\\主工作区\\proje…",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 143,
@@ -1265,7 +1402,8 @@
    "signal": "是不是别的软件都能重写解决内存占用问题，只有浏览器必须要用webview？",
    "claimText": "之前在外面运行的时刻可以点击，但是卡在5%，现在是不能点击！",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 144,
@@ -1274,7 +1412,8 @@
    "signal": "https://github.com/411304344/opencode-cnb-account参考这个项目，以magpie脚手架仓库为根本，制作magpie插件，目标是cnb供应商 s://github.com/411304344/opencode-cnb-account opencode-cnb-account github.com/411304344",
    "claimText": "version 0.4.0 供应商插件规定检查 · D:\\DeepSeek Harness\\反代\\magpie-trustoken-auth",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 145,
@@ -1283,7 +1422,8 @@
    "signal": "https://github.com/411304344/opencode-cnb-account参考这个项目，以magpie脚手架仓库为根本，制作magpie插件，目标是cnb供应商 s://github.com/411304344/opencode-cnb-account opencode-cnb-account github.com/411304344",
    "claimText": "能不能让hub兼容magpie供应商插件？",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 146,
@@ -1292,7 +1432,8 @@
    "signal": "https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md我们之前说是把仓库录入到了DSH的市场，结果好像时pr成功但是不是链接中的这个？你去看下上次的pr提交的位置对不对 s://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/ma",
    "claimText": "Error: cannot read \"/d/DeepSeek Harness/default-workspace/projects/dsh/plugins/ptc-domain-presets/AGENTS.md\": not found",
    "bigramRaw": 1,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 147,
@@ -1301,7 +1442,8 @@
    "signal": "https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/main/contributing.md我们之前说是把仓库录入到了DSH的市场，结果好像时pr成功但是不是链接中的这个？你去看下上次的pr提交的位置对不对 s://github.com/awesome-dsh-plugin/awesome-dsh-plugin/blob/ma",
    "claimText": "error: failed to push some refs to 'https://github.com/MYCF711/magpie-plugin-scaffold.git' --- 远端: [exit code: 1]",
    "bigramRaw": 1,
-   "overlap": 11
+   "overlap": 11,
+   "polarity": "unclear"
   },
   {
    "pairId": 148,
@@ -1310,7 +1452,8 @@
    "signal": "之前我们在aipy里面能伪造浏览器请求头的ua，那是不是可以通过这个办法在安卓端中伪造ua，绕过浏览器检测？",
    "claimText": "=== 完整浏览器指纹头 + HTTP2 === === 对比 intl ===",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 149,
@@ -1319,7 +1462,8 @@
    "signal": "之前我们在aipy里面能伪造浏览器请求头的ua，那是不是可以通过这个办法在安卓端中伪造ua，绕过浏览器检测？",
    "claimText": "用真默认浏览器不就丢失号池了吗？",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 151,
@@ -1328,7 +1472,8 @@
    "signal": "Xsdsh-purge去看一下这个项目，然后看一下我github仓库中的sovereign项目，告诉我我们的项目的优化方案",
    "claimText": "AGENTS里面再加一个规则：确认项目当前再无优化方向完善方向，确认当前交出的就是模型能力上限的产品后，并且要交给严格专员审核后还无问题了，才能提出安装并重启的要求。",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 152,
@@ -1337,7 +1482,8 @@
    "signal": "把这两个仓库再脱敏一下，没问题就公开吧",
    "claimText": "===== 把 legacy 转为 private（关闭公开泄漏面）===== ===== 验证 ===== PRIVATE",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 153,
@@ -1346,7 +1492,8 @@
    "signal": "把这两个仓库再脱敏一下，没问题就公开吧",
    "claimText": "那就别管了，在组织里面自己fork，然后路径走自己的fork版本，注意是在隐私仓库里面fork，放在那个隐私组织里面，不要泄露出去",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 154,
@@ -1355,7 +1502,8 @@
    "signal": "\"F:\\Steamcommunity_302\\AGENTS.md\"根据这个修复一下github网络 f:\\steamcommunity_302\\agents.md agents.md",
    "claimText": "AGENTS.md 坑 46 已更正 0 [exit code: 1]",
    "bigramRaw": 1,
-   "overlap": 3
+   "overlap": 3,
+   "polarity": "unclear"
   },
   {
    "pairId": 155,
@@ -1364,7 +1512,8 @@
    "signal": "\"F:\\Steamcommunity_302\\AGENTS.md\"根据这个修复一下github网络 f:\\steamcommunity_302\\agents.md agents.md",
    "claimText": "=== skipBrowser 修复的最终确认 === const res = await request(`${host}/api/v1/flows/models`, { headers: headersFor(token, org, host) }, { skipBrowser: true }) const body = await read(res)",
    "bigramRaw": 1,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 156,
@@ -1373,7 +1522,8 @@
    "signal": "开自动任务，找到本机之前关于GOkifu的所有记录和会话记录，然后继续优化插件，我更新了dsh版本，所以会话丢失了，你只能自己找之前的了，都在D盘",
    "claimText": "FileNotFoundError: [Errno 2] No such file or directory: '/d/主工作区/repos/dsh-GOkifu-compact/evidence/持续优化-总览-2026-11-02.md'",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 157,
@@ -1382,7 +1532,8 @@
    "signal": "开自动任务，找到本机之前关于GOkifu的所有记录和会话记录，然后继续优化插件，我更新了dsh版本，所以会话丢失了，你只能自己找之前的了，都在D盘",
    "claimText": "你去让专员读本机之前的会话，分析痛点，比如我说中文，有时候这个词有歧义，或者模糊意思，模型应该问清楚，而不是瞎猜。",
    "bigramRaw": 5,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 160,
@@ -1391,7 +1542,8 @@
    "signal": "https://dshtui.com/plugins/\n我们基本实现了GO宿主使用TUI，问题是TUI也有自己的插件，这些插件能兼容吗？你看看网页里面的tui插件 s://dshtui.com/plugins/ dshtui.com/plugins",
    "claimText": "error: pathspec 'bash' did not match any file(s) known to git error: pathspec '会话有自己的' did not match any file(s) known to git error: pathspec 'cwd，否则模型两边困惑",
    "bigramRaw": 3,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 161,
@@ -1400,7 +1552,8 @@
    "signal": "https://dshtui.com/plugins/\n我们基本实现了GO宿主使用TUI，问题是TUI也有自己的插件，这些插件能兼容吗？你看看网页里面的tui插件 s://dshtui.com/plugins/ dshtui.com/plugins",
    "claimText": "error: failed to push some refs to 'https://github.com/MYCF711/dsh-go.git' [exit code: 1]",
    "bigramRaw": 1,
-   "overlap": 1
+   "overlap": 1,
+   "polarity": "unclear"
   },
   {
    "pairId": 162,
@@ -1409,7 +1562,8 @@
    "signal": "E:\\Downloads\\sub2api_poc运行这个文件夹内的工具\nhttps://zdxjl.com/dashboard\r\n账号mycf147@qq.com\r\n密码dshmycf147\r\n获取管理员的就用这个邮箱的ai，改余额也是这个 e:\\downloads\\sub2api_poc sub2api_poc s://zdxjl.com/dashboard zdxjl.com/dashboar",
    "claimText": "我说不要吝啬token是因为大肥鱼抠门惯了，会因为抠门导致模型评分降低，不爱用工具，喜欢手写，降低效率，你写的规则是让他考虑全局token消耗，但是没有考虑到效率问题，这会导致大肥鱼不喜欢开团队模式，因为这显然会增加成本，而我需要的就是付出相应的代价但是提高工作效率，减少时间成本",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 163,
@@ -1418,7 +1572,8 @@
    "signal": "E:\\Downloads\\sub2api_poc运行这个文件夹内的工具\nhttps://zdxjl.com/dashboard\r\n账号mycf147@qq.com\r\n密码dshmycf147\r\n获取管理员的就用这个邮箱的ai，改余额也是这个 e:\\downloads\\sub2api_poc sub2api_poc s://zdxjl.com/dashboard zdxjl.com/dashboar",
    "claimText": "- **R17 运行时接管方案已事故，不要作为交付路径**：`src/rooms/takeover.mjs` + `src/ui.mjs` 的 `installTakeover` + `lib/client.js`/`test/*` 这套改动上线后重启，会话的 bash/read/write 等 preset 内工具全部消失（只剩宿主级工具）＝ preset 生成树挂载失败；",
    "bigramRaw": 2,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 164,
@@ -1427,7 +1582,8 @@
    "signal": "你觉得用java写反代供应商的magpie插件方便还是用go方便？",
    "claimText": "version 0.4.0 供应商插件规定检查 · D:\\DeepSeek Harness\\反代\\magpie-trustoken-auth",
    "bigramRaw": 5,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 165,
@@ -1436,7 +1592,8 @@
    "signal": "你觉得用java写反代供应商的magpie插件方便还是用go方便？",
    "claimText": "能不能让hub兼容magpie供应商插件？",
    "bigramRaw": 4,
-   "overlap": 0
+   "overlap": 0,
+   "polarity": "unclear"
   },
   {
    "pairId": 166,
@@ -1445,7 +1602,8 @@
    "signal": "请依次调用 bash 执行 `uname -s`，再调用 web_search 查询 DeepSeek Harness 0.2.2 rc.1（只查询一次）。最后回复 BASH=<uname输出>；SEARCH=<成功或失败及原因>。 bash",
    "claimText": "Error: glob search failed (exit 2): rg: /d/DeepSeek Harness/default-workspace/dsh-TUI-upstream-src/tmp/W200: IO error for operation on /d/DeepSeek Harness/default-workspace/dsh-TUI-upstream-src/tmp/W…",
    "bigramRaw": 3,
-   "overlap": 4
+   "overlap": 4,
+   "polarity": "unclear"
   },
   {
    "pairId": 167,
@@ -1454,7 +1612,8 @@
    "signal": "请依次调用 bash 执行 `uname -s`，再调用 web_search 查询 DeepSeek Harness 0.2.2 rc.1（只查询一次）。最后回复 BASH=<uname输出>；SEARCH=<成功或失败及原因>。 bash",
    "claimText": "Error: glob search failed (exit 2): rg: /d/DeepSeek Harness/default-workspace/DSH-GO/tmp/real-chain-current-wjxbvezg/home/state/jobs: IO error for operation on /d/DeepSeek Harness/default-workspace/D…",
    "bigramRaw": 3,
-   "overlap": 4
+   "overlap": 4,
+   "polarity": "unclear"
   },
   {
    "pairId": 168,
@@ -1463,7 +1622,8 @@
    "signal": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 7,
-   "overlap": 8
+   "overlap": 8,
+   "polarity": "unclear"
   },
   {
    "pairId": 169,
@@ -1472,7 +1632,8 @@
    "signal": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 7,
-   "overlap": 8
+   "overlap": 8,
+   "polarity": "unclear"
   },
   {
    "pairId": 170,
@@ -1481,7 +1642,8 @@
    "signal": "error: cannot edit \"<path>\": file changed since it was read — re-read the file, then retry",
    "claimText": "Error: cannot read \"/d/DeepSeek Harness/home/profiles/desktop/node_modules/dsh-gokifu-longmemory/package.json\": not found",
    "bigramRaw": 4,
-   "overlap": 6
+   "overlap": 6,
+   "polarity": "unclear"
   },
   {
    "pairId": 171,
@@ -1490,7 +1652,8 @@
    "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 11,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 172,
@@ -1499,7 +1662,8 @@
    "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 11,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 173,
@@ -1508,7 +1672,8 @@
    "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
    "claimText": "Error: cannot modify \"/d/主工作区/projects/dsh-gitbash-shell-fork/tools/patch-installed-freeze.mjs\": file has not been read — read the file, then retry",
    "bigramRaw": 11,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 174,
@@ -1517,7 +1682,8 @@
    "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 11,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 175,
@@ -1526,7 +1692,8 @@
    "signal": "error: cannot modify \"<path>\": file has not been read — read the file, then retry",
    "claimText": "Error: cannot modify \"/d/主工作区/projects/dsh-gitbash-shell-fork/tools/patch-installed-freeze.mjs\": file has not been read — read the file, then retry",
    "bigramRaw": 11,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 176,
@@ -1535,7 +1702,8 @@
    "signal": "error: cannot write \"<path>\": file changed since it was read — re-read the file, then retry",
    "claimText": "Error: cannot edit \"/e/Documents/deepseek-harness/default-workspace/prompt-opt/v4/make-preset.mjs\": file changed since it was read — re-read the file, then retry",
    "bigramRaw": 11,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 177,
@@ -1544,7 +1712,8 @@
    "signal": "error: cannot write \"<path>\": file changed since it was read — re-read the file, then retry",
    "claimText": "class:fs-read-before-write · Error: cannot modify \"/d/DeepSeek Harness/default-workspace/_inbox/magpie-wps-lingxi-image-text-fix/REPORT.md\": file has not been read — read the file, then retry",
    "bigramRaw": 8,
-   "overlap": 9
+   "overlap": 9,
+   "polarity": "unclear"
   },
   {
    "pairId": 178,
@@ -1553,7 +1722,8 @@
    "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web request used endpoint \"http://127.0.0.1:3425/v1/messages\". search endpoint conf…",
    "claimText": "class:web-search-empty · Error: DeepSeek returned no web_search_tool_result blocks; the request may not have triggered native web search The web request used endpoint \"http://127.0.0.1:3425/v1/messag…",
    "bigramRaw": 18,
-   "overlap": 19
+   "overlap": 19,
+   "polarity": "unclear"
   },
   {
    "pairId": 179,
@@ -1562,7 +1732,8 @@
    "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web request used endpoint \"http://127.0.0.1:3425/v1/messages\". search endpoint conf…",
    "claimText": "Error: DeepSeek returned no web_search_tool_result blocks; the request may not have triggered native web search The web request used endpoint \"http://127.0.0.1:3425/v1/messages\". Search endpoint conf…",
    "bigramRaw": 20,
-   "overlap": 21
+   "overlap": 21,
+   "polarity": "unclear"
   },
   {
    "pairId": 180,
@@ -1571,7 +1742,8 @@
    "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web request used endpoint \"http://127.0.0.1:3425/v1/messages\". search endpoint conf…",
    "claimText": "Error: DeepSeek returned no web_search_tool_result blocks; the request may not have triggered native web search The web request used endpoint \"http://127.0.0.1:3425/v1/messages\". Search endpoint conf…",
    "bigramRaw": 20,
-   "overlap": 21
+   "overlap": 21,
+   "polarity": "unclear"
   },
   {
    "pairId": 181,
@@ -1580,7 +1752,8 @@
    "signal": "error: deepseek returned no web_search_tool_result blocks; the request may not have triggered native web search the web request used endpoint \"http://127.0.0.1:3425/v1/messages\". search endpoint conf…",
    "claimText": "Error: DeepSeek returned no web_search_tool_result blocks; the request may not have triggered native web search The web request used endpoint \"http://127.0.0.1:3425/v1/messages\". Search endpoint conf…",
    "bigramRaw": 20,
-   "overlap": 21
+   "overlap": 21,
+   "polarity": "unclear"
   },
   {
    "pairId": 182,
@@ -1589,7 +1762,8 @@
    "signal": "error: enoent: no such file or directory, open '<path>' at object.readfilesync (node:fs:<line>) at [eval]:<line>",
    "claimText": "Error: ENOENT: no such file or directory, open 'D:\\tmp\\fileref.txt' at Object.readFileSync (node:fs:484:20) at [eval]:2:35",
    "bigramRaw": 9,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 183,
@@ -1598,7 +1772,8 @@
    "signal": "error: enoent: no such file or directory, open '<path>' at object.readfilesync (node:fs:<line>) at [eval]:<line>",
    "claimText": "Error: ENOENT: no such file or directory, open 'E:\\Documents\\deepseek-harness\\default-workspace\\prompt-opt\\v4\\_measure-_live-system.json' at Object.readFileSync (node:fs:484:20) at [eval]:2:34",
    "bigramRaw": 9,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 184,
@@ -1607,7 +1782,8 @@
    "signal": "error: enoent: no such file or directory, open '<path>' at object.readfilesync (node:fs:<line>) at [eval]:<line>",
    "claimText": "Error: ENOENT: no such file or directory, open 'D:\\tmp\\fileref.txt' at Object.readFileSync (node:fs:484:20) at [eval]:2:35",
    "bigramRaw": 9,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 185,
@@ -1616,7 +1792,8 @@
    "signal": "error: enoent: no such file or directory, open '<path>' at object.readfilesync (node:fs:<line>) at [eval]:<line>",
    "claimText": "Error: ENOENT: no such file or directory, open 'E:\\Documents\\deepseek-harness\\default-workspace\\prompt-opt\\v4\\_measure-_live-system.json' at Object.readFileSync (node:fs:484:20) at [eval]:2:34",
    "bigramRaw": 9,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 186,
@@ -1625,7 +1802,8 @@
    "signal": "error: old_string was not found in \"<path>\"",
    "claimText": "ValueError: substring not found",
    "bigramRaw": 3,
-   "overlap": 3
+   "overlap": 3,
+   "polarity": "unclear"
   },
   {
    "pairId": 187,
@@ -1634,7 +1812,8 @@
    "signal": "error: old_string was not found in \"<path>\"",
    "claimText": "Error: old_string was not found in \"/d/DeepSeek Harness/default-workspace/tmp/dsh-upgrade-0.2.2-rc.1/production/apply-upgrade.ps1\"",
    "bigramRaw": 5,
-   "overlap": 3
+   "overlap": 3,
+   "polarity": "unclear"
   },
   {
    "pairId": 188,
@@ -1643,7 +1822,8 @@
    "signal": "error: this goal operation requires a direct human turn on a top-level agent",
    "claimText": "Error: subagent limit reached (active child limit: 8); wait for an existing child to finish or complete this work with the current agents",
    "bigramRaw": 3,
-   "overlap": 3
+   "overlap": 3,
+   "polarity": "unclear"
   },
   {
    "pairId": 189,
@@ -1652,7 +1832,8 @@
    "signal": "error: this goal operation requires a direct human turn on a top-level agent",
    "claimText": "Error: subagent limit reached (active child limit: 8); wait for an existing child to finish or complete this work with the current agents",
    "bigramRaw": 3,
-   "overlap": 3
+   "overlap": 3,
+   "polarity": "unclear"
   },
   {
    "pairId": 190,
@@ -1661,7 +1842,8 @@
    "signal": "error: url hostname \"raw.githubusercontent.com\" resolves to a non-public ip address",
    "claimText": "Error: cross-origin redirect to https://cn.bing.com is not followed automatically; retry against that URL directly",
    "bigramRaw": 2,
-   "overlap": 1
+   "overlap": 1,
+   "polarity": "unclear"
   },
   {
    "pairId": 191,
@@ -1670,7 +1852,8 @@
    "signal": "error: url hostname \"raw.githubusercontent.com\" resolves to a non-public ip address",
    "claimText": "Error: URL hostname \"127.0.0.1\" resolves to a non-public IP address",
    "bigramRaw": 6,
-   "overlap": 5
+   "overlap": 5,
+   "polarity": "unclear"
   },
   {
    "pairId": 192,
@@ -1679,7 +1862,8 @@
    "signal": "json.decoder.jsondecodeerror: expecting value: line <line> column 1 (char 0)",
    "claimText": "json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
    "bigramRaw": 6,
-   "overlap": 9
+   "overlap": 9,
+   "polarity": "unclear"
   },
   {
    "pairId": 193,
@@ -1688,7 +1872,8 @@
    "signal": "sed: -e expression #<n>, char 1: unknown command: `,'",
    "claimText": "class:tool-unavailable · sed: -e expression #1, char 1: unknown command: `,' [exit code: 1]",
    "bigramRaw": 5,
-   "overlap": 4
+   "overlap": 4,
+   "polarity": "unclear"
   },
   {
    "pairId": 194,
@@ -1697,7 +1882,8 @@
    "signal": "sed: -e expression #<n>, char 1: unknown command: `,'",
    "claimText": "sed: -e expression #1, char 1: unknown command: `,' [exit code: 1]",
    "bigramRaw": 5,
-   "overlap": 4
+   "overlap": 4,
+   "polarity": "unclear"
   },
   {
    "pairId": 195,
@@ -1706,7 +1892,8 @@
    "signal": "syntaxerror: invalid or unexpected token at checksyntax (node:internal/main/check_syntax:<line>)",
    "claimText": "SyntaxError: Invalid or unexpected token at checkSyntax (node:internal/main/check_syntax:72:5)",
    "bigramRaw": 7,
-   "overlap": 10
+   "overlap": 10,
+   "polarity": "unclear"
   },
   {
    "pairId": 196,
@@ -1715,9 +1902,15 @@
    "signal": "syntaxerror: missing ) after argument list at checksyntax (node:internal/main/check_syntax:<line>)",
    "claimText": "SyntaxError: missing ) after argument list at checkSyntax (node:internal/main/check_syntax:72:5)",
    "bigramRaw": 8,
-   "overlap": 11
+   "overlap": 11,
+   "polarity": "unclear"
   }
  ],
  "filteredOut": 0,
- "filterNote": "用 hasAnySignalHandle 过滤：短指令(<10 字符)或无硬实体/英文判别词/非通用中文段 ⇒ 不进标注集（只能判 uncertain，且不在 abstain 作用面上）。"
+ "filterNote": "用 hasAnySignalHandle 过滤：短指令(<10 字符)或无硬实体/英文判别词/非通用中文段 ⇒ 不进标注集（只能判 uncertain，且不在 abstain 作用面上）。",
+ "polarityCounts": {
+  "same": 5,
+  "opposite": 2,
+  "unclear": 183
+ }
 }
