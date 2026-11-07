@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.17（2026-11-07）
+
+### 知识库 79：不相关时沉默（选择性预测 / abstention）
+**一手文献**（Geifman & El-Yaniv《Selective Classification for Deep Neural Networks》）：
+> "…can potentially significantly improve prediction performance by **trading-off coverage**."
+> "allows a user to set a **desired risk level**… **rejects instances as needed, to grant the desired risk**."
+> "an unprecedented **2% error**… and almost **60% test coverage**."
+
+**核心**：**先定风险上限，覆盖率自然落到 60%** —— 不是"尽可能多答"，而是"在风险 ≤R 的前提下尽量多答"。
+
+**对照本仓**：coverage ≈ 100%、risk 不为 0 ⇒ **用"全覆盖"换来了"注入噪声"**。
+
+**四条机械判据**：
+① 先定 risk 上限，不要先看覆盖率；
+② **`abstain` 必须是显式可计数的动作**（`no-signal` = 没输入 ≠ 拒绝；`no-hit` = 没找到才是）；
+③ **沉默率只在"无货可召"的题上算**（"卡为空"那个指标在本仓退化，恒为 0）；
+④ **拒绝必须比接受便宜**（给出不相关记忆会误导后续推理，成本很高 ⇒ 拒绝划算）。
+
+**待裁定方向**：`no-hit` 之后再补一条**显式拒绝**（卡上没有任何一行与信号相关 ⇒ `abstain` 不注入并单列）。
+**这把"不相关时沉默"从一句口号变成一个可验收的行为。**
+
+### 验证
+`check PASS`（79 篇）。
+
 ## 0.8.16（2026-11-07）
 
 ### A6 空分母改为"未验证"（T366）—— **此前 0/0 被误判为"通过"，是假绿**
