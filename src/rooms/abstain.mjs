@@ -75,7 +75,9 @@ export function hasAnySignalHandle(signalText) {
 
 /**
  * 卡上**有没有与信号相关**的行。
- * 判据（与考卷同口径）：某条 claim 与信号共享 **≥1 硬实体** 或 **≥2 判别词**。
+ * 判据（与考卷同口径）：某条 claim 与信号共享 **≥1 硬实体** 或 **≥2 判别词**；
+ * T12 起再加一层**坑类 / 工具族桥**（`hasPitClassBridge`，只在字面全不命中后兜底）——
+ * 线上误杀的根因是"同一个坑类换了文件名/目录"，不是"内容真的无关"（见 `evidence/T11-abstain-live.md`）。
  * **没有卡 / 没有 claim ⇒ 返回 false**（由调用方走既有的 `no-hit`，不走 abstain）。
  */
 export function hasRelevantClaim(card, signalText) {
@@ -110,10 +112,107 @@ export function hasRelevantClaim(card, signalText) {
       for (const b of sb) if (cb.has(b)) return true;
     }
   }
+  // T12：字面**全不命中** ⇒ 再看「坑类 / 工具族」（T11 的 17 条误杀全部落在这一层）。
+  // 位置很关键：**只在字面判据之后兜底** —— 字面能判的部分行为一字不改（向后兼容）。
+  if (hasPitClassBridge(claims, signalText)) return true;
   return false;
 }
 
-export default { hasRelevantClaim, abstainEntities, chineseBigrams, hasAnySignalHandle };
+// ── T12：**坑类 / 工具族桥**（修 T11 实测的线上误杀 77.3%）────────────────────
+// 依据：`evidence/T11-abstain-live.md`（79 判定点 / 33 条真实拒绝，逐条核：误杀 17 / 可核 22 = 77.3%）。
+// 统一观察是：**相关性发生在「坑类 / 工具族」层面，而上一个字面判据只看「共享实体/词」**。
+//   A AgentTeams 工具契约（强 3）——信号是 AgentTeams 任务分配，claim 是 `plan.members` 契约报错；
+//   B release / git 远端（强 2）——信号在干 release / 查仓库状态，claim 是 `failed to push some refs` / 远端读不到；
+//   C 写文件前先读（弱 7）——claim 带 `class:fs-read-before-write`，信号只是**要写/改文件**；
+//   D 插件 AGENTS 路径不存在（弱 5）——两边都是**插件目录下的 AGENTS.md**，只是目录名不同。
+//
+// 三条桥都**只增加「相关」**（= 少拒绝，方向与"宁可放过不可误杀"一致），全部可逐字节复算，不做语义评分：
+//   ① **同名文件**：claim 与信号共享同一个**文件名**（basename）⇒ 相关（同坑类换了目录）；
+//   ② **工具族**：信号落在某个工具族**域内**，claim 是该族的**具体报错实例**（两侧正则都写死，
+//      claim 侧只认报错签名，不认裸关键词 —— 否则 `release` 这种词会把无关内容拉成相关）；
+//   ③ **坑类**：claim 带已知坑类标记，且信号是该坑类的**适用面**（文件工作类请求）⇒ 相关。
+// **不做**：不放宽 `hasReliableHandle`、不改字面判据、不用模型打分。桥只在字面**全不命中**后兜底。
+
+/** 文件名（basename）抽取：只看**名字**，不看目录 —— 同坑类常换目录（D 桶）。 */
+const FILE_NAME_RE = /[A-Za-z0-9_.-]+\.(?:mjs|js|cjs|md|json|go|exe|ts|tsx|yml|yaml|png|cmd)\b/g;
+
+/** 文本里出现过的**文件名**集合（小写；同一文件的不同目录视为同一个名字）。 */
+export function fileBasenames(text) {
+  const out = new Set();
+  for (const m of String(text ?? '').matchAll(FILE_NAME_RE)) out.add(m[0].toLowerCase());
+  return out;
+}
+
+/**
+ * 工具族表：`signal` = 信号**落在这一族的域内**（宽，只判"这件事属于该族"）；
+ * `claim` = claim 是这一族的**具体报错实例**（窄，只认报错签名）。
+ *
+ * 宽窄不对称是**故意的**：信号侧宽 ⇒ 少误杀；claim 侧窄 ⇒ 不会因为"两边都出现 release 这个词"
+ * 就把无关内容判成相关（T11 的 5 条正确拒绝正是"claim 里出现 release 字样但讲的不是一回事"）。
+ */
+const TOOL_FAMILIES = Object.freeze([
+  {
+    id: 'release-git-remote',
+    signal: /\brelease(?:s|d)?\b|\bpublish(?:ed|ing)?\b|\btags?\b|\bpush(?:ed|ing)?\b|\borigin\b|\bgit\b|\bremote\b|\brepo(?:sitory)?\b|发布|推送|远端|仓库|发版/i,
+    claim: /failed to push some refs|could not read from remote repository|non-fast-forward|tag_name already exists|releases?\/tag\b|\bgit (?:push|fetch|pull|remote|status)\b|\borigin\/|remote: |(?:fatal|cannot|unable to): (?:could not read|unable to access|authentication failed)/i,
+  },
+  {
+    id: 'agentteams',
+    signal: /\bagentteams\b|agent_teams_|\bteams_(?:create|claim_task|update_task|send_message|status)\b|\bconfigured member\b|\bteam goal\b|task assignment/i,
+    claim: /\bplan\.(?:members|tasks)\b|agent_teams_|\bteams_(?:create|claim_task|update_task|send_message)\b|team member limit/i,
+  },
+]);
+
+/**
+ * **文件工作类请求**（坑类的适用面）：信号里有**落地动作**（写/改/产出/任务/测试…）。
+ * `fs-read-before-write` 这个坑类只在"要动文件"的请求上才有适用性；纯问答/闲聊不该被它拉成相关。
+ * 注意：只认**动作词**，不认具体文件名 —— 认文件名就又回到"换了文件名就判不相关"的老路（C 桶误杀根因）。
+ */
+const WORK_INTENT_RE = /(?:\bwrit(?:e|es|ing)\b|\bedit(?:s|ing)?\b|\bmodif(?:y|ies|ying)\b|\bcreat(?:e|es|ing)\b|\bupdat(?:e|es|ing)\b|\bimplement(?:s|ing|ed)?\b|\bfix(?:es|ing|ed)?\b|\bpatch(?:es|ing)?\b|\bsav(?:e|es|ing)\b|\bcommit(?:s|ted|ting)?\b|\bfiles?\b|\btasks?\b|\bwork(?:s|ing)?\b|\brun(?:s|ning)?\b|\btests?\b|\bclaim(?:s|ed|ing)?\b|写|改|修改|编辑|产出|生成|保存|落盘|记录|新建|实现|修复|更新|提交|任务|工作|验收|测试|执行|跑)/i;
+
+/**
+ * 坑类表：claim 带已知的类级标记 ⇒ 只要信号落在该坑类的**适用面**上就算相关。
+ * 只收 `fs-read-before-write`：它是 T11 C 桶（7 条弱误杀）的**全部**来源，也是本仓最高频的坑。
+ * **不放宽其它坑类**：`policy-human-turn` / `web-search-empty` 这类没有可机械判定的适用面，
+ * 硬接进来会变成"任何工作请求都注入" —— 那是噪声，不是相关性（T11 的 11 条无害拒绝就是提醒）。
+ */
+const PIT_CLASS_APPLIES = Object.freeze([
+  { id: 'fs-read-before-write', claim: /class:fs-read-before-write/i, signal: WORK_INTENT_RE },
+]);
+
+/**
+ * **坑类 / 工具族桥**：字面全不命中之后，判"两边是不是同一个坑类 / 同一个工具族"。
+ *
+ * @param {Array<object>|object} claims 卡上的 claim 列表（或用整张卡）
+ * @param {string} signalText 信号原文
+ * @returns {boolean} 命中任一桥 ⇒ `true`（**相关**，不该拒绝）
+ */
+export function hasPitClassBridge(claims, signalText) {
+  const list = Array.isArray(claims) ? claims : (Array.isArray(claims?.claims) ? claims.claims : []);
+  const texts = list.map((c) => String(c?.text ?? c?.rawText ?? '')).filter(Boolean);
+  if (!texts.length) return false;
+  const signal = String(signalText ?? '');
+  // ① 同名文件（D 桶：`…/dsh-agent-teams-preset/AGENTS.md` ↔ `…/ptc-domain-presets/AGENTS.md`）
+  const signalNames = fileBasenames(signal);
+  if (signalNames.size) {
+    for (const text of texts) {
+      for (const name of fileBasenames(text)) if (signalNames.has(name)) return true;
+    }
+  }
+  // ② 工具族（A/B 桶：信号在族域内 + claim 是该族的具体报错实例）
+  for (const family of TOOL_FAMILIES) {
+    if (!family.signal.test(signal)) continue;
+    if (texts.some((text) => family.claim.test(text))) return true;
+  }
+  // ③ 坑类（C 桶：claim 是 `class:fs-read-before-write` + 信号是文件工作类请求）
+  for (const pit of PIT_CLASS_APPLIES) {
+    if (!pit.signal.test(signal)) continue;
+    if (texts.some((text) => pit.claim.test(text))) return true;
+  }
+  return false;
+}
+
+export default { hasRelevantClaim, abstainEntities, chineseBigrams, hasAnySignalHandle, fileBasenames, hasPitClassBridge };
 
 // ── T366c：方向（polarity）——"相关但反向"的记忆是负迁移，A1 现在测不到 ──
 // 依据：用户要 A、claim 指向非 A ⇒ 给了会误导。
