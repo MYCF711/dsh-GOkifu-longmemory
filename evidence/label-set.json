@@ -19,28 +19,28 @@
  "stats": {
   "n": 135,
   "byVerdict": {
-   "relevant": 58,
-   "irrelevant": 63,
+   "relevant": 57,
+   "irrelevant": 64,
    "uncertain": 14
   },
   "byStratum": {
-   "same": 19,
+   "same": 17,
    "dir": 15,
-   "rel": 24,
-   "hard": 49,
+   "rel": 25,
+   "hard": 50,
    "random": 14,
    "unc": 14
   },
-  "irrelevantRatio": 0.4667,
-  "hardNegatives": 49,
+  "irrelevantRatio": 0.4741,
+  "hardNegatives": 50,
   "randomNegatives": 14,
   "decidable": 45,
   "decidability": 0.3333,
-  "decidableRelevant": 32,
-  "mechanicalDecidableIrrelevant": 12,
-  "semanticDecidabilityOnNonStratified": 0.1287,
-  "decidabilityOnRelevant": 0.5517,
-  "decidableIrrelevant": 12,
+  "decidableRelevant": 31,
+  "mechanicalDecidableIrrelevant": 13,
+  "semanticDecidabilityOnNonStratified": 0.1456,
+  "decidabilityOnRelevant": 0.5439,
+  "decidableIrrelevant": 13,
   "maxBigramAmongHardNeg": 6,
   "hardNegBigramMin": 2
  },
@@ -61,7 +61,7 @@
    "decidability": 0.0228,
    "note": "118 条真实信号 × 全库 2020 条 claim，取 bigramRaw>=2 的候选对，用 detectPolarity 直算"
   },
-  "note": "本集是**分层集**（same/dir 两层刻意富集，hard 层含 12 条机械可判但内容无关）⇒ 33.3% 只表示本集能同时测「相关/不相关 × 方向」，**不能外推为线上自然可判率**；自然分布量级仍是 2-4%。"
+  "note": "本集是**分层集**（same/dir 两层刻意富集，hard 层含 13 条机械可判但内容无关（#4 改判后））⇒ 33.3% 只表示本集能同时测「相关/不相关 × 方向」，**不能外推为线上自然可判率**；自然分布量级仍是 2-4%。"
  },
  "polarityCounts": {
   "same": 25,
@@ -74,8 +74,21 @@
   "total": 135,
   "oppositeRate": 0.14814814814814814,
   "decidability": 0.3333333333333333,
-  "usableForDecision": true,
-  "text": "反向记忆率 14.8%（20/135）· 可判率 33.3%（45/135）· 可用于决策"
+  "usableForDecision": false,
+  "text": "反向记忆率 14.8%（20/135）· 可判率 33.3%（45/135）· 以上为 T1 旧判据（55ec9ef）快照；按 HEAD 判据重算可判率 19.3%（26/135）< 30% 下限 ⇒ 不可用于决策"
+ },
+ "polaritySnapshot": {
+  "commit": "55ec9ef",
+  "module": "src/rooms/abstain.mjs@T1",
+  "note": "polarity / polarityCounts / polarityReport 是 T1 旧判据（commit 55ec9ef 的 detectPolarity）的快照，与当时逐条一致；stats.decidable*/decidability* 亦按该快照口径计算。任何消费者要当前判据，请用 src/rooms/abstain.mjs 的 polarityScorecard(pairs) 现场重算。",
+  "headRecount": {
+   "same": 24,
+   "opposite": 2,
+   "unclear": 109,
+   "decidable": 26,
+   "decidability": 0.1926,
+   "usableForDecision": false
+  }
  },
  "pairs": [
   {
@@ -132,10 +145,10 @@
    "claimScope": "w:e:/Documents/deepseek-harness/default-workspace",
    "bigramRaw": 3,
    "overlap": 0,
-   "verdict": "relevant",
-   "stratum": "same",
+   "verdict": "irrelevant",
+   "stratum": "hard",
    "polarity": "same",
-   "why": "同一议题是内存/显存占用（翻译完就关掉别占内存），与本局问内存占用怎么解决同域",
+   "why": "同一议题是内存/显存占用（翻译完就关掉别占内存），与本局问内存占用怎么解决同域。T13 复核改判：claim 不在信号里（LCS 3 字、overlap 0）、出自 ep-2ddf0a19（magpie 翻译引擎显存）而信号是浏览器/webview 内存、跨 scope ⇒ 只共享泛词、指向另一对象，原判 relevant 不成立",
    "pairId": 4
   },
   {
@@ -283,7 +296,7 @@
    "bigramRaw": 3,
    "overlap": 0,
    "verdict": "relevant",
-   "stratum": "same",
+   "stratum": "rel",
    "polarity": "same",
    "why": "同一议题是图片/看图链路该怎么走（关闭原生看图走回退），与本局截图被当文字同一件事",
    "pairId": 14
