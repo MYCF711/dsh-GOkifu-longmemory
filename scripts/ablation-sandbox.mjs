@@ -355,6 +355,21 @@ export function factualCardFor(pit) {
 </memory-ledger>`;
 }
 
+/** T29：每个坑「后来成功的那条命令」——恢复事实里要写的**事实**（手工构造，合成坑没有真实恢复历史）。 */
+export const RECOVERY_CMD = {
+  env: 'T23_TOKEN=demo node scripts/t23/pit-env.mjs',
+  flag: 'node scripts/t23/pit-flag.mjs --offline',
+  order: 'node scripts/t23/pit-init.mjs && node scripts/t23/pit-order.mjs',
+  cwd: 'cd scripts/t23 && node pit-cwd.mjs',
+};
+
+/** T29：事实型卡 + 一段「恢复事实」（T28 卡尾巴注格式；只写事实，不写祈使）。 */
+export function recoveryCardFor(pit) {
+  const base = factualCardFor(pit);
+  const rec = ` · 恢复：后于 2026-11-08 同一命令 \`${RECOVERY_CMD[pit.key] ?? ''}\` 成功（exit 0, seq 2）`;
+  return base.split('\n</memory-ledger>').join(`${rec}\n</memory-ledger>`);
+}
+
 /**
  * 生成合成坑题集：每个坑 × rounds 轮，taskId = `T23-<pit>-r<round>`。
  * 纯函数（不碰磁盘），便于单测。
@@ -402,15 +417,16 @@ export function syntheticHit({ task, events } = {}) {
 /** 把坑脚本写进副本 + 写 tasks/cards/pool.json（合成模式）。 */
 function prepareSynthetic({ dir, meta, repo }) {
   const rounds = Math.max(1, Number(opt('rounds', '3')));
-  const cardMode = String(opt('card', 'directive')) === 'factual' ? 'factual' : 'directive';
+  const card = String(opt('card', 'directive'));
+  const cardMode = card === 'factual' || card === 'recovery' ? card : 'directive';
   const only = String(opt('pits', '')).split(',').map((x) => x.trim()).filter(Boolean);
   const pits = only.length ? SYNTHETIC_PITS.filter((p) => only.includes(p.key)) : SYNTHETIC_PITS;
   const { tasks, cards } = syntheticTasks({ rounds, pits });
-  if (cardMode === 'factual') {
+  if (cardMode !== 'directive') {
     for (const pit of pits) {
       for (let r = 1; r <= rounds; r += 1) {
         const taskId = `T23-${pit.key}-r${r}`;
-        const text = factualCardFor(pit);
+        const text = cardMode === 'recovery' ? recoveryCardFor(pit) : factualCardFor(pit);
         cards[taskId] = { text, scope: 'w:synthetic/t26', tokens: Math.ceil(text.length / 3), hitCount: 1 };
       }
     }
@@ -822,7 +838,7 @@ function reportSynthetic() {
   L.push(`- **有效对 ${validPairs.length} 对**：A（有卡）踩坑 **${sv.A.recurred}/${sv.A.n} = ${pctOf(sv.A.rate)}**，B（无卡）踩坑 **${sv.B.recurred}/${sv.B.n} = ${pctOf(sv.B.rate)}**；onlyA **${sv.discordant.onlyA}** / onlyB **${sv.discordant.onlyB}**；McNemar 精确 p = **${sv.mcnemarP}**。`);
   L.push(`- **方向**：${sv.discordant.onlyB > sv.discordant.onlyA ? '**B 臂踩得更多（偏「记忆有用」）**' : sv.discordant.onlyA > sv.discordant.onlyB ? '**A 臂踩得更多（方向相反）**' : '无方向'}；**显著性**：${sv.mcnemarP < 0.05 ? 'p < 0.05，达到显著' : 'p ≥ 0.05，未达显著'}。`);
   L.push(`- 全批（含作废坑）口径：A ${sAll.A.recurred}/${sAll.A.n} vs B ${sAll.B.recurred}/${sAll.B.n}，p=${sAll.mcnemarP}。`);
-  if (cardMode === 'factual') {
+  if (cardMode !== 'directive') {
     L.push('');
     L.push('### 0.1 事实型 vs 指令式（T23 对照）');
     L.push('');

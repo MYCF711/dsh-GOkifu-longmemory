@@ -209,3 +209,28 @@ test('T26 事实型 vs 指令式：同一题集、同一题面，只换卡文字
     }
   }
 });
+
+// ---------------------------------------------------------------------------
+// T29 · 事实型 + 恢复事实（T28 卡尾格式）
+// ---------------------------------------------------------------------------
+import { recoveryCardFor, RECOVERY_CMD } from '../scripts/ablation-sandbox.mjs';
+
+test('T29 恢复事实卡：失败事实 + 「后于 <日期> 同一命令 <正确命令> 成功」且无祈使句', () => {
+  for (const pit of SYNTHETIC_PITS) {
+    const c = recoveryCardFor(pit);
+    assert.ok(c.includes(pit.signature), '保留失败事实');
+    assert.ok(c.includes(' · 恢复：后于 2026-11-08 同一命令'), '带 T28 格式恢复尾注');
+    assert.ok(c.includes(RECOVERY_CMD[pit.key]), '恢复事实里写明当时成功的那条命令');
+    assert.ok(!/不要|应该|先跑|直接执行|请|务必/.test(c), `恢复事实也必须只写事实：${c}`);
+  }
+});
+
+test('T29 恢复事实卡 vs 事实型卡：前者多恢复尾注，失败事实部分一致', () => {
+  for (const pit of SYNTHETIC_PITS) {
+    const factual = factualCardFor(pit);
+    const withRec = recoveryCardFor(pit);
+    assert.ok(withRec.length > factual.length);
+    assert.ok(withRec.includes(factual.split('\n')[3]), '失败事实那一行必须原样保留');
+    assert.ok(!factual.includes('恢复：'));
+  }
+});
