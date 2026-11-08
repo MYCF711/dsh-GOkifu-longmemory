@@ -2480,3 +2480,36 @@ test('T31 ⑤: token 成本 —— 只有被豁免的那一行变厚，其它行
     assert.ok(exempt.tokens > control.tokens, '卡片 tokens 增加（成本可测）');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// T34 · 恢复事实分档：卡上文案必须标「同工具族」，不许写成「同一命令」
+// ---------------------------------------------------------------------------
+test('T34 ④: kind=same-tool ⇒ 卡行写「恢复（同工具族）…同工具族后来成功」，不冒充同一命令', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry({ kind: 'same-tool', seq: 4 }) } });
+    const card = t31Card(store); // 指针档默认开；有恢复事实 ⇒ 不降级
+    const line = cardLines(card).find((l) => l.includes('Error: boom'));
+    assert.ok(line, '该行必须渲染');
+    assert.match(line, / · 恢复（同工具族）：后于 2026-10-20 同工具族后来成功（seq 4）$/, '同工具族文案');
+    assert.ok(!line.includes('同一命令成功'), '不许冒充同一命令');
+    assert.ok(!line.includes('同一文件写入成功'), '不许冒充同一文件');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T34 ⑤: exact 档文案与 same-file 档文案不受影响（分档不改旧档）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: {
+      'c-0000aa01': t30IndexEntry(),
+      'c-0000aa02': t30IndexEntry({ kind: 'same-file-write-ok', seq: 8, failureSeq: 6, prefix: 'Error: old_string matched 2 times in' }),
+    } });
+    const card = t31Card(store);
+    const boom = cardLines(card).find((l) => l.includes('Error: boom'));
+    assert.match(boom, / · 恢复：后于 2026-10-20 同一命令成功（exit 0, seq 4）$/, 'exact 文案不变');
+    const edit = cardLines(card).find((l) => l.includes('old_string matched 2 times'));
+    assert.match(edit, / · 恢复：后于 2026-10-20 同一文件写入成功（seq 8）$/, 'same-file 文案不变');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

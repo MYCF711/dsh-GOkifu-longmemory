@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.69（2026-11-08）
+
+### T34 · 恢复事实分档 exact / same-file / same-tool（提高覆盖率，不混淆）
+
+**版本说明**：`src/rooms/{extract,inject}.mjs`/`scripts/archive.mjs` 行为新增 ⇒ patch。
+
+**分档计数**（真库 1560 条 antipattern，逐档报不合并）：
+**exact 12（0.77%）· same-file 22（1.41%）· same-tool 76（4.87%）**（合计 7.05% 仅作对照）。
+
+**same-tool（新）**：同工具族后来显式成功（`git push`/`node scripts/check.mjs` 族归一；write/edit 同目录族）；
+仍要求同局 + 更靠后 seq + 显式成功。**精确优先**：同一命令永远走 exact，不被 same-tool 抢。
+
+**卡上标清档位**：same-tool ⇒ ` · 恢复（同工具族）：后于 <date> 同工具族后来成功（seq N）`；
+T34 ④ 断言**不含**「同一命令成功」「同一文件写入成功」（不许混）。
+
+**same-tool 是弱证据**（同族≠同一主体，如 `git push` 到另一个 remote）——单列一档 + 明标，
+后续退役/降权时权重应低于 exact。
+
+**tombstone**：`includeSameTool:false` ⇒ 与 T30 逐字节一致。
+
+**注意**：7.05% 是「能找到的恢复事实」变多，**不是**记忆命中率变高（A2b/ablation 不受影响）。
+
+**验收**：extract/inject 132/129；全量 1176/1170/0 fail；check PASS。
+
 ## 0.8.68（2026-11-08）
 
 ### T33 · trial 记录（失败教训后来复发没，Zep 方向）

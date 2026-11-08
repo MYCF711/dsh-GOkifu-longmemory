@@ -342,7 +342,51 @@ export const RECOVERY_FACT_KINDS = Object.freeze([
   'same-command-exit-0',
   'same-command-no-failure',
   'same-file-write-ok',
+  // T34：**同工具族**后来成功（不是同一命令/同一文件；卡上必须标「同工具族」）
+  'same-tool',
 ]);
+
+/**
+ * T34 · 恢复事实的分档（**只用于计数与文案，不合并成一个覆盖率**）：
+ *   · `exact`     —— 同一命令/同一文件，逐字相同（T28 的三档）
+ *   · `same-file` —— 同一个 file_path 后来写成功（T28 第三档）
+ *   · `same-tool` —— 同工具族（命令族 / 同目录的 write/edit）后来显式成功（T34 新增，最弱档）
+ */
+export const RECOVERY_TIER_OF = Object.freeze({
+  'same-command-exit-0': 'exact',
+  'same-command-no-failure': 'exact',
+  'same-file-write-ok': 'same-file',
+  'same-tool': 'same-tool',
+});
+
+/** 恢复事实的种类 → 档位（未知 kind ⇒ null，不猜）。 */
+export function recoveryTierOf(kind) {
+  return RECOVERY_TIER_OF[String(kind ?? '')] ?? null;
+}
+
+/**
+ * T34 · 命令 → **工具族**（机械归一：跳过前置环境变量赋值，取首个非开关词 + 可选的次词）。
+ * 例：`git push origin main` ⇒ `git push`；`node scripts/check.mjs --x` ⇒ `node scripts/check.mjs`；
+ *     `pnpm run test` ⇒ `pnpm run`；`ls -la` ⇒ `ls`。
+ */
+export function recoveryCommandFamily(command) {
+  const tokens = String(command ?? '').split(' ').filter(Boolean);
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i += 1;
+  if (i >= tokens.length) return null;
+  const head = tokens[i].toLowerCase();
+  const next = tokens[i + 1];
+  if (!next || next.startsWith('-')) return head;
+  return `${head} ${next.toLowerCase()}`;
+}
+
+/** T34 · file_path → 目录（归一：反斜杠→斜杠、小写、去尾部斜杠）。 */
+export function recoveryDirOf(filePath) {
+  const p = String(filePath ?? '').replace(/\\/g, '/').toLowerCase();
+  const idx = p.lastIndexOf('/');
+  if (idx < 0) return null;
+  return p.slice(0, idx) || '/';
+}
 
 /** write/edit 工具结果的**成功**标记（DSH 实际文案；没有它就不算"写成功"）。 */
 const WRITE_OK_RE = /has been (?:updated|created|written)(?: successfully)?|Created file|successfully (?:wrote|written|updated|created|replaced)/i;
@@ -389,7 +433,14 @@ function recoveryCallInfo(call) {
   try { args = JSON.parse(call?.data?.arguments ?? '{}'); } catch { args = {}; }
   const fp = args.file_path ?? args.path ?? null;
   const cmd = typeof args.command === 'string' ? args.command.replace(/\s+/g, ' ').trim() : null;
-  return { name, cmd, fp: fp ? recoveryNormPath(fp) : null };
+  return {
+    name,
+    cmd,
+    fp: fp ? recoveryNormPath(fp) : null,
+    // T34：同工具族判据（命令族 / 同目录）
+    family: cmd ? recoveryCommandFamily(cmd) : null,
+    dir: fp ? recoveryDirOf(recoveryNormPath(fp)) : null,
+  };
 }
 
 /** 从失败原文里取"像路径"的主体（没有 ⇒ null；不拿前 N 字兜底，T338）。 */
@@ -475,7 +526,7 @@ export function collectRecoveryFacts({ events = [], episode = null } = {}) {
  * @param {string} quote 失败原文（claim 的 support.quote / 卡行正文）
  * @returns {{kind:string, seq:number, at:number, failureSeq:number, subject:string|null}|null}
  */
-export function findRecoveryFact(index, quote, { nearSeq = null } = {}) {
+export function findRecoveryFact(index, quote, { nearSeq = null, includeSameTool = true } = {}) {
   const prefix = recoveryMatchPrefix(quote);
   if (!prefix) return null;
   const failures = Array.isArray(index?.failures) ? index.failures : [];
@@ -500,6 +551,16 @@ export function findRecoveryFact(index, quote, { nearSeq = null } = {}) {
   if (subjectPath) {
     const later = runs.find((r) => r.seq > cur.seq && (r.name === 'write' || r.name === 'edit') && r.fp === subjectPath && r.ok);
     if (later) return withTime({ kind: 'same-file-write-ok', seq: later.seq, at: later.at, failureSeq: cur.seq, subject: subjectPath });
+  }
+  // ③ T34：**同工具族**后来显式成功（最弱档；卡上必须写「同工具族」，不许写成"同一命令"）
+  if (!includeSameTool) return null;
+  if (cur.name === 'bash' && cur.family) {
+    const later = runs.find((r) => r.seq > cur.seq && r.name === 'bash' && r.family === cur.family && r.exit0);
+    if (later) return withTime({ kind: 'same-tool', seq: later.seq, at: later.at, failureSeq: cur.seq, subject: cur.family });
+  }
+  if ((cur.name === 'write' || cur.name === 'edit') && cur.dir) {
+    const later = runs.find((r) => r.seq > cur.seq && (r.name === 'write' || r.name === 'edit') && r.dir === cur.dir && r.ok);
+    if (later) return withTime({ kind: 'same-tool', seq: later.seq, at: later.at, failureSeq: cur.seq, subject: cur.dir });
   }
   return null;
 }
