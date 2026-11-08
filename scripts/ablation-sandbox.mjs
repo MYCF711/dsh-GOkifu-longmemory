@@ -439,32 +439,42 @@ function prepareSynthetic({ dir, meta, repo }) {
   const only = String(opt('pits', '')).split(',').map((x) => x.trim()).filter(Boolean);
   // T39 变体坑：同类（环境变量未设置）但换了变量名；A 卡仍用 env 坑的卡（泛化测试）
   const envPit = SYNTHETIC_PITS.find((p) => p.key === 'env');
-  const env2Pit = {
-    key: 'env2',
-    title: '同类变体：另一个环境变量（pit-env2）',
-    prompt: 'bash node scripts/t23/pit-env2.mjs',
-    signature: 'Error: T23_PIT: T23_TOKEN2 is not set',
-    why: '同类坑（环境变量未设置）换了一个变量名；raw 恢复事实帮不上（变量名不同），洞见层应能泛化',
-    files: {
-      'scripts/t23/pit-env2.mjs': `#!/usr/bin/env node
-const token = process.env.T23_TOKEN2;
+  // T40：多个同类变体坑（同坑类 env-missing，不同具体形态：变量名 / 脚本名）
+  const VARIANTS = {
+    env2: { token: 'T23_TOKEN2', script: 'pit-env2.mjs', title: '同类变体：T23_TOKEN2' },
+    env3: { token: 'T23_TOKEN3', script: 'pit-env3.mjs', title: '同类变体：T23_TOKEN3' },
+    env4: { token: 'T23_TOKEN4', script: 'pit-envcheck.mjs', title: '同类变体：换脚本名（pit-envcheck）' },
+  };
+  const variantPit = (key) => {
+    const v = VARIANTS[key];
+    return {
+      key,
+      title: v.title,
+      prompt: `bash node scripts/t23/${v.script}`,
+      signature: `Error: T23_PIT: ${v.token} is not set`,
+      why: '同类坑（环境变量未设置）换了具体形态（变量名/脚本名）；raw 恢复事实帮不上，洞见层应能泛化',
+      files: {
+        [`scripts/t23/${v.script}`]: `#!/usr/bin/env node
+const token = process.env.${v.token};
 if (!token) {
-  console.error('Error: T23_PIT: T23_TOKEN2 is not set（先 export T23_TOKEN2=demo 再跑）');
+  console.error('Error: T23_PIT: ${v.token} is not set（先 export ${v.token}=demo 再跑）');
   process.exit(1);
 }
-console.log('t23-env2 OK token=' + token);
+console.log('t23-${key} OK token=' + token);
 `,
-    },
+      },
+    };
   };
+
   const pits = (only.length ? SYNTHETIC_PITS.filter((p) => only.includes(p.key)) : [...SYNTHETIC_PITS]);
-  if (only.includes('env2')) pits.push(env2Pit);
+  for (const k of only.filter((x) => x.startsWith('env') && x !== 'env')) pits.push(variantPit(k));
   const { tasks, cards } = syntheticTasks({ rounds, pits });
   if (cardMode !== 'directive') {
     for (const pit of pits) {
       for (let r = 1; r <= rounds; r += 1) {
         const taskId = `T23-${pit.key}-r${r}`;
         // env2 的 A 卡 = env 坑的卡（同类不同坑 ⇒ 只能靠洞见层泛化）
-        const cardPit = pit.key === 'env2' ? envPit : pit;
+        const cardPit = pit.key === 'env' ? pit : envPit;
         const text = cardMode === 'insight' ? insightCardFor(cardPit) : cardMode === 'recovery' ? recoveryCardFor(cardPit) : factualCardFor(cardPit);
         cards[taskId] = { text, scope: 'w:synthetic/t26', tokens: Math.ceil(text.length / 3), hitCount: 1 };
       }
