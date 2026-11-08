@@ -66,10 +66,10 @@ function makeCtx() {
 }
 
 /** 假 session：`append` 一旦被调用就记下来（用来证明"不写会话事件"）。 */
-function makeSession(cwd) {
+function makeSession(cwd, id = 'session-test0001') {
   const appended = [];
   const session = {
-    id: 'session-test0001',
+    id,
     cwd,
     append: (...args) => {
       appended.push(args);
@@ -228,8 +228,9 @@ test('R16: 同一会话第二次调用 ⇒ 不再注入（WeakSet 记住这个 s
     const second = await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 还是装不上')] }, decision: secondOriginal });
     assert.equal(second, secondOriginal, '第二次必须原样返回');
 
-    // 换一个会话（新对象）⇒ 又能注入
-    const other = makeSession(workspace).session;
+    // 换一个会话（新对象 + **新 id**）⇒ 又能注入
+    // T25：只换对象不换 id 不算新会话（宿主每步都换对象，id 才是会话身份）
+    const other = makeSession(workspace, 'session-test0002').session;
     const third = await runHook({ hooks, payload: { agent: { session: other }, messages: [userMessage('yaml 装不上')] }, decision: enterDecision([userMessage('yaml 装不上')]) });
     assert.equal(third.messages.length, 2, '新会话仍然只注入一次');
   } finally {
@@ -251,6 +252,99 @@ test('R16: oncePerSession:false ⇒ 每步都能注入（配置可关掉这条�
   } finally {
     cleanup();
   }
+});
+
+// ---------------------------------------------------------------------------
+// T25 · oncePerSession 必须按 **session.id**（不是 session 对象身份）
+//
+// 背景（T24 实测）：同一宿主进程内、同一 session.id 的重复注入 **69/69**（如 `634616f8` 的同一张卡
+// `08840121f2c29be4` 投 9 次、跨 6 小时）—— 根因是 `new WeakSet()` 按对象身份判，宿主每个 pre-step
+// 可能给一个新 session 对象 ⇒ 永远判「没注入过」。`session.id` 是本仓一贯的会话键（LAST_SCOPE、repeatStateFor 都用）。
+//
+// tombstone：把判定改回 WeakSet/对象身份 ⇒ T25 ① 红（同 id、不同对象会注入两次）。
+// ---------------------------------------------------------------------------
+import { sessionIdOf } from '../src/plugin.mjs';
+
+test('T25 ①: 同一 session.id、不同 session 对象（模拟宿主每步新对象）⇒ 只注入一次', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot }));
+    // 两个**不同对象**、同一个 id —— 修复前 WeakSet 会把它们当两个会话
+    const first = makeSession(workspace, 'session-t25-aaaa').session;
+    const second = makeSession(workspace, 'session-t25-aaaa').session;
+    const a = await runHook({ hooks, payload: { agent: { session: first }, messages: [userMessage('yaml 装不上')] }, decision: enterDecision([userMessage('yaml 装不上')]) });
+    assert.equal(a.messages.length, 2, '第一次应当注入');
+    const secondOriginal = enterDecision([userMessage('yaml 还是装不上')]);
+    const b = await runHook({ hooks, payload: { agent: { session: second }, messages: [userMessage('yaml 还是装不上')] }, decision: secondOriginal });
+    assert.equal(b, secondOriginal, '同一 session.id 的第二次必须原样返回（WeakSet 时代这里会再注入一次）');
+  } finally {
+    cleanup();
+  }
+});
+
+test('T25 ②: 不同 session.id ⇒ 各自注入一次（不是按对象/全局一刀切）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot }));
+    for (const id of ['session-t25-bbbb', 'session-t25-cccc']) {
+      const { session } = makeSession(workspace, id);
+      const out = await runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: enterDecision([userMessage('yaml 装不上')]) });
+      assert.equal(out.messages.length, 2, `会话 ${id} 应当各自拿到一次注入`);
+    }
+  } finally {
+    cleanup();
+  }
+});
+
+test('T25 ③: 无 id 不炸，退回旧行为（同一对象第二次不再注入；不同对象视为不同会话）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot }));
+    const s1 = makeSession(workspace).session;
+    delete s1.id; // 宿主极端情况下没有 id
+    const s2 = makeSession(workspace).session;
+    delete s2.id;
+    const run = (session) => runHook({ hooks, payload: { agent: { session }, messages: [userMessage('yaml 装不上')] }, decision: enterDecision([userMessage('yaml 装不上')]) });
+    const a = await run(s1);
+    assert.equal(a.messages.length, 2, '无 id 也要能正常注入（不炸）');
+    const b = await run(s1);
+    assert.notEqual(b.messages?.length, 2, '无 id 时同一对象第二次仍按旧行为拦住');
+    const c = await run(s2);
+    assert.equal(c.messages.length, 2, '无 id 的不同对象按旧行为视为不同会话');
+    // 极端：payload.session 直接是字符串（没有 .id）⇒ 不许炸（WeakSet 只能收对象）
+    const stringOut = await runHook({ hooks, payload: { agent: { session: 'session-string-no-id' }, messages: [userMessage('yaml 装不上')] }, decision: enterDecision([userMessage('yaml 装不上')]) });
+    assert.ok(stringOut && stringOut.kind === 'enter', '字符串 session 不许炸');
+  } finally {
+    cleanup();
+  }
+});
+
+test('T25 ④: oncePerSession:false ⇒ 同一 session.id 每步都注入（向后兼容）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot, oncePerSession: false }));
+    const session = makeSession(workspace, 'session-t25-dddd').session;
+    const payload = { agent: { session }, messages: [userMessage('yaml 装不上')] };
+    const a = await runHook({ hooks, payload, decision: enterDecision([userMessage('yaml 装不上')]) });
+    const b = await runHook({ hooks, payload, decision: enterDecision([userMessage('yaml 装不上')]) });
+    assert.equal(a.messages.length, 2);
+    assert.equal(b.messages.length, 2, '关掉限流后同 id 每步都要注入（行为不变）');
+  } finally {
+    cleanup();
+  }
+});
+
+test('T25 ⑤: sessionIdOf 只认非空字符串 id（其它一律 null，走旧行为兜底）', () => {
+  assert.equal(sessionIdOf({ id: 'session-x' }), 'session-x');
+  assert.equal(sessionIdOf({ id: '   ' }), null);
+  assert.equal(sessionIdOf({}), null);
+  assert.equal(sessionIdOf({ id: 123 }), null);
+  assert.equal(sessionIdOf(null), null);
+  assert.equal(sessionIdOf('session-string'), null, 'session 本身是字符串时不算（避免把对象与字符串混为一谈）');
 });
 
 // ---------------------------------------------------------------------------
@@ -1490,14 +1584,15 @@ test('T16 ③ 接线: 真注入撞上限 ⇒ live-stats 出现 card-samples-cap�
 
     const { ctx, hooks, warns } = makeCtx();
     apply(ctx, baseConfig({ storeRoot, sampleCards: true, liveStats: true, probeValidity: false }));
-    const injectOnce = async () => {
-      const { session } = makeSession(workspace);
+    const injectOnce = async (id) => {
+      // T25：两次必须是**不同 session.id** —— 同 id 第二次会被 oncePerSession 拦住，这里要测的是撞上限
+      const { session } = makeSession(workspace, id);
       const claimed = [userMessage('yaml 装不上')];
       const out = await runHook({ hooks, payload: { agent: { session }, messages: claimed }, decision: enterDecision([...claimed]) });
       assert.equal(out.messages.length, 2, '有命中就必须注入（否则撞不到留样这一步）');
     };
-    await injectOnce();
-    await injectOnce();
+    await injectOnce('session-t16-cap-a');
+    await injectOnce('session-t16-cap-b');
 
     assert.equal(statSync(file).size, CARD_SAMPLE_CAP_BYTES, '撞上限后不许再写（文件不再长大）');
     const capRows = readFileSync(path.join(storeRoot, 'live-stats.jsonl'), 'utf8').trim().split('\n')

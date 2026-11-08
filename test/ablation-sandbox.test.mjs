@@ -130,3 +130,56 @@ test('T17 ②b 副本脱敏：只动含本批 errorText 的文本文件，其他
   assert.match(fs.readFileSync(path.join(dir, 'binary.bin'), 'utf8'), /Error: unknown job bash-1234567890/, '.bin 不是文本类，不扫');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------------------
+// T23 · 合成坑（synthetic pits）
+// ---------------------------------------------------------------------------
+import { SYNTHETIC_PITS, syntheticTasks } from '../scripts/ablation-sandbox.mjs';
+
+test('T23 合成坑：4 个坑 × rounds 轮，taskId 唯一、每题都有卡与签名', () => {
+  const { tasks, cards } = syntheticTasks({ rounds: 3 });
+  assert.equal(SYNTHETIC_PITS.length, 4);
+  assert.equal(tasks.length, 12);
+  assert.equal(new Set(tasks.map((t) => t.taskId)).size, 12);
+  for (const t of tasks) {
+    assert.ok(t.taskPrompt.startsWith('bash '));
+    assert.ok(t.signature.startsWith('Error: T23_PIT:'));
+    assert.ok(cards[t.taskId].text.includes(t.signature), `卡必须写明该坑的错误：${t.taskId}`);
+    assert.ok(cards[t.taskId].hitCount >= 1);
+  }
+});
+
+test('T23 合成坑：每坑自带的脚本在踩坑分支里确实输出对应签名（静态核对）', () => {
+  for (const pit of SYNTHETIC_PITS) {
+    const all = Object.values(pit.files).join('\n');
+    assert.ok(all.includes(pit.signature), `坑 ${pit.key} 的脚本必须包含签名`);
+    assert.ok(pit.why.length >= 10, '每个坑必须写「为什么无记忆会踩」');
+  }
+});
+
+test('T23 合成坑：题面只给动作、不暴露坑名/修复方式（防「只有 A 能避开」）', () => {
+  for (const pit of SYNTHETIC_PITS) {
+    assert.ok(!/T23_PIT|T23_TOKEN|--offline|pit-init|scripts\/t23/.test(pit.prompt.replace(/node scripts\/t23\/[a-z-]+\.mjs/, '')), `题面不该带修复提示：${pit.prompt}`);
+    assert.ok(!pit.prompt.includes(pit.signature));
+  }
+});
+
+// T23 合成坑判分：签名出现在任意 tool/result 文本里即算踩坑（不依赖「第一失败行」）
+import { syntheticHit } from '../scripts/ablation-sandbox.mjs';
+
+test('T23 判分：错误串即使不是第一个失败行也要判为踩坑', () => {
+  const ev = { type: 'tool/result', data: { output: '[exit code: 1]\nError: T23_PIT: T23_TOKEN is not set（先 export）' } };
+  assert.equal(syntheticHit({ task: { signature: 'Error: T23_PIT: T23_TOKEN is not set' }, events: [ev] }), true);
+});
+
+test('T23 判分：只在 user/system 事件里出现不算（防卡正文自证）', () => {
+  const ev = { type: 'user/message', data: { text: 'Error: T23_PIT: T23_TOKEN is not set' } };
+  assert.equal(syntheticHit({ task: { signature: 'Error: T23_PIT: T23_TOKEN is not set' }, events: [ev] }), false);
+});
+
+test('T23 判分：read 到源码里的错误串（exit 0）不算踩坑，必须是执行失败', () => {
+  const readEv = { type: 'tool/result', data: { output: "console.error('Error: T23_PIT: T23_TOKEN is not set');\n[exit code: 0]" } };
+  assert.equal(syntheticHit({ task: { signature: 'Error: T23_PIT: T23_TOKEN is not set' }, events: [readEv] }), false);
+  const failEv = { type: 'tool/result', data: { output: 'Error: T23_PIT: T23_TOKEN is not set\n[exit code: 1]' } };
+  assert.equal(syntheticHit({ task: { signature: 'Error: T23_PIT: T23_TOKEN is not set' }, events: [failEv] }), true);
+});

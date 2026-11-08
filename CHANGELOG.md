@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.59（2026-11-08）
+
+### T25 · 修 oncePerSession 失效（WeakSet 按对象身份 ⇒ 按 session.id）
+
+**版本说明**：`src/plugin.mjs` 行为修复 ⇒ patch。
+
+**根因**：`oncePerSession` 用 WeakSet 按 session **对象身份**判会话；宿主每次 pre-step 可能给新对象
+⇒ 永远判「没注入过」。T24 实测同会话重复 **69/69 全在同一 pid**。
+
+**修法**：`injectedIds = new Set()`（session.id 主判据）+ 无 id 时 WeakSet 旧行为兜底；
+`sessionIdOf(session)` 唯一入口，与 LAST_SCOPE / repeatStateFor 同一把 id。
+
+**修复前后（634616f8 会话重放）**：单会话 **35 次 → ≈4 次（−88.6%）**；
+同卡同会话 9 次 → 1 次；全库 11 scope 注入次数 −20.1%～−28.5%。
+
+**tombstone**：同 id 两个不同对象只注一次；改回对象身份即红（实证）。oncePerSession:false 行为不变。
+
+**注意**：进程内 Set，宿主重启清空（与旧 WeakSet 生命周期一致）；**线上生效需重启**。
+
 ## 0.8.58（2026-11-08）
 
 ### T24 · redundant 重复注入测量（两个口径差 7.6 倍，不能混用）

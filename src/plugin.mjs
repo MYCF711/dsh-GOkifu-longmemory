@@ -679,7 +679,8 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
   const store = deps.createStore({ root: storeRoot });
   const cwd = typeof session?.cwd === 'string' && session.cwd.trim() !== '' ? session.cwd : process.cwd();
   const resolved = resolveSessionScope({ session, store, storeRoot });
-  if (typeof session?.id === 'string') LAST_SCOPE.set(session.id, resolved);
+  const sid = sessionIdOf(session);
+  if (sid) LAST_SCOPE.set(sid, resolved);
   const scope = resolved.scope;
   // T332：**costIndex 接线** —— 读预计算 sidecar（`<store>/corpus/antipattern-cost.json`），
   // 交给 `buildMemoryCard` 做 `cost: 0` 降级门。**只读、失败静默**（索引缺失 ⇒ 不过滤，行为不变）。
@@ -1064,6 +1065,16 @@ function repeatStateFor(map, session, after) {
 const SESSION_SCOPE_CACHE = new WeakMap();
 const LAST_SCOPE = new Map();
 export function lastResolvedScope(sessionId) { return sessionId ? (LAST_SCOPE.get(sessionId) ?? null) : null; }
+
+/**
+ * T25：**稳定的会话标识** = `session.id`（宿主每个 pre-step 可能给一个新对象，但 id 不变）。
+ *
+ * 这是本仓一贯的会话键：`LAST_SCOPE`（`Map<session.id, scope>`）与 `repeatStateFor`（D5 状态）
+ * 都用它 —— 这里沿用同一把 id，不引入第二个会话标识。无 `id`（或空串）⇒ `null`，调用方退回旧行为。
+ */
+export function sessionIdOf(session) {
+  return typeof session?.id === 'string' && session.id.trim() !== '' ? session.id : null;
+}
 export function sessionScopeIndex(store) {
   if (!store || typeof store.list !== 'function') return new Map();
   const hit = SESSION_SCOPE_CACHE.get(store);
@@ -1382,7 +1393,11 @@ export function makeUserMessageFallback(input) {
 
 export function apply(ctx, rawConfig = {}) {
   const config = resolveConfig(rawConfig);
-  const injected = new WeakSet(); // 每会话只注入一次（对象身份；WeakSet 不留引用）
+  // T25：**按 `session.id` 判「本会话已注入」** —— 宿主每个 pre-step 给的 session 可能是新对象，
+  // WeakSet 的对象身份会让 oncePerSession 永远判"没注入过"（T24 实测：同会话同 pid 重复注入 69/69）。
+  // `session.id` 与 `LAST_SCOPE` / `repeatStateFor` 是同一个稳定键；无 id 时才退回 WeakSet（旧行为兜底）。
+  const injectedIds = new Set(); // session.id ⇒ 已注入
+  const injectedObjects = new WeakSet(); // 无 id 的 session 对象 ⇒ 旧行为兜底（不泄漏引用）
   const repeatStates = new Map(); // D5：每个会话的「同类失败计数」
   const cardSampleCapNotified = new Set(); // T16：撞卡样本上限只报一次（按 storeRoot）
   const liveStatsCapNotified = new Set(); // T18：撞心跳上限只报一次（按 storeRoot）
@@ -1400,6 +1415,7 @@ export function apply(ctx, rawConfig = {}) {
       disposed = true;
       disposePromise = (async () => {
         repeatStates.clear();
+        injectedIds.clear();
         cardSampleCapNotified.clear();
         liveStatsCapNotified.clear();
         lifecycle.corpusCapNotified.clear();
@@ -1528,6 +1544,9 @@ export function apply(ctx, rawConfig = {}) {
       if (!Array.isArray(decision.messages)) return decision;
 
       const session = payload?.agent?.session ?? payload?.session ?? null;
+      const sessionId = sessionIdOf(session); // T25：按 id 判会话（宿主每步可能换对象）
+      // T25：WeakSet 只能收对象 —— 极端情况下 payload.session 可能是字符串，兜底时先判类型（不许炸）
+      const sessionObject = session && typeof session === 'object' ? session : null;
 
       // D5：先看这一刀有没有"同类失败反复"。它不受 oncePerSession 限制，但每会话有上限。
       if (config.repeatHint && (config.enabled || config.shadow)) {
@@ -1570,7 +1589,9 @@ export function apply(ctx, rawConfig = {}) {
         }
       }
 
-      if (config.oncePerSession && session && injected.has(session)) return decision;
+      if (config.oncePerSession && session) {
+        if (sessionId ? injectedIds.has(sessionId) : (sessionObject ? injectedObjects.has(sessionObject) : false)) return decision;
+      }
 
       const deps = await resolveDeps(config);
       const result = await decidePreStep({ ctx, config, deps, payload, decision, lifecycle });
@@ -1628,9 +1649,12 @@ export function apply(ctx, rawConfig = {}) {
         // 所有整文件读者都能看见；不写新文件，免得"留了痕但没人读"）。
         traceLiveStatsCap({ ctx, storeRoot: storeRootForStats, result: liveStatsWrite, notified: liveStatsCapNotified });
       }
-      // 真注入成功 / 影子记录写成 ⇒ 这个会话就别再来一遍
+      // 真注入成功 / 影子记录写成 ⇒ 这个会话就别再来一遍（T25：按 session.id 记；无 id 才按对象）
       if (result.action === 'inject' || result.action === 'shadow') {
-        if (session) injected.add(session);
+        if (session) {
+          if (sessionId) injectedIds.add(sessionId);
+          else if (sessionObject) injectedObjects.add(sessionObject);
+        }
       }
       return result.decision ?? decision;
     } catch (error) {
@@ -1680,6 +1704,7 @@ export default {
   sanitizeConfig,
   messageText,
   lastUserText,
+  sessionIdOf,
   CARD_SAMPLE_SIGNAL_LIMIT,
   cardSampleSignal,
   CARD_SAMPLE_CAP_BYTES,
