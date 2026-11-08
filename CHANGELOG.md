@@ -17,6 +17,44 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.51（2026-11-08）
+
+### T13 跟进（t7）+ T16 留样上限（t8）
+
+**版本说明**：`src/plugin.mjs` 行为变更（留样上限与 trace）⇒ patch（`v0.9.0` 仍被旧线占用）。
+
+#### T13 跟进：标注定点修 + polarity 快照标注 + T2 回归假红
+
+- `label-set.json` 定点修 `#4`（relevant→irrelevant + stratum→hard）、`#14`（stratum→rel），
+  派生统计同步（irrelevantRatio 46.7%→**47.4%**、hardNegatives 49→**50**），其余行逐字不变；
+- 新增 `polaritySnapshot{commit:55ec9ef, module}` 标明 polarity 字段是 **T1 旧判据快照**，
+  并附 `headRecount`（HEAD 重算：可判率 **19.26%**、`usableForDecision:false`）——
+  修掉「快照数据却写着可用于决策」的误导；
+- T2 回归改用**固定 pairId 清单**，不再依赖 polarity 快照字段（修掉定点修后的假红）。
+
+#### T16 · card-samples 留样上限 8MB → 64MB，撞线不再静默
+
+**选抬上限不选轮转（机械理由）**：`card-samples.jsonl` 有**两个独立读者**
+（`audit-card-samples.mjs` 与 `offset-attribution.mjs`）都直接读规范路径；轮转会把它静默变成「只剩最新一段」，
+第二个读者无声少读历史——正是本刀要消灭的那类静默失效。抬上限 = 零读者改动、旧文件逐字节不变。
+
+**撞线留痕**：`appendCardSample` 返回 `{status: written|capped|absent|failed, fileBytes}`；
+撞线时 `ctx.logger.warn` + 向 live-stats 追加 `{kind:"card-samples-cap"}`（每实例/每库一次，不刷屏）。
+
+**新估算**（真实行宽）：T10 后新行 mean **2410B** ⇒ 8MB 只够 ≈3480 行 ≈ **12–14 天**；
+64MB ≈ 27800 行 ≈ **94–114 天**。
+
+**有意不做自动恢复**：自动删历史会毁审计证据；warn 文案写明「归档或抬上限后恢复」。
+
+#### 验收
+
+- `test/plugin.test.mjs` 63/63 · `test/abstain.test.mjs` 32/32 · `test/audit-card-samples.test.mjs` 22/22
+- tombstone 双向实证（删实现即红，复原 sha256 一致）
+- 版本 0.8.50 → **0.8.51**
+
+**遗留**：`live-stats.jsonl` 自身无上限（比卡样本长得更快），建议下一刀同形状处理。
+
+---
 ## 0.8.50（2026-11-08）
 
 ### 第二阶段首批：T9 安全与有效性 / T10 / T11 / T13 / T14
