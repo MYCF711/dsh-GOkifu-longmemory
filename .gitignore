@@ -9,3 +9,4 @@ evidence/shadow/
 evidence/metrics-guard.json
 evidence/T268-messages.jsonl
 .agent-teams/
+evidence/ablation-live.jsonl
