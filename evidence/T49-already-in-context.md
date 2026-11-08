@@ -113,3 +113,24 @@ node scripts/check.mjs → PASS
   （新 agent 作用域 / 插件重载 / 会话再 seed 三选一未定）。本修法**不依赖**这个结论成立。
 - **D5 补卡路径**只加了同一条闸 + 单测覆盖到主路径；D5 自身的触发面（`repeatHintMax=1`，也是内存态）
   没单独测"重新 apply 后会不会再补一张"——它的上限是 1，量级小，留作观察。
+
+## 六、补记（2026-11-09 07:12）：根因定位到 `session/end-seed`
+
+上一版写的是"`apply` 跑了不止一次，具体触发点（新 agent 作用域 / 插件重载 / 会话再 seed）三选一未定"。
+现在定位了：**是"会话再 seed"**。
+
+判据：把「上一次注入」到「这一次注入」之间有没有 `session/end-seed` 事件数出来。
+
+```
+会话 aa0b0da9（16 turn · 15 个 session/end-seed · 4 次 compaction）· 注入 11 次
+  第 2..11 次注入，其间 seed 数 = 1,1,1,2,1,2,1,2,1,1   ⇒ **10/10 都夹着 ≥1 个 end-seed**
+
+会话 2dbed42d（6 turn · **0** 个 session/end-seed · 0 次 compaction）· 注入 **1** 次
+  之后 128 分钟零心跳（被 oncePerSession 正常拦住，见 evidence/T52 的补记）
+```
+
+对照很清楚：**有 end-seed 的会话每轮重投，没有的一次都不重投**。
+机制上也对得上：`session/end-seed` ⇒ 下一轮 agent 重建 ⇒ 插件重新 `apply()` ⇒ `injectedIds` 是新的空集。
+
+**这不动摇 T49 的修法** —— 修法不依赖"什么时候重新 apply"（判据是上下文事实，不是内存状态）；
+它解释的是"为什么有的会话每次 turn 重投、有的从不重投"，也解释了为什么 `patrol` 的 10.53% 不像 100% 那么高。

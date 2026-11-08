@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 更正 · 2026-11-09（T49 根因补正：`session/end-seed`）
+
+- **原文是什么**：0.8.88 段写「`apply` 为什么重复跑只证到"跑了不止一次"，没定位到具体触发点
+  （新 agent 作用域 / 插件重载 / 会话再 seed 三选一未定）」。
+- **正确是什么**：**是"会话再 seed"**。`session/end-seed` 事件 ⇒ 下一轮 agent 重建 ⇒ 插件重新 `apply()`
+  ⇒ 内存 `injectedIds` 归零 ⇒ 同一张卡在下一轮又被投一次。
+- **依据**：`aa0b0da9`（16 turn · 15 个 end-seed）的 10 次重复注入，**10/10** 都在与上一次注入之间
+  夹着 ≥1 个 `session/end-seed`；对照会话 `2dbed42d`（6 turn · **0** 个 end-seed）注入 **1** 次、
+  之后 128 分钟零心跳（被 `oncePerSession` 正常拦住）。见 `evidence/T49-already-in-context.md` §六、
+  `evidence/T52-once-per-session-tombstone.md` §六。
+- **影响**：T49 的修法**不依赖**这个结论（判据是上下文事实，不是内存状态）；这个补正解释的是
+  "为什么有的会话每轮重投、有的从不重投"，也解释了 `A1.redundant` 10.53% 而不是接近 100%。
+
+## 0.8.93（2026-11-09）
+
+### 更正段：T49 根因补正 + T52 补记（文档）
+
+**版本说明**：只改 `evidence/` 与 CHANGELOG 更正段 ⇒ patch。
+
+见文首「更正 · 2026-11-09」：把 T49 的根因从"三选一未定"补正为 `session/end-seed`（10/10 相关），
+并把 T52 里那句"这次的 128 分钟无法定性"补成已定性（= 被 `oncePerSession` 拦下）。
+
 ## 0.8.92（2026-11-09）
 
 ### T52 · 「被 oncePerSession 拦下」在心跳台账里留一条墓碑行
