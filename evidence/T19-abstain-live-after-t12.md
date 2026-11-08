@@ -112,7 +112,7 @@ T10 把 `signalPreview` 从 160 上限改成 4096（自称"真实语料 495 条�
 | 9 | 09:19:33 | `a2c5c427` | 114 | captain → task t10：t13 已完成，t10 可领取 | 同 #1 | **正确** |
 | 10 | 09:20:41 | `d468371d` | 168 | **未能重建**（库刷新后 digest 漂移） | — | **无法判** |
 | 11 | 09:20:55 | `6c5bc432` | 133 | **未能重建** | — | **无法判** |
-| 12 | 09:25:26 | `463c91ec` | 132 | **未能重建**（同一时点在 09:25 的重放曾匹配 `7f4afd4d#1057`：annotator-d 汇报 t12 完成；现已漂移） | 曾重建：`git branch name` 错误 + `rm: … Device or resource busy` | **无法判**（若按当时重建稿：**正确**） |
+| 12 | 09:25:26 | `463c91ec` | 132 | **未能重建**（此前一次重放曾匹配 `7f4afd4d#1057`：annotator-d 汇报 t12 完成；库刷新后 digest 已漂移） | 曾重建：`git branch name` 错误 + `rm: … Device or resource busy` | **无法判**（若按当时重建稿：**正确**） |
 | 13 | 09:26:15 | `a2c5c427` | 114 | captain → task t10（同上） | 同 #1 | **正确** |
 | 14 | 10:00:34 | `c15e36f9` | 147 | 任务分配：`plugin-dev` / T10（团队目标含「release 幂等」） | `failed to push some refs …/releases/tag/v0.2.41` | **误杀（弱）** |
 | 15 | 10:01:39 | `c15e36f9` | 147 | `[SCHEDULE REMINDER BATCH]`（02:00Z） | 同上 | **误杀（弱）** |
@@ -130,7 +130,7 @@ T10 把 `signalPreview` 从 160 上限改成 4096（自称"真实语料 495 条�
 |---|---|---|
 | **按拒绝事件（可核 12 条）** | 4 / 12 | **33.3%** |
 | 按不同卡（4 张卡：`a2c5c427`×7 / `43275e54`×1 / `c15e36f9`×4 / `463c91ec`×1 未判） | 1 / 3 可判 | **33.3%（1/3）** |
-| 含"无法判"的保守上界 | (4+0) / 12 | 33.3%（无法判的 4 条不计入分子） |
+| 上界（假设 4 条"无法判"也全是误杀） | (4+4) / 16 | **50.0%** |
 
 **这不是 T12 的误杀率，不能拿去闭环 T12。** 它是"**pre-T12 代码在 08:22–10:10 这段真实流量上的误杀率**"。
 与 T11 的 77.3% 不同口径也不可直接比：T11 是"33 条重放（覆盖 3 个团队 11 个会话）"，本批是"线上实际发生的 16 次（集中在 2 个 scope、4 张卡）"。
@@ -197,8 +197,9 @@ git show e977859^:src/rooms/abstain.mjs > tmp/abstain-pre-t12.mjs   # 旧判据�
 powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='DeepSeek Harness.exe'\" | Select ProcessId,ParentProcessId"
 git log -1 --format='%ci %s' e977859        # T12 合入 2026-11-08 08:21:27
 
-# 2) 线上分布
-node -e "统计 live-stats 的 action/reason 分布（见 §二 表）"
+# 2) 线上分布（见 §二 表）
+node -e "const fs=require('fs');const r=fs.readFileSync('D:/DeepSeek Harness/home/memory-context/live-stats.jsonl','utf8').split(/?
+/).filter(Boolean).map(JSON.parse);const c={};for(const x of r){const k=x.action+'/'+x.reason;c[k]=(c[k]||0)+1}console.log(r.length,JSON.stringify(c))"
 ```
 
 **关键数（复核请对这四个数）**：
