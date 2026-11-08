@@ -370,6 +370,23 @@ export function recoveryCardFor(pit) {
   return base.split('\n</memory-ledger>').join(`${rec}\n</memory-ledger>`);
 }
 
+/** T39：坑类（洞见层）。按 T38 分类器口径：env/flag/order/cwd 各归一类。 */
+export const PIT_CLASS = {
+  env: { id: 'env-missing', gloss: '环境变量未设置' },
+  env2: { id: 'env-missing', gloss: '环境变量未设置' },
+  flag: { id: 'missing-flag', gloss: '缺省参数/开关未给' },
+  order: { id: 'wrong-order', gloss: '初始化顺序不对' },
+  cwd: { id: 'wrong-cwd', gloss: '运行目录不对' },
+};
+
+/** T39：事实型卡 + **洞见层**恢复事实（坑类陈述 + T28 卡尾事实；只写事实，不写祈使）。 */
+export function insightCardFor(pit) {
+  const base = factualCardFor(pit);
+  const cls = PIT_CLASS[pit.key] ?? { id: 'unknown', gloss: '' };
+  const rec = ` · 恢复（class:${cls.id}：${cls.gloss}）：后于 2026-11-08 同一命令 \`${RECOVERY_CMD[pit.key] ?? ''}\` 成功（exit 0, seq 2）`;
+  return base.split('\n</memory-ledger>').join(`${rec}\n</memory-ledger>`);
+}
+
 /**
  * 生成合成坑题集：每个坑 × rounds 轮，taskId = `T23-<pit>-r<round>`。
  * 纯函数（不碰磁盘），便于单测。
@@ -392,7 +409,7 @@ export function syntheticTasks({ rounds = 3, pits = SYNTHETIC_PITS } = {}) {
         signature: pit.signature,
         errorText: pit.signature,
       });
-      cards[taskId] = { text: pit.card, scope: 'w:synthetic/t23', tokens: Math.ceil(pit.card.length / 3), hitCount: 1 };
+      cards[taskId] = { text: pit.card, scope: 'w:synthetic/t23', tokens: Math.ceil(String(pit.card ?? '').length / 3), hitCount: 1 };
     }
   }
   return { tasks, cards };
@@ -418,15 +435,37 @@ export function syntheticHit({ task, events } = {}) {
 function prepareSynthetic({ dir, meta, repo }) {
   const rounds = Math.max(1, Number(opt('rounds', '3')));
   const card = String(opt('card', 'directive'));
-  const cardMode = card === 'factual' || card === 'recovery' ? card : 'directive';
+  const cardMode = ['factual', 'recovery', 'insight'].includes(card) ? card : 'directive';
   const only = String(opt('pits', '')).split(',').map((x) => x.trim()).filter(Boolean);
-  const pits = only.length ? SYNTHETIC_PITS.filter((p) => only.includes(p.key)) : SYNTHETIC_PITS;
+  // T39 变体坑：同类（环境变量未设置）但换了变量名；A 卡仍用 env 坑的卡（泛化测试）
+  const envPit = SYNTHETIC_PITS.find((p) => p.key === 'env');
+  const env2Pit = {
+    key: 'env2',
+    title: '同类变体：另一个环境变量（pit-env2）',
+    prompt: 'bash node scripts/t23/pit-env2.mjs',
+    signature: 'Error: T23_PIT: T23_TOKEN2 is not set',
+    why: '同类坑（环境变量未设置）换了一个变量名；raw 恢复事实帮不上（变量名不同），洞见层应能泛化',
+    files: {
+      'scripts/t23/pit-env2.mjs': `#!/usr/bin/env node
+const token = process.env.T23_TOKEN2;
+if (!token) {
+  console.error('Error: T23_PIT: T23_TOKEN2 is not set（先 export T23_TOKEN2=demo 再跑）');
+  process.exit(1);
+}
+console.log('t23-env2 OK token=' + token);
+`,
+    },
+  };
+  const pits = (only.length ? SYNTHETIC_PITS.filter((p) => only.includes(p.key)) : [...SYNTHETIC_PITS]);
+  if (only.includes('env2')) pits.push(env2Pit);
   const { tasks, cards } = syntheticTasks({ rounds, pits });
   if (cardMode !== 'directive') {
     for (const pit of pits) {
       for (let r = 1; r <= rounds; r += 1) {
         const taskId = `T23-${pit.key}-r${r}`;
-        const text = cardMode === 'recovery' ? recoveryCardFor(pit) : factualCardFor(pit);
+        // env2 的 A 卡 = env 坑的卡（同类不同坑 ⇒ 只能靠洞见层泛化）
+        const cardPit = pit.key === 'env2' ? envPit : pit;
+        const text = cardMode === 'insight' ? insightCardFor(cardPit) : cardMode === 'recovery' ? recoveryCardFor(cardPit) : factualCardFor(cardPit);
         cards[taskId] = { text, scope: 'w:synthetic/t26', tokens: Math.ceil(text.length / 3), hitCount: 1 };
       }
     }

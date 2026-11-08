@@ -234,3 +234,25 @@ test('T29 恢复事实卡 vs 事实型卡：前者多恢复尾注，失败事实
     assert.ok(!factual.includes('恢复：'));
   }
 });
+
+// ---------------------------------------------------------------------------
+// T39 · 洞见层恢复事实（坑类陈述）
+// ---------------------------------------------------------------------------
+import { insightCardFor, PIT_CLASS } from '../scripts/ablation-sandbox.mjs';
+
+test('T39 洞见层卡：恢复事实带坑类陈述，且仍只写事实', () => {
+  for (const pit of SYNTHETIC_PITS) {
+    const c = insightCardFor(pit);
+    const cls = PIT_CLASS[pit.key];
+    assert.ok(cls && cls.id, `每个坑必须有坑类：${pit.key}`);
+    assert.ok(c.includes(`恢复（class:${cls.id}：${cls.gloss}）`), '必须带坑类陈述');
+    assert.ok(c.includes(RECOVERY_CMD[pit.key]), '恢复事实里仍写明当时成功的那条命令');
+    assert.ok(!/不要|应该|先跑|直接执行|请|务必/.test(c), '洞见层卡也不许祈使句');
+  }
+});
+
+test('T39 坑类：env 与同类变体同属 env-missing（供泛化测试）', () => {
+  assert.equal(PIT_CLASS.env.id, 'env-missing');
+  assert.equal(PIT_CLASS.env2.id, 'env-missing');
+  assert.equal(new Set([PIT_CLASS.env.id, PIT_CLASS.flag.id, PIT_CLASS.order.id, PIT_CLASS.cwd.id]).size, 4);
+});
