@@ -17,6 +17,63 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.79（2026-11-08）
+
+### T43 · 语义联想检索试点：**负结果**（没有比机械检索准，不接）
+
+**版本说明**：实验证据 ⇒ patch。
+
+**模型**：paraphrase-multilingual-MiniLM-L12-v2（384 维，缓存 458MB）。
+
+**E1（118 题 / 403 对，A2b strict 标注）**：语义余弦 AUC **0.8386** vs 机械 overlap **0.8503**（打平略输）。
+对 related 标签 AUC **0.4986 ≈ 随机** —— 语义不认识「support 在哪一局」这个证据归属。
+
+**E2（全库检索）**：walk top-5 hit@5 **0.670**；embedding 全库 top-5 **0.331**、同 scope 0.568。
+**语义找的是「主题相近的另一条教训」，不是「这道题真正相关的记忆」。**
+
+**成本**：冷加载 12s + ~1GB RAM ⇒ 进不了 pre-step 热路径。
+
+**结论：不替换、不加兜底。** 失败点是**口径错位**（相关性 ≠ 主题相似），不是模型容量（换 BGE-M3 也解决不了）。
+
+**这印证了 MemUse 的判据**：相关性是「共享机制/适用程序」，不是「主题相近」。
+**唯一苗头**：机械盲区 overlap=0 的 313 对（余弦 AUC 0.751），但只有 18 个 strict 正例，另立任务扩样本再判。
+
+**验收**：真实数据对照 + 成本数字 + 明确「不接」建议。check PASS。
+
+## 0.8.78（2026-11-08）
+
+### 仓库对外整理：README 简洁化 + kifu-loader 角色写清
+
+**版本说明**：文档 ⇒ patch。
+
+**普通用户只需开 `dsh-gokifu-longmemory` 本体**（自包含，核心 = src/plugin.mjs）。
+`packages/kifu-loader` 是**开发专用软链加载器**，`package.json` 的 `files` 不含 `packages/`，**不会被打包分发**。
+
+**README 重写为简洁版**（给人看）：能做什么（失败教训+恢复事实）、怎么开（只开本体）、
+和 kifu-loader 的关系（开发专用）、和 Hindsight 的关系（另一个独立插件，可关）。
+
+**AGENTS 补安装说明**（本体与 loader 只开一个，双开 = 双注入）。
+**packages/kifu-loader/README** 注明「开发专用，普通用户不用看」。
+
+## 0.8.77（2026-11-08）
+
+### T42 · 一键重启验证脚本（post-restart-verify.mjs）
+
+**版本说明**：新增脚本 + 测试 ⇒ patch。
+
+一条命令 `node scripts/post-restart-verify.mjs`，七项检查各出 PASS/FAIL/NO-SAMPLE + 证据。
+退出码：全 PASS=0 / 有 FAIL=1 / 全 NO-SAMPLE=2。
+
+**现在实跑（旧代码）**：**2/7 通过 · FAIL=4 · NO-SAMPLE=1 ⇒ exit 1**（如实不硬算过）。
+
+**关键设计**：判「在跑哪份代码」**不能只看版本号**（软链直读源码，instance-status 永远报新版）——
+必须看**宿主进程启动时间 vs 发版时点**。所以现在判 FAIL 是对的，重启后应转 PASS。
+
+**边界**：④ live-stats 无 session id，只能 scope 级上界（会话级需 T24 口径）；
+① 用 mtime 当发版时点，git checkout 会刷新（保守方向，重启一次即消解）。
+
+**验收**：post-restart-verify.test **12/12**；check PASS；空库冒烟无假绿。
+
 ## 0.8.76（2026-11-08）
 
 ### T40 · 洞见层变体泛化：**负结果**（不比 raw 更好，如实记）
