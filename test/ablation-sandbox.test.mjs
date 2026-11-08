@@ -49,3 +49,84 @@ test('T9 ③ tombstone：把写盘标志识别删掉，② 必须红', () => {
   // 若 WRITE_MARK 退化成永不命中，writesOutsideSandbox 会对写盘题也返回 false —— ② 即红。
   assert.equal(writesOutsideSandbox('bash cat > /d/other/x.mjs', REPO), true);
 });
+
+// ---------------------------------------------------------------------------
+// T17 · 有效批三闸（题池落副本 / 防答案键 / 空卡剔除的纯函数）
+// ---------------------------------------------------------------------------
+import { outsideActionPaths, taskStaysInRepo, answerKeyHits, answerKeyHitDetails, scrubAnswerKeys } from '../scripts/ablation-sandbox.mjs';
+
+const ROOT2 = 'D:/DeepSeek Harness/default-workspace/长期记忆系统';
+
+test('T17 ① 动作路径全落本仓 ⇒ 留在题池', () => {
+  assert.deepEqual(outsideActionPaths('bash node scripts/check.mjs .', ROOT2), []);
+  assert.deepEqual(outsideActionPaths(`bash cd "${ROOT2}" && node --test`, ROOT2), []);
+  assert.equal(taskStaysInRepo('bash grep -n foo scripts/x.mjs', ROOT2), true);
+  assert.equal(taskStaysInRepo('todo_write', ROOT2), true, '无路径的纯工具题，路径层面不越界');
+});
+
+test('T17 ① 动作路径在副本外 ⇒ 必须剔除（不许拿副本外的题凑数）', () => {
+  for (const prompt of [
+    'bash cd "/d/主工作区/repos/dsh-GOkifu-compact" && python x.py',
+    'bash cd /tmp/ghscan && node -e 1',
+    'bash cd "$DSH_HOME/profiles/desktop" && grep x',
+    'bash cd ~/.config/magpie && cat usage.jsonl',
+    'bash cat "D:/DeepSeek Harness/反代/x.txt"',
+  ]) {
+    assert.equal(taskStaysInRepo(prompt, ROOT2), false, `应判副本外：${prompt}`);
+    assert.ok(outsideActionPaths(prompt, ROOT2).length > 0);
+  }
+});
+
+test('T17 ① tombstone：把「副本外路径」判据删成永远返回空，本组必须红', () => {
+  assert.ok(outsideActionPaths('bash cd /tmp/definitely-outside && node x.mjs', ROOT2).length >= 1);
+});
+
+test('T17 ① 反斜杠 Windows 路径也要能识别（曾因字符类只写 [\/] 的正斜杠半边而漏判）', () => {
+  const p = String.raw`bash TARGET='D:\主工作区\repos\dsh-GOkifu-release-1.18.1' node -e x`;
+  assert.deepEqual(outsideActionPaths(p, ROOT2), [String.raw`D:\主工作区\repos\dsh-GOkifu-release-1.18.1`]);
+  assert.equal(taskStaysInRepo(p, ROOT2), false);
+  assert.deepEqual(outsideActionPaths('bash cd D:/DeepSeek Harness/default-workspace/长期记忆系统 && ls', ROOT2), []);
+});
+
+test('T17 ② 答案键静默：cwd/相对路径的普通操作不算读答案键', () => {
+  const ev = (name, args) => ({ type: 'tool/call', data: { message: { name, arguments: args } } });
+  assert.deepEqual(answerKeyHits([ev('read', { file_path: 'D:/work/repo/scripts/x.mjs' })], 'C:/tmp/kifu-ablation-meta/ts1'), []);
+  assert.deepEqual(answerKeyHits([ev('bash', { command: 'node --test' })], null), []);
+});
+
+test('T17 ② 答案键命中：读 tasks.json / runs/ / sessions/ 要记为命中', () => {
+  const ev = (name, args) => ({ type: 'tool/call', data: { message: { name, arguments: args } } });
+  const cases = [
+    [ev('read', { file_path: 'D:/x/tasks.json' })],
+    [ev('bash', { command: 'ls "D:/x/runs"' })],
+    [ev('bash', { command: 'ls "D:/x/sessions"' })],
+  ];
+  for (const events of cases) assert.ok(answerKeyHits(events, null).length >= 1, `应命中：${JSON.stringify(events)}`);
+  const details = answerKeyHitDetails([ev('read', { file_path: 'D:/x/tasks.json' })], null);
+  assert.ok(details.length && details[0].includes('tasks.json'));
+});
+
+test('T17 ② 误报防护：arguments 是 JSON 字符串时，"internal/sessions" 不算读 sessions/', () => {
+  const ev = { type: 'tool/call', data: { message: { name: 'grep', arguments: '{"pattern":"TestDshSpeed|internal/sessions"}' } } };
+  assert.deepEqual(answerKeyHits([ev], null), []);
+  const ev2 = { type: 'tool/call', data: { message: { name: 'read', arguments: '{"file_path":"D:/x/sessions/abc/session.v4.jsonl.zstd"}' } } };
+  assert.ok(answerKeyHits([ev2], null).length >= 1);
+});
+
+test('T17 ②b 副本脱敏：只动含本批 errorText 的文本文件，其他文件不碰', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't17-scrub-'));
+  fs.mkdirSync(path.join(dir, 'evidence'));
+  fs.writeFileSync(path.join(dir, 'evidence', 'a.md'), 'prefix Error: unknown job bash-1234567890 suffix');
+  fs.writeFileSync(path.join(dir, 'keep.txt'), 'nothing to see here');
+  fs.writeFileSync(path.join(dir, 'binary.bin'), 'Error: unknown job bash-1234567890');
+  const stats = scrubAnswerKeys(dir, [{ taskId: 'T-x', errorText: 'Error: unknown job bash-1234567890' }]);
+  assert.equal(stats.hits, 1);
+  assert.equal(stats.files, 1);
+  assert.match(fs.readFileSync(path.join(dir, 'evidence', 'a.md'), 'utf8'), /\[T17-REDACTED\]/);
+  assert.equal(fs.readFileSync(path.join(dir, 'keep.txt'), 'utf8'), 'nothing to see here');
+  assert.match(fs.readFileSync(path.join(dir, 'binary.bin'), 'utf8'), /Error: unknown job bash-1234567890/, '.bin 不是文本类，不扫');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
