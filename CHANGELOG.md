@@ -17,6 +17,29 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.71（2026-11-08）
+
+### T36 · 知识库 94：经验复用与负迁移（退役判据 + 洞见层）
+
+**版本说明**：调研/文档 ⇒ patch。
+
+arXiv:2604.27003《When Continual Learning Moves to Memory》（NTU，2026-04-29）。
+
+**三条机制**：
+
+1. **负迁移拆两档**：`harmfulReuse`（把基线能做的弄坏）vs `ineffectiveReuse`（难题没帮上）——
+   平均成功率会抹平 ⇒ 我们的「负迁移 ≤5%」应只对 harmfulReuse 生效，ineffectiveReuse 单列趋势。
+2. **退役判据看检索侧不看存储侧**：检索多样性塌缩（88.5% 查询挤同一 top-1、覆盖率 5.4%）
+   + **记忆稀释**（旧记忆没删，被同质新条目挤到取不到）——**「取不到」≠「真没用」**。
+3. **恢复事实加「洞见层」**：raw 跨任务负迁移、insight 翻正 ⇒ 恢复事实（现在只有 raw：命令+退出码）
+   加一层**类别/坑类陈述**，raw 作证据——这也是把 2.37% 覆盖率往上抬的机械路径。
+
+**同期对照**：arXiv:2608.18177《Towards Reversible Forgetting》给 active/dormant/retired 三态 + 滞回 + ledger 状态机（无实验，作设计对照）。
+
+**给 T37 的直接输入**：退役三判据 = 长期 0 检索 / 同质变体≥N 且检索覆盖率<阈值 / preconditions 失效（T35 已有）；动作只降可见性，每次写 ledger。
+
+索引与 MAINTENANCE 清单同步（check PASS 94 篇）。
+
 ## 0.8.70（2026-11-08）
 
 ### T35 · file-exists 适用条件失效 ⇒ 不注入（方向感知，消除负迁移 1.49%）
