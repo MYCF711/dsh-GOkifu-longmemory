@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.89（2026-11-09）
+
+### T50 · 重启验证 ① 的假红：判据改成「最近一次运行时代码改动」
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 按主人 2026-11-05 的裁定落 **patch**。
+
+**触发**：0.8.86（README 简洁化）/ 0.8.87（HANDOFF 归档）两次**纯文档**发版之后，
+`post-restart-verify` 连续两次报 `FAIL 新代码已加载 … 仍是旧进程（需要重启宿主）` —— 运行时代码一个字没动。
+
+**根因**：① 的 `releaseAt` 取 `max(mtime(package.json), mtime(CHANGELOG.md))`。这两个文件**每次发版都必须改**
+（版本号 + CHANGELOG 段）⇒ 只要发过版就判「需要重启」，除非用户为纯文档改动重启宿主。
+
+**修法**：判据换成**运行时代码**（`src/`、`packages/`）的最近提交时点（`lastRuntimeCommitAt`，`git log -1 --format=%ct`）；
+`judgeNewCode` 的参数 `releaseAt` → `codeAt`（旧名字就是 bug 本身）。读不到 git 历史 ⇒ **NO-SAMPLE**，不硬算过。
+
+**验收**：`test/post-restart-verify.test.mjs` 14/14（含 T50 ②：临时 git 仓库里 docs-only 提交**不移动**判据）；
+`post-restart-verify` 由 4/7（FAIL=1 · NO-SAMPLE=2）变 **5/7**（FAIL=1 · NO-SAMPLE=1），
+且剩下的 FAIL 是**真红**（T49 的 29ec9d7 在 19:58:51Z，宿主首心跳 17:52:55Z ⇒ 新代码确实没加载）。
+全量 1221 条 / 1215 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T50-post-restart-code-time.md`。
+
 ## 0.8.88（2026-11-09）
 
 ### T49 · 同一张卡在每个 turn 重投：去重改「卡已在上下文里」
