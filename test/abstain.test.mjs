@@ -254,7 +254,7 @@ test('T2 对象锚定：只共享方向词、不同议题 ⇒ unclear（不拿�
   );
 });
 
-test('T2 回归：`evidence/label-set.json` 上 8 条「不得判 opposite」+ 12 条「必须退回 unclear」', async (t) => {
+test('T2 回归：`evidence/label-set.json` 固定样本上 8 条「不得判 opposite」+ 13 条「必须退回 unclear」', async (t) => {
   const { detectPolarity } = await import('../src/rooms/abstain.mjs');
   const { readFileSync, existsSync } = await import('node:fs');
   const path = 'evidence/label-set.json';
@@ -273,13 +273,27 @@ test('T2 回归：`evidence/label-set.json` 上 8 条「不得判 opposite」+ 1
       `pair ${p.pairId} 人工判 same，不得判 opposite（${p.why}）`);
   }
 
-  // ② 12 条「机械判成可判、人工判 irrelevant」：必须全部退回 unclear
-  const mustBeUnclear = set.pairs.filter((p) => p.verdict === 'irrelevant' && p.polarity !== 'unclear');
-  assert.ok(mustBeUnclear.length >= 12, `误判清单至少 12 条，实际 ${mustBeUnclear.length}`);
+  // ② 13 条「机械判过、人工判 irrelevant」：必须全部退回 unclear
+  // T13 跟进：改成**固定 pairId 清单**，不再用 `verdict === 'irrelevant' && polarity !== 'unclear'` 过滤 ——
+  // `polarity` 是 T1 旧判据快照（见 label-set.json 的 `polaritySnapshot`），按 HEAD 重算后该过滤式会取到 0 条（假红）。
+  // 清单 = T1 快照的 12 条误判（64,65,66,67,68,69,76,77,78,80,81,82）+ T13 改判的 #4（快照 polarity=same、HEAD 判据 unclear）。
+  const MUST_BE_UNCLEAR_PAIR_IDS = [4, 64, 65, 66, 67, 68, 69, 76, 77, 78, 80, 81, 82];
+  const mustBeUnclear = MUST_BE_UNCLEAR_PAIR_IDS.map((id) => {
+    const p = set.pairs.find((x) => x.pairId === id);
+    assert.ok(p, `标注集缺少 pair ${id}`);
+    assert.equal(p.verdict, 'irrelevant', `pair ${id} 必须是 irrelevant（固定清单的入样条件）`);
+    return p;
+  });
+  assert.equal(mustBeUnclear.length, 13, '固定清单必须是 13 条');
   for (const p of mustBeUnclear) {
     assert.equal(detectPolarity(p.signalText, p.claimText), 'unclear',
       `pair ${p.pairId} 人工判 irrelevant，必须退回 unclear（不得拿词面重合当方向）`);
   }
+
+  // ②' 快照标注（T13 跟进）：`polarity` 三件套是 T1 旧判据快照，且已如实标成「不可用于决策」
+  assert.equal(set.polaritySnapshot?.commit, '55ec9ef', 'polarity 快照必须标 commit');
+  assert.equal(set.polaritySnapshot?.module, 'src/rooms/abstain.mjs@T1', 'polarity 快照必须标 module');
+  assert.equal(set.polarityReport?.usableForDecision, false, 'HEAD 判据下可判率 19.3% < 30% ⇒ 不可用于决策');
 
   // ③ 真反向（人工判 opposite）里，直接抑制动词那几条必须保留
   const trueOpposite = set.pairs.filter((p) => p.stratum === 'dir' && p.polarityHuman === 'opposite');
