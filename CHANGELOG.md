@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.92（2026-11-09）
+
+### T52 · 「被 oncePerSession 拦下」在心跳台账里留一条墓碑行
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `src/plugin.mjs` 的 pre-step 短路分支。
+
+**触发**：本轮查 `live-stats.jsonl` 发现当前宿主**连续 128 分钟零心跳**，而会话一直在跑。
+台账里"被 oncePerSession 拦下"「插件没被调用」「插件挂了」**完全同形**，查不出是哪一种。
+
+**根因**：心跳是"决策之后"才写的，而 `oncePerSession` 的短路发生在决策**之前** ⇒ 被它拦下的每一步都不留痕。
+这不只是少一条日志：它让 T25/T49 那条闸**无法被审计**（`post-restart-verify` 的 ④⑤ 一度只能 NO-SAMPLE 也有这层原因）。
+
+**修法**：被拦下时写一条 `reason: "once-per-session"` 的墓碑行，**每会话一次**
+（`oncePerSessionNotified: Set<sessionId>`；不能每步一条 —— 本机约 2000 步/天，会吃掉 64MB 上限）。
+
+**验收**：T52 单测（三次调用 ⇒ 注入 1 次 + 墓碑恰好 1 条，第三次不许再灌）；
+全量 1229 条 / 1223 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T52-once-per-session-tombstone.md`。
+
+**边界**：这条行要等宿主重启后才会出现在线上；它让**下一次**能分辨"静默 vs 死机"，不给这次的 128 分钟定性。
+
 ## 0.8.91（2026-11-09）
 
 ### T28b · 重启验证 ⑤ 的**取样**错了：写死信号 ⇒ 永远 NO-SAMPLE

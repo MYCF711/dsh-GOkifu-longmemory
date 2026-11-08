@@ -1437,6 +1437,7 @@ export function apply(ctx, rawConfig = {}) {
   const repeatStates = new Map(); // D5：每个会话的「同类失败计数」
   const cardSampleCapNotified = new Set(); // T16：撞卡样本上限只报一次（按 storeRoot）
   const liveStatsCapNotified = new Set(); // T18：撞心跳上限只报一次（按 storeRoot）
+  const oncePerSessionNotified = new Set(); // T52：被 oncePerSession 拦下时留一条墓碑行（每会话一次）
   const disposers = [];
   let disposed = false;
 
@@ -1454,6 +1455,7 @@ export function apply(ctx, rawConfig = {}) {
         injectedIds.clear();
         cardSampleCapNotified.clear();
         liveStatsCapNotified.clear();
+        oncePerSessionNotified.clear();
         lifecycle.corpusCapNotified.clear();
         const pending = [];
         for (const off of disposers.splice(0).reverse()) {
@@ -1626,8 +1628,30 @@ export function apply(ctx, rawConfig = {}) {
         }
       }
 
+      // T52（2026-11-09）：被 oncePerSession 拦下时**留一条墓碑行**（每会话一次）。
+      // 为什么：早退发生在心跳写入之前 ⇒ 台账里"被限流静默"与"插件根本没被调用/已死"长得一模一样
+      // （实测本机连续 125 分钟零心跳，只能靠推理分辨，T25 到底有没有生效无法审计）。
       if (config.oncePerSession && session) {
-        if (sessionId ? injectedIds.has(sessionId) : (sessionObject ? injectedObjects.has(sessionObject) : false)) return decision;
+        const blockedBySession = sessionId ? injectedIds.has(sessionId) : (sessionObject ? injectedObjects.has(sessionObject) : false);
+        if (blockedBySession) {
+          const key = sessionId ?? '(no-id)';
+          if (!oncePerSessionNotified.has(key)) {
+            oncePerSessionNotified.add(key);
+            try {
+              appendLiveStats(resolveStoreRoot(config), {
+                kind: 'pre-step',
+                scope: lastResolvedScope(session?.id)?.scope ?? null,
+                scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
+                action: 'skip',
+                reason: 'once-per-session',
+                digest: null,
+                tokens: null,
+                shadow: config.shadow === true,
+              });
+            } catch { /* 心跳失败不影响决策（这条本来就只是留痕） */ }
+          }
+          return decision;
+        }
       }
 
       const deps = await resolveDeps(config);

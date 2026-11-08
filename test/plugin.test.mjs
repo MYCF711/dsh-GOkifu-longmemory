@@ -338,6 +338,35 @@ test('T25 ④: oncePerSession:false ⇒ 同一 session.id 每步都注入（向�
   }
 });
 
+test('T52: 被 oncePerSession 拦下时留一条墓碑行（否则"被限流静默"与"插件死了"分不清）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot }));
+    const session = makeSession(workspace, 'session-t52-aaaa').session;
+    const payload = { agent: { session }, messages: [userMessage('yaml 装不上')] };
+    const run = () => runHook({ hooks, payload, decision: enterDecision([userMessage('yaml 装不上')]) });
+
+    const a = await run();
+    assert.equal(a.messages.length, 2, '第一次真注入');
+    const b = await run();
+    assert.equal(b.messages.length, 1, '第二次被 oncePerSession 拦下');
+    const c = await run(); // 第三次：墓碑已经写过，不许再灌一条
+    assert.equal(c.messages.length, 1);
+
+    const rows = readFileSync(path.join(storeRoot, 'live-stats.jsonl'), 'utf8')
+      .split(String.fromCharCode(10)).filter(Boolean).map((l) => JSON.parse(l));
+    const tombstones = rows.filter((r) => r.reason === 'once-per-session');
+    assert.equal(tombstones.length, 1, '**每会话一条**墓碑行（不许每个 step 灌一条）');
+    assert.equal(tombstones[0].action, 'skip');
+    assert.equal(tombstones[0].kind, 'pre-step');
+    const injects = rows.filter((r) => r.action === 'inject');
+    assert.equal(injects.length, 1, '第一次的心跳照旧');
+  } finally {
+    cleanup();
+  }
+});
+
 test('T25 ⑤: sessionIdOf 只认非空字符串 id（其它一律 null，走旧行为兜底）', () => {
   assert.equal(sessionIdOf({ id: 'session-x' }), 'session-x');
   assert.equal(sessionIdOf({ id: '   ' }), null);
