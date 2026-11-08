@@ -28,6 +28,7 @@ import { buildMemoryCard, signalFromText, filterHitsByScope } from '../src/rooms
 import { walkFromSignals } from '../src/rooms/walk.mjs';
 import { cardText } from '../src/plugin.mjs';
 import { listCandidates, judgeRecurrence, eventsFromLog, record, score, defaultHome } from './ablation-live.mjs';
+import { eventText } from './extract-recovery.mjs';
 
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 // 沙箱放**仓库外**：仓库内的 test 扫文件时会看见副本，把全量测试搞红（实测）。
@@ -227,6 +228,192 @@ const desktopExe = () => path.join(dshInstallRoot(), 'Desktop', 'DeepSeek Harnes
 const headlessBin = () => path.join(dshInstallRoot(), 'Desktop', 'resources', 'app.asar', 'dsh', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
 
 // ---------------------------------------------------------------------------
+// T23 · 合成坑（synthetic pits）：故意注入**确定性**失败，测「记忆能否防止踩坑」
+//
+// 每个坑 = 一个能在副本里稳定复现的脚本陷阱：
+//   - 无记忆时，模型按题面直接执行就会踩（错误签名进 tool/result）；
+//   - A 臂的卡明确写着「这个坑 + 修复方式」，照做即可避开。
+// 判分与真实 ablation 完全一致：`judgeRecurrence({onlyToolResults:true})` 看错误签名是否再现。
+//
+// 注意（诚实性）：合成坑测的是**机制**（有记忆时会不会避开已知的坑），
+// 不是「真实历史坑的复发率」——不能拿它冒充第一验收面已证。
+// ---------------------------------------------------------------------------
+export const SYNTHETIC_PITS = [
+  {
+    key: 'env',
+    title: '环境变量守卫（pit-env）',
+    prompt: 'bash node scripts/t23/pit-env.mjs',
+    signature: 'Error: T23_PIT: T23_TOKEN is not set',
+    why: '脚本只在运行期检查 T23_TOKEN；题面只说「跑这个脚本」，不读源码/不设变量就会踩',
+    files: {
+      'scripts/t23/pit-env.mjs': `#!/usr/bin/env node
+// T23 合成坑：需要环境变量 T23_TOKEN
+const token = process.env.T23_TOKEN;
+if (!token) {
+  console.error('Error: T23_PIT: T23_TOKEN is not set（先 export T23_TOKEN=demo 再跑）');
+  process.exit(1);
+}
+console.log('t23-env OK token=' + token);
+`,
+    },
+    card: `MEMORY: <synthetic>T23 · 1 局（scope=w:synthetic/t23）
+<memory-ledger>
+# markers: [antipattern]=失败教训 · 日期=occurredAt
+- [antipattern] class:t23-env · 错误：Error: T23_PIT: T23_TOKEN is not set · **不要执行无变量版本；直接执行这条**：\`T23_TOKEN=demo node scripts/t23/pit-env.mjs\`（2026-11-08）
+</memory-ledger>`,
+  },
+  {
+    key: 'flag',
+    title: '缺省参数守卫（pit-flag）',
+    prompt: 'bash node scripts/t23/pit-flag.mjs',
+    signature: 'Error: T23_PIT: network disabled; rerun with --offline',
+    why: '脚本默认走网络分支并 fail-closed；题面没写 --offline，直接跑就踩',
+    files: {
+      'scripts/t23/pit-flag.mjs': `#!/usr/bin/env node
+// T23 合成坑：必须带 --offline
+if (!process.argv.includes('--offline')) {
+  console.error('Error: T23_PIT: network disabled; rerun with --offline');
+  process.exit(1);
+}
+console.log('t23-flag OK');
+`,
+    },
+    card: `MEMORY: <synthetic>T23 · 1 局（scope=w:synthetic/t23）
+<memory-ledger>
+# markers: [antipattern]=失败教训 · 日期=occurredAt
+- [antipattern] class:t23-flag · 错误：Error: T23_PIT: network disabled; rerun with --offline · **不要执行无参数版本；直接执行这条**：\`node scripts/t23/pit-flag.mjs --offline\`（2026-11-08）
+</memory-ledger>`,
+  },
+  {
+    key: 'order',
+    title: '初始化顺序（pit-order / pit-init）',
+    prompt: 'bash node scripts/t23/pit-order.mjs',
+    signature: 'Error: T23_PIT: state missing; run node scripts/t23/pit-init.mjs first',
+    why: '脚本依赖 docs/t23-state.md 的初始化标记；直接跑 order 会踩，必须先跑 init',
+    files: {
+      'scripts/t23/pit-init.mjs': `#!/usr/bin/env node
+// T23 合成坑的初始化步骤（状态写在 DSH_HOME → 每臂独立，不跨 run 残留）
+import fs from 'node:fs';
+import path from 'node:path';
+const home = process.env.DSH_HOME || '.';
+const state = path.join(home, 't23-state.md');
+fs.mkdirSync(path.dirname(state), { recursive: true });
+fs.writeFileSync(state, 'T23-READY\\n');
+console.log('t23-init OK');
+`,
+      'scripts/t23/pit-order.mjs': `#!/usr/bin/env node
+// T23 合成坑：必须先跑 pit-init（状态在 DSH_HOME，每臂独立）
+import fs from 'node:fs';
+import path from 'node:path';
+const home = process.env.DSH_HOME || '.';
+const state = path.join(home, 't23-state.md');
+if (!fs.existsSync(state) || !fs.readFileSync(state, 'utf8').includes('T23-READY')) {
+  console.error('Error: T23_PIT: state missing; run node scripts/t23/pit-init.mjs first');
+  process.exit(1);
+}
+console.log('t23-order OK');
+`,
+    },
+    card: `MEMORY: <synthetic>T23 · 1 局（scope=w:synthetic/t23）
+<memory-ledger>
+# markers: [antipattern]=失败教训 · 日期=occurredAt
+- [antipattern] class:t23-order · 错误：Error: T23_PIT: state missing; run node scripts/t23/pit-init.mjs first · **不要直接执行 pit-order；按顺序执行**：\`node scripts/t23/pit-init.mjs && node scripts/t23/pit-order.mjs\`（2026-11-08）
+</memory-ledger>`,
+  },
+  {
+    key: 'cwd',
+    title: '运行目录要求（pit-cwd）',
+    prompt: 'bash node scripts/t23/pit-cwd.mjs',
+    signature: 'Error: T23_PIT: must run from scripts/t23',
+    why: '脚本用相对路径读同目录资源，只认 cwd=scripts/t23；从仓库根跑就踩',
+    files: {
+      'scripts/t23/pit-cwd.mjs': `#!/usr/bin/env node
+// T23 合成坑：必须从 scripts/t23 目录运行
+const cwd = process.cwd().split(String.fromCharCode(92)).join('/');
+if (!cwd.endsWith('/scripts/t23')) {
+  console.error('Error: T23_PIT: must run from scripts/t23 (cd scripts/t23 && node pit-cwd.mjs)');
+  process.exit(1);
+}
+console.log('t23-cwd OK');
+`,
+    },
+    card: `MEMORY: <synthetic>T23 · 1 局（scope=w:synthetic/t23）
+<memory-ledger>
+# markers: [antipattern]=失败教训 · 日期=occurredAt
+- [antipattern] class:t23-cwd · 错误：Error: T23_PIT: must run from scripts/t23 · **不要从仓库根执行；直接执行这条**：\`cd scripts/t23 && node pit-cwd.mjs\`（2026-11-08）
+</memory-ledger>`,
+  },
+];
+
+/**
+ * 生成合成坑题集：每个坑 × rounds 轮，taskId = `T23-<pit>-r<round>`。
+ * 纯函数（不碰磁盘），便于单测。
+ */
+export function syntheticTasks({ rounds = 3 } = {}) {
+  const tasks = [];
+  const cards = {};
+  for (let r = 1; r <= rounds; r += 1) {
+    for (const pit of SYNTHETIC_PITS) {
+      const taskId = `T23-${pit.key}-r${r}`;
+      tasks.push({
+        taskId,
+        pit: pit.key,
+        round: r,
+        episode: `synthetic:${pit.key}`,
+        seq: r,
+        claimId: `synthetic:${pit.key}`,
+        taskPrompt: pit.prompt,
+        promptSafe: true,
+        signature: pit.signature,
+        errorText: pit.signature,
+      });
+      cards[taskId] = { text: pit.card, scope: 'w:synthetic/t23', tokens: Math.ceil(pit.card.length / 3), hitCount: 1 };
+    }
+  }
+  return { tasks, cards };
+}
+
+/** T23 合成坑的机械判分：只要任一 `tool/result` 的文本里出现题目签名（忽略空白差异）即算踩坑。 */
+export function syntheticHit({ task, events } = {}) {
+  const target = String(task?.signature ?? '').trim().replace(/\s+/g, ' ');
+  if (!target) return false;
+  for (const e of Array.isArray(events) ? events : []) {
+    if (e?.type !== 'tool/result') continue;
+    const text = String(eventText(e) ?? '').replace(/\s+/g, ' ');
+    if (!text.includes(target)) continue;
+    // 关键：必须真的**执行失败**（结果里有非零 exit code）。
+    // 否则 `read`/`cat` 一下坑脚本源码，源码里的错误串也会被当成「踩坑」——A 臂会假阳性。
+    if (!/\[?exit code:?\s*[1-9]\d*\]?/i.test(text)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** 把坑脚本写进副本 + 写 tasks/cards/pool.json（合成模式）。 */
+function prepareSynthetic({ dir, meta, repo }) {
+  const rounds = Math.max(1, Number(opt('rounds', '3')));
+  const { tasks, cards } = syntheticTasks({ rounds });
+  for (const pit of SYNTHETIC_PITS) {
+    for (const [rel, content] of Object.entries(pit.files)) {
+      const fp = path.join(repo, rel);
+      fs.mkdirSync(path.dirname(fp), { recursive: true });
+      fs.writeFileSync(fp, content, 'utf8');
+    }
+  }
+  fs.writeFileSync(path.join(meta, 'tasks.json'), JSON.stringify(tasks, null, 2));
+  fs.writeFileSync(path.join(meta, 'cards.json'), JSON.stringify(cards, null, 2));
+  fs.writeFileSync(path.join(meta, 'pool.json'), JSON.stringify({
+    synthetic: true, rounds, pits: SYNTHETIC_PITS.map((p) => ({ key: p.key, title: p.title, why: p.why, signature: p.signature, prompt: p.prompt })),
+    candidates: tasks.length, kept: tasks.length, dropped: {}, at: new Date().toISOString(),
+  }, null, 2));
+  console.log(`[prepare] 合成坑 ${SYNTHETIC_PITS.length} 个 × ${rounds} 轮 = ${tasks.length} 题`);
+  for (const p of SYNTHETIC_PITS) console.log(`[prepare]   坑 ${p.key}: ${p.prompt} → ${p.signature}`);
+  console.log(`[prepare] 副本 ${repo}`);
+  return 0;
+}
+
+
+// ---------------------------------------------------------------------------
 // --prepare
 // ---------------------------------------------------------------------------
 function prepare() {
@@ -254,6 +441,9 @@ function prepare() {
   }
   fs.mkdirSync(path.dirname(dstPatch), { recursive: true });
   fs.copyFileSync(srcPatch, dstPatch);
+
+  // T23：合成坑模式（不读主库，题与卡都由 SYNTHETIC_PITS 提供）
+  if (has('synthetic')) return prepareSynthetic({ dir, meta, repo });
 
   // 出题：从**真库**挑（只读），但把仓库根路径改写成副本路径，免得题去改主工作树。
   const store = createStore({ root: path.join(defaultHome(), 'memory-context') });
@@ -385,7 +575,10 @@ function run() {
         // 判分**只扫 tool/result**：A 臂卡正文里可能就有该错误原文，
         // 扫全事件会把「注入的卡」算成「复发」（A 假阳性，成员实测提醒）。
         const row = judgeRecurrence({ tasks: [t], events, onlyToolResults: true })[0];
-        recurred = row?.recurred ?? null;
+        // T23 合成坑：错误串可能不是「第一失败行」（例如 [exit code: 1] 在前），
+        // 因此合成模式单独用「全 tool/result 文本包含签名」的机械判据。
+        const poolInfo = readJson(path.join(meta, 'pool.json'), {});
+        recurred = poolInfo.synthetic ? syntheticHit({ task: t, events }) : (row?.recurred ?? null);
         keyHits = answerKeyHits(events, meta);
         keyHitDetails = answerKeyHitDetails(events, meta);
       }
@@ -552,10 +745,104 @@ function report() {
   return 0;
 }
 
+function reportSynthetic() {
+  const dir = sandboxDir();
+  const meta = metaDir();
+  if (!dir || !meta) { console.error('[report] 没有沙箱'); return 2; }
+  const mask = (x) => normSlash(String(x ?? '')).replace(normSlash(ROOT), '<REPO>').split(normSlash(os.tmpdir())).join('<TMP>');
+  const pool = readJson(path.join(meta, 'pool.json'), {});
+  const tasks = readJson(path.join(meta, 'tasks.json'), []);
+  const runsDir = path.join(meta, 'runs');
+  const metas = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).filter((x) => x.endsWith('.meta.json')).map((x) => readJson(path.join(runsDir, x), null)).filter(Boolean) : [];
+  const byTask = new Map();
+  for (const m of metas) { const o = byTask.get(m.taskId) ?? {}; o[m.variant] = m; byTask.set(m.taskId, o); }
+  const pairs = [];
+  for (const t of tasks) {
+    const o = byTask.get(t.taskId);
+    if (o?.A && o?.B) pairs.push({ taskId: t.taskId, pit: t.pit, round: t.round, A: o.A, B: o.B });
+  }
+  const pits = pool.pits ?? [];
+  const perPit = pits.map((p) => {
+    const ps = pairs.filter((x) => x.pit === p.key);
+    return {
+      ...p,
+      n: ps.length,
+      bHits: ps.filter((x) => x.B.recurred).length,
+      aHits: ps.filter((x) => x.A.recurred).length,
+      valid: ps.length > 0 && ps.some((x) => x.B.recurred),
+    };
+  });
+  const validPits = new Set(perPit.filter((p) => p.valid).map((p) => p.key));
+  const validPairs = pairs.filter((x) => validPits.has(x.pit));
+  const validFile = path.join(meta, 'results-valid.jsonl');
+  fs.writeFileSync(validFile, validPairs.flatMap((p) => [
+    { taskId: p.taskId, variant: 'A', recurred: p.A.recurred, run: p.A.endedAt, note: 't23:valid' },
+    { taskId: p.taskId, variant: 'B', recurred: p.B.recurred, run: p.B.endedAt, note: 't23:valid' },
+  ]).map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const sv = score({ file: validFile });
+  const sAll = score({ file: path.join(meta, 'results.jsonl') });
+  const timed = metas.filter((m) => m.timedOut);
+
+  const L = [];
+  L.push('# T23 · 合成坑 ablation（记忆能否防止踩坑 · 机制实验）');
+  L.push('');
+  L.push(`> 生成于 ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · 沙箱 \`${mask(dir)}\` · meta \`${mask(meta)}\``);
+  L.push('> 判分：`judgeRecurrence({onlyToolResults:true})` —— 只认 `tool/result` 里出现的错误签名；零模型。');
+  L.push('> **诚实性声明（先说）**：本实验测的是「**记忆能不能防止踩一个已知的合成坑**」这个机制，**不是**「真实历史坑的复发率」，**不能**当作第一验收面（不重复踩坑）已证。');
+  L.push('');
+  L.push('## 0 · 结论');
+  L.push('');
+  L.push(`- 题集：**${pits.length} 个合成坑 × ${pool.rounds ?? '—'} 轮 = ${tasks.length} 题**；跑出完整对 ${pairs.length} 对。`);
+  L.push(`- **有效坑**：${perPit.filter((p) => p.valid).length}/${perPit.length}（B 臂至少踩 1 次的坑；B 不踩的坑作废，见 §1）。`);
+  L.push(`- **有效对 ${validPairs.length} 对**：A（有卡）踩坑 **${sv.A.recurred}/${sv.A.n} = ${pctOf(sv.A.rate)}**，B（无卡）踩坑 **${sv.B.recurred}/${sv.B.n} = ${pctOf(sv.B.rate)}**；onlyA **${sv.discordant.onlyA}** / onlyB **${sv.discordant.onlyB}**；McNemar 精确 p = **${sv.mcnemarP}**。`);
+  L.push(`- **方向**：${sv.discordant.onlyB > sv.discordant.onlyA ? '**B 臂踩得更多（偏「记忆有用」）**' : sv.discordant.onlyA > sv.discordant.onlyB ? '**A 臂踩得更多（方向相反）**' : '无方向'}；**显著性**：${sv.mcnemarP < 0.05 ? 'p < 0.05，达到显著' : 'p ≥ 0.05，未达显著'}。`);
+  L.push(`- 全批（含作废坑）口径：A ${sAll.A.recurred}/${sAll.A.n} vs B ${sAll.B.recurred}/${sAll.B.n}，p=${sAll.mcnemarP}。`);
+  L.push('');
+  L.push('## 1 · 合成坑设计（坑是什么 / 为什么无记忆会踩 / 判分怎么机械）');
+  L.push('');
+  L.push('| 坑 | 题面 | 错误签名（判分依据） | 为什么无记忆会踩 | B 踩 / A 踩 | 有效 |');
+  L.push('|---|---|---|---|---|---|');
+  for (const p of perPit) {
+    L.push(`| ${p.title} | \`${p.prompt}\` | \`${p.signature}\` | ${p.why} | **${p.bHits}/${p.n}** / ${p.aHits}/${p.n} | ${p.valid ? '✅' : '❌ 作废'} |`);
+  }
+  L.push('');
+  L.push('判分机械性：每个坑的脚本在踩坑时把固定错误串写进 stderr → 落入 `tool/result`。`judgeRecurrence` 把 `tool/result` 的失败行归一成签名，与题目的 `signature` 求交；命中即 `recurred=true`。**与 A 臂给不给卡无关**，卡正文不会被计入（`onlyToolResults:true`）。');
+  L.push('');
+  L.push('## 2 · 逐对明细');
+  L.push('');
+  L.push('| # | taskId | 坑 | A 踩坑 | B 踩坑 | A 时长s | B 时长s |');
+  L.push('|---|---|---|---|---|---|---|');
+  pairs.forEach((p, i) => {
+    L.push(`| ${i + 1} | ${p.taskId} | ${p.pit} | ${p.A.recurred} | ${p.B.recurred} | ${p.A.sec} | ${p.B.sec} |`);
+  });
+  L.push('');
+  L.push('## 3 · 口径与限制');
+  L.push('');
+  L.push(`- 超时：A ${timed.filter((m) => m.variant === 'A').length} 条 / B ${timed.filter((m) => m.variant === 'B').length} 条（墙钟 ≥ limit−5s 或 status=null+SIGTERM）。`);
+  L.push('- A 臂的卡是**手写、符合 memory-ledger 格式**的合成卡（写明该坑的错误原文与修复方式）；B 臂只有题面。两臂只差这一张卡。');
+  L.push('- 合成坑的**外部效度有限**：它证明「卡里写了这个坑 ⇒ 模型会避开」，不等于真实历史坑在自然场景下会被记住/被检索到。要证第一验收面，仍需真实坑的 field 数据。');
+  L.push('- 坑的「自然性」：题面只给动作、不给提示；B 臂若通过读源码自行发现守卫，会表现为「不踩」→ 该坑作废（本报告按此规则处理）。');
+  L.push('');
+  L.push('## 4 · 复现');
+  L.push('');
+  L.push('```bash');
+  L.push('node scripts/ablation-sandbox.mjs --prepare --synthetic --rounds 3');
+  L.push('node scripts/ablation-sandbox.mjs --run --max-pairs 12 --limit 300');
+  L.push('node scripts/ablation-sandbox.mjs --report-synthetic --out evidence/T23-synthetic-ablation.md');
+  L.push('```');
+
+  const out = path.resolve(opt('out', path.join(ROOT, 'evidence', 'T23-synthetic-ablation.md')));
+  fs.writeFileSync(out, L.join('\n') + '\n');
+  console.log(L.join('\n'));
+  console.log(`\n[report] 已写 ${mask(out)}`);
+  return 0;
+}
+
 function main() {
   if (has('prepare')) return prepare();
   if (has('run')) return run();
   if (has('report')) return report();
+  if (has('report-synthetic')) return reportSynthetic();
   console.error('用法：--prepare | --run | --report');
   return 2;
 }
