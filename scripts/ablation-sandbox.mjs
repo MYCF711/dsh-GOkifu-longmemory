@@ -787,7 +787,7 @@ function reportSynthetic() {
   L.push('# T23 · 合成坑 ablation（记忆能否防止踩坑 · 机制实验）');
   L.push('');
   L.push(`> 生成于 ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · 沙箱 \`${mask(dir)}\` · meta \`${mask(meta)}\``);
-  L.push('> 判分：`judgeRecurrence({onlyToolResults:true})` —— 只认 `tool/result` 里出现的错误签名；零模型。');
+  L.push("> 判分：合成坑用 syntheticHit —— 只认 tool/result 里以题目签名开头的行（源码 console.error 不算）；零模型。");
   L.push('> **诚实性声明（先说）**：本实验测的是「**记忆能不能防止踩一个已知的合成坑**」这个机制，**不是**「真实历史坑的复发率」，**不能**当作第一验收面（不重复踩坑）已证。');
   L.push('');
   L.push('## 0 · 结论');
@@ -806,7 +806,7 @@ function reportSynthetic() {
     L.push(`| ${p.title} | \`${p.prompt}\` | \`${p.signature}\` | ${p.why} | **${p.bHits}/${p.n}** / ${p.aHits}/${p.n} | ${p.valid ? '✅' : '❌ 作废'} |`);
   }
   L.push('');
-  L.push('判分机械性：每个坑的脚本在踩坑时把固定错误串写进 stderr → 落入 `tool/result`。`judgeRecurrence` 把 `tool/result` 的失败行归一成签名，与题目的 `signature` 求交；命中即 `recurred=true`。**与 A 臂给不给卡无关**，卡正文不会被计入（`onlyToolResults:true`）。');
+  L.push("判分机械性：每个坑的脚本在踩坑时把固定错误串写进 stderr，落入 tool/result。syntheticHit 扫描 tool/result 文本的每一行：以题目 signature 开头的行即判 recurred=true（read 到源码里的 console.error 不算）。与 A 臂给不给卡无关，卡正文不在 tool/result 里。");
   L.push('');
   L.push('## 2 · 逐对明细');
   L.push('');
