@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.56（2026-11-08）
+
+### T22 · T1 文档口径同步 + 知识库 92（MemUse：交付不等于使用）
+
+**版本说明**：文档/调研 + 标注数据修正 ⇒ patch。
+
+**① T1-label-expansion.md**：只增不改，新增 §九「改前→改后」对照；旧数字保留标「改前」。
+**② 知识库 92**：arXiv:2611.01718《MemUse》（CUHK，2026-11-01，已读正文）。
+
+对本项目最相关的三条：
+
+1. **delivered→actedOn→beneficial→harmful 四段计数**：SWE-bench 8000 局上，
+   记忆 resolve 差 ≤0.40pp，但 71.5–98.6% 条目不相关、51.3–79.7% 相关条目**未被用** ——
+   正是我们 ablation 该用的口径：**投递 ≠ 使用**（A 臂「没复发」要区分「记忆劝退」与「根本没做」）。
+2. **relevance 须「共享机制/适用程序」**：原文 Sharing a topic, file, or function is insufficient ——
+   支持 T12 的坑类/工具族桥，同时警告**只共享名字不够**。
+3. **redundant 独立轴**：Mem0 投递 token 的 68.1% 是仍在上下文里的副本 ⇒ 我们的「重复注入」也该单列。
+
+**集成修正**：MAINTENANCE 知识库清单补 92（check 红）；label-hard-negatives.json 补 #4（49→50）。
+
 ## 0.8.55（2026-11-08）
 
 ### T21 · A2b 归因 + walk 预算口径修复（严格 44.07%→46.61%，0 掉分）

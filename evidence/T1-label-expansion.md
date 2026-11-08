@@ -2,6 +2,7 @@
 
 > 日期：2026-11-07 · 只做 T1（数据准备）。**没有改** `src/**`、`test/**`、`package.json`、`CHANGELOG.md`、`MAINTENANCE.md`。
 > 产出：`evidence/label-set.json`（135 对，逐条 `verdict` + `why`）、`evidence/label-hard-negatives.json`（49 条难负例）、本文件。
+> **口径更正（2026-11-08 追加，T22）**：本文 §一/§三/§五/§六/§八 的「same 19 条 / 机械可判 19（100%）」「12 条误判」「49 条难负例 / 46.7%」是 **T15 定点修之前（改前）** 的口径；当前口径见文末 **§九**（`label-set.json` 已按 T15 更新，唯一权威是它的 `stats` / `polaritySnapshot`）。
 
 ## 一、结论（逐条对验收）
 
@@ -130,3 +131,65 @@ s.pairs.filter(p => p.verdict === 'irrelevant' && p.polarity !== 'unclear') // 1
 - 可判率：`polarityReport` 口径 ≥30%（本集基线 33.3%）；
 - **精确率**：8 条「同向被误判」的行必须**不再被判成 `opposite`**、7 条 `opposite` 难负例必须**退回 `unclear`** ⇒ 改判后 `opposite` 只剩 4 条真反向（precision 100%），且这 4 条**一条都不许丢**（对齐 T2 验收②「误杀率 = 0」的反向）；
 - **改判后怎么还能 ≥30%**：把 12 条误判退回 `unclear` 后，本集只有 33/135 = **24.4%**（见 §4 最后一行）—— 要回到 30% 只有一条正路：在 `rel` 层那 24 条**相关但对判据透明**的对上正确判出方向（多判出 ≥8 条即可，它们多数其实是**同向**）。用误判撑到 33.3% 不算达标，这一点必须写进 T2 的报告。
+
+## 九、口径更正（2026-11-08 · T22）：T15 定点修后的当前口径
+
+> **性质**：**追加的更正段，不改写上文已发布内容**。上文 §一/§三/§五/§六/§八 的数字是 **2026-11-07 T1 首次发布时（改前）** 的口径；2026-11-08 T15 对 `#4`/`#14` 做了定点修、并给 `polarity` 加了快照标注（`evidence/T15-label-followup.md`）。本节给出**改前 → 改后**对照。**改后的唯一权威是 `evidence/label-set.json` 的 `stats` / `polaritySnapshot` 字段**；本节所有数字都由它复算（§9.5）。
+
+### 9.1 改前 → 改后（逐项，旧数字保留）
+
+| 位置 | 改前（原文保留） | 改后（当前 `label-set.json`） | 说明 |
+|---|---|---|---|
+| 标题 / §一② / §六 | 难负例 **49 条** | **50 条** | `#4` 改判 `irrelevant` 且 `stratum=hard`（`bigramRaw=3 ≥ 2`）⇒ 计入难负例。**注意**：`evidence/label-hard-negatives.json` 目前仍是 **49 条**（该文件不在 T15/T22 的可写面）⇒ **待同步 49 → 50**（补 `#4`，`n`/`pairs` 一起改） |
+| §一③ | `irrelevant` 占比 **63/135 = 46.7%** | **64/135 = 47.4%** | `#4` `relevant → irrelevant` |
+| §一④ | `polarityReport.usableForDecision = true` | **`false`**（§9.2） | 该字段现在是 **T1 旧判据快照**的如实标注；HEAD 判据重算可判率 19.26% < 30% ⇒ 不可用于决策 |
+| §三 `same` 层 | **19 条 / 机械可判 19（100%）** | **17 条 / 定义符合率 17/17（100%）** | `#4`、`#14` 移出。**改前的真实定义符合率是 17/19（89.5%）**：`#4`/`#14` 的 claim 都不在信号里（LCS 仅 3 字「问题，」、`overlap=0`）——T13 复核发现、T15 定点修 |
+| §三 `rel` 层 | 24 条 | **25 条** | `#14` 从 `same` 移入（`verdict` 仍是 `relevant`） |
+| §三 `hard` 层 | 49 条 | **50 条** | `#4` 从 `same` 移入 |
+| §五 / §六 / §八 | 「**12 条**误判」 | **13 条**（原 12 条 + `#4`） | `#4` 的快照 `polarity` 仍是 `same`，按同一过滤式会计入；HEAD 判据对 `#4` 是 `unclear`。T2 回归用例已改为**固定 13 个 pairId**（`test/abstain.test.mjs` 的 `MUST_BE_UNCLEAR_PAIR_IDS`），不再依赖该过滤式 |
+| §八 代码片段 | `s.pairs.filter(p => p.verdict === 'irrelevant' && p.polarity !== 'unclear') // 12 条` | 同一行现在返回 **13 条** | 过滤式本身没变，条数变了；**新代码请用固定 id 清单**，别再用过滤式 |
+
+**`#4` / `#14` 处置（一句话）**：**`#4` `verdict: relevant → irrelevant` 且 `stratum: same → hard`**（claim 与信号跨局、跨 scope、只共享「内存/显存」泛词、LCS 仅 3 字）；**`#14` 仅 `stratum: same → rel`**（同局同对象，`verdict: relevant` 不动）。两条的 `why` 均保留原判依据（`#4` 追加改判理由），不删旧记录。
+
+### 9.2 polarity 口径（T15 起必须这样读）
+
+- `polarity` / `polarityCounts` / `polarityReport` 是 **T1 旧判据（commit `55ec9ef` 的 `detectPolarity`）快照**：与当时 **135/135 逐条一致**；与 **HEAD 判据差 27/135**（HEAD：`same 24 / opposite 2 / unclear 109` ⇒ 可判率 **19.26%** < 30% 下限 ⇒ **不可用于决策**）。
+- `label-set.json` 已有 `polaritySnapshot: {commit:"55ec9ef", module:"src/rooms/abstain.mjs@T1", note, headRecount}` 标明这一点；任何"当前判据"的数字请用 `polarityScorecard(pairs)` **现场重算**，不要读文件里的 `polarity`。
+- 因此：**§一④ 的「33.3% / 可用于决策」只属于 T1 快照**；当前 HEAD 判据下是 **19.3% / 不可用于决策**（`evidence/T2-decidability.md`、`evidence/T7-a1-opposite.md` 已按 19.3% 写）。
+
+### 9.3 改后 `stats` 快照（`label-set.json` 原样）
+
+```json
+{
+ "n": 135,
+ "byVerdict": { "relevant": 57, "irrelevant": 64, "uncertain": 14 },
+ "byStratum": { "same": 17, "dir": 15, "rel": 25, "hard": 50, "random": 14, "unc": 14 },
+ "irrelevantRatio": 0.4741,
+ "hardNegatives": 50,
+ "randomNegatives": 14,
+ "decidable": 45,
+ "decidability": 0.3333,
+ "decidableRelevant": 31,
+ "mechanicalDecidableIrrelevant": 13,
+ "semanticDecidabilityOnNonStratified": 0.1456,
+ "decidabilityOnRelevant": 0.5439,
+ "decidableIrrelevant": 13,
+ "maxBigramAmongHardNeg": 6,
+ "hardNegBigramMin": 2
+}
+```
+
+### 9.4 受影响的旧结论（保留原文，但请按改后读）
+
+- **§四「可判率前后对照」**：`33.3%` 行仍是**快照口径**，不是"当前判据"的覆盖率；"新标注集去掉两个刻意富集层（`same`/`dir`）"一行改后是 **103 对 / 15 可判 / 14.6%**（改前 101 / 13 / 12.9%）。
+- **§四最后一行 / §八「12 条退回 unclear 后 33/135 = 24.4%」**：改后是 **13 条**；按同一算式为 **32/135 = 23.7%**（只是快照口径的算术说明，不改变 T2 的 19.3% 实测结论）。
+- **§六「难负例 49 条，分布 `2:7·3:17·4:13·5:10·6:2`」**：改后 **50 条**，分布多一条 `3`（`#4`）。
+- **§七.2「单人标注」**：2026-11-08 T13 已按 stratum 抽 20 条复核（改判 1 条、`same` 层定义 2/19 不符），见 `evidence/T13-label-review.md`；不再是"零复核"。
+
+### 9.5 复算命令（只读）
+
+```bash
+node -e "const s=require('./evidence/label-set.json');console.log(s.stats);console.log(s.polaritySnapshot)"
+node -e "const s=require('./evidence/label-set.json');const p=s.pairs.filter(x=>x.verdict==='irrelevant'&&x.polarity!=='unclear');console.log(p.length,p.map(x=>x.pairId).join(','))"
+# 期望：stats 与 §9.3 一致；误判清单 13 条 = 4,64,65,66,67,68,69,76,77,78,80,81,82
+```
