@@ -718,12 +718,14 @@ function indexedRecoveryFact({ claim, src, storeRoot }) {
  * T28/T30：给一条**失败 claim**找「同一主体后来成功」的事实。
  * 只对 `kind === 'antipattern'` 生效；**索引优先，读时派生兜底**；都没有 ⇒ null（卡行逐字节不变）。
  */
-function recoveryFactOf({ claim, src, options }) {
+function recoveryFactOf({ claim, src, options, logFallback = true }) {
   if (!claim || claim.kind !== 'antipattern') return null;
   if (options?.recoveryOnCard === false) return null;
   const storeRoot = typeof options?.recoveryStoreRoot === 'string' ? options.recoveryStoreRoot : null;
   const indexed = indexedRecoveryFact({ claim, src, storeRoot });
   if (indexed) return indexed;
+  // T31：指针候选只查索引（成本上限）；正文行才回退到读时派生（T28）。
+  if (!logFallback) return null;
   const base = typeof options?.recoveryBaseDir === 'string' ? options.recoveryBaseDir : null;
   if (!base) return null;
   const ep = options?.episodesById?.get?.(String(src?.episode ?? '')) ?? null;
@@ -811,12 +813,14 @@ function entryFromClaim(hit, claim, options = {}) {
     ? Number(src.occurredAt)
     : (Number.isFinite(claim.occurredAt) ? claim.occurredAt : (Number.isFinite(hit?.occurredAt) ? hit.occurredAt : null));
   // T3（三级交付的第二级）：**没把握 ⇒ 只给指针**（判据见 `isPointerCandidate`，纯计数）。
-  // **默认开**（`options.pointerTier === false` 才回到两级）：开/关的判据只有这一处收口，
-  // 关掉时卡片与 0.8.46 逐字节一致（前后对照见 `evidence/T3-pointer-tier.md`）。
-  const pointer = options?.pointerTier === true && isPointerCandidate(claim);
+  // **默认开**（`options.pointerTier === false` 才回到两级）：开/关的判据只有这一处收口。
+  const basePointer = options?.pointerTier === true && isPointerCandidate(claim);
 
   // T28：恢复事实（同一主体后来成功）。只写事实；没有证据 ⇒ null（该行逐字节不变）。
-  const recovery = pointer ? null : recoveryFactOf({ claim, src, options });
+  // T31：**有恢复事实的 antipattern 豁免指针档** —— 恢复事实只在正文行渲染，降级会把它藏掉；
+  //   所以指针候选也要先查一次（索引很便宜；读时派生只给正文行，避免为指针行解日志）。
+  const recovery = recoveryFactOf({ claim, src, options, logFallback: !basePointer });
+  const pointer = basePointer && !recovery;
   return buildEntry({
     episode,
     seq,
