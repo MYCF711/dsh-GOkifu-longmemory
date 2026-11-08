@@ -29,7 +29,7 @@ import { deriveFalsifiableWhen, buildRecoveryIndex, findRecoveryFact, RECOVERY_F
 import { readFrames, parseEvents } from './logread.mjs';
 import { markerWithPolarity, detectPolarity, isCold, decayWeight } from './abstain.mjs';
 // T30：归档层落好的恢复索引（sidecar，只读）；索引缺失/坏 ⇒ 回退到读时派生（T28）。
-import { readRecoveryIndex } from './persist.mjs';
+import { readRecoveryIndex, readTrials, appendTrials } from './persist.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -630,6 +630,94 @@ function pickSourceBySignal(support, { signalTokens = [], currentSeq = null, fal
     else if (score === bestScore && Number.isFinite(currentSeq) && Number(sup?.seq) === Number(currentSeq)) { best = sup; }
   }
   return bestScore >= 2 ? best : fallback;
+}
+
+/** T33：trial 的三种结果（单一来源；只记录、不参与可见性/退役）。 */
+export const TRIAL_OUTCOMES = Object.freeze(['recurred', 'avoided', 'unknown']);
+
+/**
+ * T33 · trial 的机械判据：**上一次注入（since）之后**，同一主体发生了什么？
+ *
+ *  · `recurred` —— claim 的 `support` 里有 `occurredAt > since` 的（同一错误签名在后续局里**再次出现**）；
+ *  · `avoided`  —— T30 恢复事实（同一主体后来成功）的 `at > since`（**后来修好了**）；
+ *  · `unknown`  —— 观察窗里两种证据都没有（不猜）。
+ *
+ * 有多条后继证据时取**最早**的那条（离注入最近），保证可复现；`since` 缺失 ⇒ `unknown`。
+ * @param {{claim:object, recovery?:object|null, since?:number|null}} input
+ * @returns {{outcome:string, evidenceEpisode:string|null, evidenceSeq:number|null, evidenceAt:number|null}}
+ */
+export function trialOutcomeOf({ claim, recovery = null, since = null, until = null } = {}) {
+  const sinceTs = Number.isFinite(since) ? Number(since) : null;
+  const untilTs = Number.isFinite(until) ? Number(until) : null;
+  if (!claim || sinceTs === null) return { outcome: 'unknown', evidenceEpisode: null, evidenceSeq: null, evidenceAt: null };
+  const supports = (Array.isArray(claim.support) ? claim.support : [])
+    .filter((sup) => Number.isFinite(sup?.occurredAt) && Number(sup.occurredAt) > sinceTs && (untilTs === null || Number(sup.occurredAt) <= untilTs))
+    .sort((a, b) => Number(a.occurredAt) - Number(b.occurredAt));
+  if (supports.length) {
+    const first = supports[0];
+    return {
+      outcome: 'recurred',
+      evidenceEpisode: typeof first?.episode === 'string' ? first.episode : null,
+      evidenceSeq: Number.isFinite(Number(first?.seq)) ? Number(first.seq) : null,
+      evidenceAt: Number(first.occurredAt),
+    };
+  }
+  if (recovery && Number.isFinite(recovery.at) && Number(recovery.at) > sinceTs && (untilTs === null || Number(recovery.at) <= untilTs)) {
+    return {
+      outcome: 'avoided',
+      evidenceEpisode: typeof recovery.episode === 'string' ? recovery.episode : null,
+      evidenceSeq: Number.isFinite(recovery.seq) ? recovery.seq : null,
+      evidenceAt: Number(recovery.at),
+    };
+  }
+  return { outcome: 'unknown', evidenceEpisode: null, evidenceSeq: null, evidenceAt: null };
+}
+
+/**
+ * T33 · 注入时结算 trial：**只记录、不退役**（Zep 也是先攒 trial）。
+ *
+ * 语义：本次注入时，把**上一次注入**（`since`）到现在这段观察窗里的结果写一条记录。
+ *  · `since` 取自 `trials.jsonl` 里该 claim 最近一条的 `at`（= 上次观察/注入时间）；
+ *    没有记录时退回 `claim.counters.lastInjectedAt`；**两者都没有 ⇒ 本次是首次注入，只开 trial、不写记录**。
+ *  · 恢复事实只查**索引**（`recovery-index.json`，T30）—— 热路径不解日志。
+ *  · 幂等：同一 `(claimId, injectedAt)` 只写一条（`appendTrials` 去重）。
+ * @returns {{appended:number, skipped:number, records:number, path?:string, reason?:string}}
+ */
+export function recordInjectionTrials({ storeRoot, claims = [], at = null } = {}) {
+  if (typeof storeRoot !== 'string' || !storeRoot) return { appended: 0, skipped: 0, records: 0, reason: 'no-store' };
+  if (!Number.isFinite(at)) return { appended: 0, skipped: 0, records: 0, reason: 'no-clock' };
+  const list = (Array.isArray(claims) ? claims : []).filter((c) => c && c.kind === 'antipattern' && typeof c.id === 'string' && c.id);
+  if (!list.length) return { appended: 0, skipped: 0, records: 0, reason: 'no-antipattern' };
+  const { records } = readTrials(storeRoot);
+  const lastByClaim = new Map();
+  for (const row of records) {
+    const prev = lastByClaim.get(row.claimId);
+    if (!prev || Number(row.at) > prev) lastByClaim.set(row.claimId, Number(row.at));
+  }
+  const index = loadRecoveryIndexCached(storeRoot);
+  const rows = [];
+  for (const claim of list) {
+    const fromTrials = lastByClaim.get(claim.id);
+    // 注意：`Number(null) === 0` 是合法数字 —— 必须按「正数才是注入时间」判（0 / null / 缺失 = 从未注入）
+    const rawInjectedAt = claim?.counters?.lastInjectedAt;
+    const fromClaim = typeof rawInjectedAt === 'number' && Number.isFinite(rawInjectedAt) && rawInjectedAt > 0 ? rawInjectedAt : null;
+    const since = Number.isFinite(fromTrials) ? fromTrials : fromClaim;
+    if (!Number.isFinite(since) || Number(at) <= since) continue; // 首次注入 ⇒ 只开 trial
+    const entry = index?.entries?.[claim.id] ?? null;
+    const recovery = entry && Number.isFinite(entry.at)
+      ? { kind: entry.kind, seq: entry.seq, at: entry.at, episode: typeof entry.episode === 'string' ? entry.episode : null }
+      : null;
+    const outcome = trialOutcomeOf({ claim, recovery, since, until: at });
+    rows.push({
+      claimId: claim.id,
+      injectedAt: since,
+      outcome: outcome.outcome,
+      evidenceEpisode: outcome.evidenceEpisode,
+      evidenceSeq: outcome.evidenceSeq,
+      at: Number(at),
+    });
+  }
+  return { ...appendTrials(storeRoot, rows), records: rows.length };
 }
 
 /** T28：恢复事实的缓存（按日志文件 size+mtime 失效；只存**派生索引**，不存事件原文）。 */

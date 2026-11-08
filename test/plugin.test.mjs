@@ -1855,3 +1855,105 @@ test('T3 ⑪: sanitizeConfig 认 pointerTier（布尔键；类型不对退回默
   assert.equal(sanitizeConfig({ pointerTier: 'yes' }).pointerTier, DEFAULT_CONFIG.pointerTier, '类型不对 ⇒ 退回默认');
   assert.equal(sanitizeConfig({}).pointerTier, DEFAULT_CONFIG.pointerTier, '未设置 ⇒ 默认值（单一来源）');
 });
+
+// ---------------------------------------------------------------------------
+// T33 · trial 记录（注入后的结果：recurred / avoided / unknown）
+// ---------------------------------------------------------------------------
+import { trialOutcomeOf, recordInjectionTrials, TRIAL_OUTCOMES } from '../src/rooms/inject.mjs';
+import { readTrials, writeRecoveryIndex } from '../src/rooms/persist.mjs';
+
+const T33_T0 = 1_790_000_000_000;
+const T33_claim = (over = {}) => ({
+  id: 'c-t33-1',
+  kind: 'antipattern',
+  text: 'Error: boom',
+  state: 'observed',
+  support: [{ episode: 'ep-a', seq: 2, occurredAt: T33_T0, quote: 'Error: boom' }],
+  counters: { support: 1, counter: 0, injections: 1, lastInjectedAt: T33_T0 },
+  ...over,
+});
+
+test('T33 ①: 三种 outcome 的机械判据（recurred / avoided / unknown）', () => {
+  assert.deepEqual([...TRIAL_OUTCOMES], ['recurred', 'avoided', 'unknown']);
+
+  // recurred：上一次注入之后，同一错误签名又出现（新的 support）
+  const recurred = trialOutcomeOf({
+    claim: T33_claim({ support: [
+      { episode: 'ep-a', seq: 2, occurredAt: T33_T0 },
+      { episode: 'ep-b', seq: 9, occurredAt: T33_T0 + 60_000 },
+    ] }),
+    since: T33_T0,
+  });
+  assert.equal(recurred.outcome, 'recurred');
+  assert.equal(recurred.evidenceEpisode, 'ep-b');
+  assert.equal(recurred.evidenceSeq, 9);
+
+  // avoided：没有新 support，但有 T30 恢复事实（同一主体后来成功）
+  const avoided = trialOutcomeOf({
+    claim: T33_claim(),
+    recovery: { kind: 'same-file-write-ok', seq: 7, at: T33_T0 + 30_000, episode: 'ep-a' },
+    since: T33_T0,
+  });
+  assert.equal(avoided.outcome, 'avoided');
+  assert.equal(avoided.evidenceSeq, 7);
+
+  // unknown：两种证据都没有
+  const unknown = trialOutcomeOf({ claim: T33_claim(), recovery: null, since: T33_T0 });
+  assert.equal(unknown.outcome, 'unknown');
+  assert.equal(unknown.evidenceSeq, null);
+
+  // 恢复事实早于注入 ⇒ 不算（只认注入之后的观察）
+  const early = trialOutcomeOf({ claim: T33_claim(), recovery: { kind: 'same-file-write-ok', seq: 7, at: T33_T0 - 1 }, since: T33_T0 });
+  assert.equal(early.outcome, 'unknown');
+});
+
+test('T33 ②: 首次注入只开 trial（不写记录）；第二次写一条；重放幂等', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t33-'));
+  try {
+    const claim = T33_claim();
+    // 首次：没有历史 trial、counters.lastInjectedAt 存在 ⇒ 写一条 unknown
+    const first = recordInjectionTrials({ storeRoot: root, claims: [claim], at: T33_T0 + 60_000 });
+    assert.equal(first.appended, 1);
+    assert.equal(first.records, 1);
+    const after = readTrials(root);
+    assert.equal(after.exists, true);
+    assert.equal(after.records.length, 1);
+    assert.equal(after.records[0].claimId, 'c-t33-1');
+    assert.equal(after.records[0].injectedAt, T33_T0, 'injectedAt = 上一次注入时间');
+    assert.equal(after.records[0].outcome, 'unknown');
+    assert.equal(after.records[0].at, T33_T0 + 60_000);
+
+    // 重放（同一时刻）⇒ 幂等：0 新增
+    const replay = recordInjectionTrials({ storeRoot: root, claims: [claim], at: T33_T0 + 60_000 });
+    assert.equal(replay.appended, 0);
+    assert.equal(readTrials(root).records.length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T33 ③: 没有历史（首次注入且无 counters）⇒ 只开 trial，不创建文件（tombstone）', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t33b-'));
+  try {
+    const fresh = T33_claim({ counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null } });
+    const res = recordInjectionTrials({ storeRoot: root, claims: [fresh], at: T33_T0 + 60_000 });
+    assert.equal(res.appended, 0);
+    assert.equal(res.records, 0);
+    assert.equal(existsSync(path.join(root, 'trials.jsonl')), false, '没有可结算的 trial ⇒ 不写文件（行为与现状一致）');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T33 ④: 恢复事实从 T30 索引读（avoided 用它作证据）', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t33c-'));
+  try {
+    writeRecoveryIndex(root, { version: 1, entries: { 'c-t33-1': { kind: 'same-file-write-ok', seq: 42, at: T33_T0 + 120_000, failureSeq: 2, episode: 'ep-a', prefix: 'Error: boom' } } });
+    const res = recordInjectionTrials({ storeRoot: root, claims: [T33_claim()], at: T33_T0 + 60_000 });
+    assert.equal(res.appended, 1);
+    const row = readTrials(root).records[0];
+    assert.equal(row.outcome, 'unknown', '恢复事实在本次注入之后才发生 ⇒ 本次仍 unknown');
+    // 再注入一次（at 更晚）⇒ 这次能看见那条恢复事实
+    const res2 = recordInjectionTrials({ storeRoot: root, claims: [T33_claim()], at: T33_T0 + 180_000 });
+    assert.equal(res2.appended, 1);
+    const rows = readTrials(root).records;
+    assert.equal(rows[1].outcome, 'avoided');
+    assert.equal(rows[1].evidenceSeq, 42);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

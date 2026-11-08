@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.68（2026-11-08）
+
+### T33 · trial 记录（失败教训后来复发没，Zep 方向）
+
+**版本说明**：`src/rooms/{inject,persist}.mjs`/`src/plugin.mjs` 行为新增 ⇒ patch。
+
+**判据**（观察窗 (injectedAt, at]）：
+**recurred** = 同一错误签名在后续局再现（support 的 occurredAt 落窗内）；
+**avoided** = 恢复事实（同一主体后来成功）的 at 落窗内；**unknown** = 都无。
+
+**落盘**：`trials.jsonl`（append-only），首次注入只开 trial 不写记录；同一 (claimId,injectedAt) 去重。
+
+**只在 action=inject 且非 shadow 时记**（没被模型看到的记了是假数）。
+
+**只记录，不改可见性/不退役**；存量不回填（真库 lastInjectedAt>0 的 0 条，trials.jsonl 当前不存在）。
+
+**意义**：一周后能用「哪些 claim 的 recurred 率高」退役没用的记忆（Zep Wilson 下界方向）——
+**这是「记忆有没有用」的长期判据，比 ablation 更接近真实使用。**
+
+**验收**：plugin.test 79/79；全量 1171/1165/0 fail；check PASS；tombstone（无 trials 时与现状一致）。
+
 ## 0.8.67（2026-11-08）
 
 ### T32 · 知识库 93：Zep Agent Skills（过程性记忆）
