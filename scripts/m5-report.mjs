@@ -604,10 +604,14 @@ export function summarizeRedundant({ sessions = [], sinceMs = 0, now = Date.now(
   };
 }
 
-export function measureA1Redundant({ dataRoot = null, now = Date.now(), sinceAt = null, scan = null, env = process.env } = {}) {
+export function measureA1Redundant({ dataRoot = null, now = Date.now(), sinceAt = null, scan = null, env = process.env, runStartAt = null } = {}) {
   const envSince = Number(env?.KIFU_A1_REDUNDANT_SINCE);
-  const fixAt = Number.isFinite(sinceAt) ? sinceAt
+  const declaredFixAt = Number.isFinite(sinceAt) ? sinceAt
     : (Number.isFinite(envSince) && envSince > 0 ? envSince : A1_REDUNDANT_FIX_AT);
+  // T53：**当前这份代码什么时候开始跑的**同样是窗口下限（宿主重启 ⇒ 自动推进，不用改常量）。
+  // 同时保留"跨代码版本"的窗口作为**参考值**（只报不判）—— 不能因为换了口径就把旧读数藏起来。
+  const declaredWindowStart = Math.max(declaredFixAt, now - A1_REDUNDANT_WINDOW_MS);
+  const fixAt = Math.max(declaredFixAt, Number.isFinite(runStartAt) ? runStartAt : 0);
   const windowStart = Math.max(fixAt, now - A1_REDUNDANT_WINDOW_MS);
   const floor = { minInjections: A1_REDUNDANT_MIN_INJECTIONS, minTokens: A1_REDUNDANT_MIN_TOKENS };
   const baseDetail = {
@@ -615,6 +619,8 @@ export function measureA1Redundant({ dataRoot = null, now = Date.now(), sinceAt 
     pairedWith: [A1_STALE_AXIS_ID, A1_OPPOSITE_AXIS_ID],
     units: '会话级（同 session.id + 同 source.digest 再投）· 不是 scope 级',
     fixAt,
+    declaredFixAt,
+    runStartAt: Number.isFinite(runStartAt) ? runStartAt : null,
     windowStart,
     windowDays: round((now - windowStart) / 86_400_000, 2),
     floor,
@@ -633,7 +639,7 @@ export function measureA1Redundant({ dataRoot = null, now = Date.now(), sinceAt 
   }
   let scanned;
   try {
-    scanned = scan ?? scanSessionInjections({ dataRoot, sinceMs: windowStart });
+    scanned = scan ?? scanSessionInjections({ dataRoot, sinceMs: Math.min(windowStart, declaredWindowStart) });
   } catch (err) {
     return axis({
       value: null,
@@ -645,6 +651,8 @@ export function measureA1Redundant({ dataRoot = null, now = Date.now(), sinceAt 
     });
   }
   const sums = summarizeRedundant({ sessions: scanned.sessions, sinceMs: windowStart, now, ...floor });
+  // 参考值：同一批扫描结果、按"跨代码版本"的旧窗口再算一遍（**不参与 exit code**，只防"换口径藏读数"）
+  const refSums = summarizeRedundant({ sessions: scanned.sessions, sinceMs: declaredWindowStart, now, ...floor });
   const detail = {
     ...baseDetail,
     powered: sums.powered,
@@ -665,6 +673,16 @@ export function measureA1Redundant({ dataRoot = null, now = Date.now(), sinceAt 
     redundantNecessaryPairs: sums.necessaryPairs,
     redundantNecessaryTokens: sums.necessaryTokens,
     dupRate: sums.dupRate,
+    reference: {
+      windowStart: declaredWindowStart,
+      windowStartIso: new Date(declaredWindowStart).toISOString(),
+      injections: refSums.injections,
+      tokens: refSums.tokens,
+      redundantWaste: refSums.wasteRate,
+      redundantNecessary: refSums.necessaryRate,
+      powered: refSums.powered,
+      why: '跨代码版本的旧窗口（只报不判）：口径变了，别拿它跟本轴比',
+    },
     scanned: {
       sessionsDir: scanned.sessionsDir,
       missingSessionsDir: scanned.missingSessionsDir,
@@ -686,7 +704,8 @@ export function measureA1Redundant({ dataRoot = null, now = Date.now(), sinceAt 
   parts.push(sums.powered
     ? `**已通电**（窗口 ${sums.injections} 次 ≥ ${floor.minInjections} · ${sums.tokens} tokens ≥ ${floor.minTokens}）⇒ redundantWaste > ${(A1_REDUNDANT_WASTE_MAX * 100).toFixed(0)}% 参与 exit code`
     : `**未通电**（窗口 ${sums.injections} 次 / ${sums.tokens} tokens，不到 ${floor.minInjections} 次或 ${floor.minTokens} tokens）⇒ 不参与 exit code，不硬造数`);
-  parts.push(`窗口 = max(T25 修复上线时点, now−${Math.round(A1_REDUNDANT_WINDOW_MS / 86_400_000)}d)（${new Date(windowStart).toISOString()} 起）；scope 级重复（跨会话同卡各拿一次）**不计入**（有益）`);
+  parts.push(`窗口 = max(判据修复时点 ${new Date(declaredFixAt).toISOString()}, 当前宿主机首心跳 ${Number.isFinite(runStartAt) ? new Date(runStartAt).toISOString() : 'n/a'}, now−${Math.round(A1_REDUNDANT_WINDOW_MS / 86_400_000)}d)（实际 ${new Date(windowStart).toISOString()} 起）；scope 级重复（跨会话同卡各拿一次）**不计入**（有益）`);
+  parts.push(`**参考（跨代码版本，不参与 exit code）**：waste=${pct(refSums.wasteRate)} · necessary=${pct(refSums.necessaryRate)}（${refSums.injections} 次注入 / ${new Date(declaredWindowStart).toISOString()} 起）`);
   parts.push('消费者：waste > 1% ⇒ 查 oncePerSession（`session.id` 判据）是否回归；口径与三者关系见 `evidence/T27-a1-redundant.md`');
   return axis({
     value: sums.tokens > 0 ? sums.wasteRate : null,
@@ -986,6 +1005,35 @@ export function readPluginFacts(repoRoot = REPO_ROOT) {
     unitTests,
     testFile: path.relative(repoRoot, testFile).split(path.sep).join('/'),
   };
+}
+
+/**
+ * 当前宿主进程（最后一条 `src=index.js` 心跳的 pid）的**首条**心跳时点（epoch ms）；读不到 ⇒ null。
+ *
+ * T53（2026-11-09）：A1.redundant 的窗口起点必须**跟着"当前在跑的那份代码"走**。
+ * 原来的 `fixAt` 是一个写死的常量（= 上一次修判据的时点），于是新一版修法上线后，
+ * 窗口里仍然混着旧代码注入的那批 ⇒ 修好了也照样红满 24 小时，看起来像"没修好"。
+ * 用当前 pid 的首心跳当起点，"这份代码跑起来之后才计入"就是机械事实，不用人工改常量。
+ *
+ * @param {string} storeRoot 记忆库根（`<DSH_HOME>/memory-context`）
+ * @returns {number|null}
+ */
+export function currentRunStartAt(storeRoot) {
+  try {
+    const file = path.join(String(storeRoot ?? ''), 'live-stats.jsonl');
+    if (!fs.existsSync(file)) return null;
+    const NL = String.fromCharCode(10);
+    const rows = fs.readFileSync(file, 'utf8').split(NL).filter(Boolean).map((l) => {
+      try { return JSON.parse(l); } catch { return null; }
+    }).filter((r) => r && String(r.src ?? '') === 'index.js' && Number.isFinite(r.pid) && Number.isFinite(r.at));
+    if (!rows.length) return null;
+    let last = rows[0];
+    for (const r of rows) if (r.at >= last.at) last = r;   // 最后一条心跳的 pid = 当前宿主
+    const mine = rows.filter((r) => r.pid === last.pid).map((r) => r.at);
+    return mine.length ? Math.min(...mine) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A3 线上心跳（2026-11-03）：读 <store>/live-stats.jsonl，统计尝试与动作分布。 */
@@ -1341,7 +1389,7 @@ async function runM5Body(opts) {
     }),
     // T27：A1 的第三条轴（**会话级**冗余注入）。同步读会话日志（只读、零模型调用）；
     // 样本不足/没有 sessions/ ⇒ 自动 `未通电`（不参与 exit code），不写假 0。
-    [A1_REDUNDANT_AXIS_ID]: measureA1Redundant({ dataRoot, now }),
+    [A1_REDUNDANT_AXIS_ID]: measureA1Redundant({ dataRoot, now, runStartAt: currentRunStartAt(storeRoot) }),
     A2: await measureA2({ dataRoot, storeRoot, now, holdoutExam: opts.holdoutExam ?? null }),
     A3: measureA3({ repoRoot: opts.repoRoot ?? REPO_ROOT, liveAttempts: opts.liveAttempts ?? 0, liveStats: readLiveStats(storeRoot) }),
     A4: measureA4({ pipeline }),
