@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.77（2026-11-08）
+
+### T42 · 一键重启验证脚本（post-restart-verify.mjs）
+
+**版本说明**：新增脚本 + 测试 ⇒ patch。
+
+一条命令 `node scripts/post-restart-verify.mjs`，七项检查各出 PASS/FAIL/NO-SAMPLE + 证据。
+退出码：全 PASS=0 / 有 FAIL=1 / 全 NO-SAMPLE=2。
+
+**现在实跑（旧代码）**：**2/7 通过 · FAIL=4 · NO-SAMPLE=1 ⇒ exit 1**（如实不硬算过）。
+
+**关键设计**：判「在跑哪份代码」**不能只看版本号**（软链直读源码，instance-status 永远报新版）——
+必须看**宿主进程启动时间 vs 发版时点**。所以现在判 FAIL 是对的，重启后应转 PASS。
+
+**边界**：④ live-stats 无 session id，只能 scope 级上界（会话级需 T24 口径）；
+① 用 mtime 当发版时点，git checkout 会刷新（保守方向，重启一次即消解）。
+
+**验收**：post-restart-verify.test **12/12**；check PASS；空库冒烟无假绿。
+
 ## 0.8.76（2026-11-08）
 
 ### T40 · 洞见层变体泛化：**负结果**（不比 raw 更好，如实记）
