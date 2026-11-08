@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.70（2026-11-08）
+
+### T35 · file-exists 适用条件失效 ⇒ 不注入（方向感知，消除负迁移 1.49%）
+
+**版本说明**：`src/rooms/inject.mjs` 行为新增 ⇒ patch。
+
+**⚠ 关键发现（差点做错）**：本仓 `file-exists` 是**反向语义**（T158/T159）——
+真库 110 条全部 `expect:missing`（「该路径不存在」才成立，**路径出现**才失效）。
+按任务书字面「文件不存在 ⇒ 不注入」会**恰好反掉**：误杀 76 条仍正确的、保留 34 条已失效的。
+成员按仓库既有语义做**方向感知**核验 ⇒ 避免一次大误杀。
+
+**实现**：`fileExistsPreconditionOk`（纯函数）——expect:missing ⇒ 路径出现即失效；
+expect:exists ⇒ 文件消失即失效；旧记录无 expect 按 validity.value 推（gates 同规则）。失效 ⇒ **整行不注入**。
+
+**顺带修真 bug**：`pickClaimBase` 的「hit 自带 claim 对象」投影原来丢掉 preconditions/validity
+⇒ 这条旁路上核验被静默绕过（等于永不失效），已补。
+
+**统计**：claim 2277 · 带 file-exists **110**（100% expect:missing）· 仍成立 **76**（不误杀）· **当前失效 34**
+⇒ 消除负迁移 **34/2277 = 1.49%**。
+
+**验收**：inject 102/101；全量 1181/1175/0 fail；check PASS；T35 ①–⑤ 全绿。
+
 ## 0.8.69（2026-11-08）
 
 ### T34 · 恢复事实分档 exact / same-file / same-tool（提高覆盖率，不混淆）
