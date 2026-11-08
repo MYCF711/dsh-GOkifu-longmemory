@@ -17,6 +17,21 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.67（2026-11-08）
+
+### T32 · 知识库 93：Zep Agent Skills（过程性记忆）
+
+**版本说明**：调研/文档 ⇒ patch。
+
+arXiv:2611.01386（Zep AI，2026-11-01）。三条机制对我们当前痛点：
+
+1. **只从强验证的成功 attempt family 编译** —— 与恢复事实 **2.37% 同源天花板**；
+   论文把「从失败 Trace 的已验证子目标编译」列为 future work。可执行：主体匹配从「同一命令」扩到「同一文件/工具族」，分档计数。
+2. **Skill 契约 = 适用性 + 过程（含预期观察、停止条件、失败模式及恢复）** —— 事实型卡缺的正是这几栏。
+3. **成熟度 + 信任 = 95% Wilson 下界 + trial（检索 ≠ 使用）** —— 先记录 trial（recurred/avoided/unknown）再定退役。
+
+索引与 MAINTENANCE 清单同步（check PASS 93 篇）。
+
 ## 0.8.66（2026-11-08）
 
 ### 重启验证清单（docs/重启验证清单.md）
