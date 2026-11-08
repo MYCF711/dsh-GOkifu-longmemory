@@ -17,6 +17,21 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.78（2026-11-08）
+
+### 仓库对外整理：README 简洁化 + kifu-loader 角色写清
+
+**版本说明**：文档 ⇒ patch。
+
+**普通用户只需开 `dsh-gokifu-longmemory` 本体**（自包含，核心 = src/plugin.mjs）。
+`packages/kifu-loader` 是**开发专用软链加载器**，`package.json` 的 `files` 不含 `packages/`，**不会被打包分发**。
+
+**README 重写为简洁版**（给人看）：能做什么（失败教训+恢复事实）、怎么开（只开本体）、
+和 kifu-loader 的关系（开发专用）、和 Hindsight 的关系（另一个独立插件，可关）。
+
+**AGENTS 补安装说明**（本体与 loader 只开一个，双开 = 双注入）。
+**packages/kifu-loader/README** 注明「开发专用，普通用户不用看」。
+
 ## 0.8.77（2026-11-08）
 
 ### T42 · 一键重启验证脚本（post-restart-verify.mjs）

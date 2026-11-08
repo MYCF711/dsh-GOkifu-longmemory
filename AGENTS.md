@@ -60,6 +60,10 @@
 ### 2.2 DSH 接缝
 
 - **不改 DSH 安装目录**（`D:\DeepSeek Harness\Desktop\resources\`）；只经 profile 通道安装。
+- **普通用户只开 `dsh-gokifu-longmemory` 本体**（自包含，核心 = `src/plugin.mjs`）。
+  **`packages/kifu-loader` 是开发专用的软链加载器**（改源码不用重装），**普通用户不需要**；
+  `package.json` 的 `files` 不含 `packages/`，它不会被打包分发。
+  **本体与 kifu-loader 只开一个**（双开 = 双注入）。
 - **不写自定义 session 事件**：日志里出现未知事件类型会让会话打不开（fail-closed）。记忆数据一律进 sidecar（`<DSH_HOME>/memory-context/`）。
 - **落账只挂可 await 的钩子**：`agent/pre-step`（每步边界，唯一可安全 append 的 durable 写点）、`agent/turn-stopping`（轮次收尾）、`agent/status`（状态）；**禁止在 `session/event` 广播里 append**（重入抛错且被吞成 warn）。
 - **运行中不改 `profiles/*/cordis.patch.yml`**：会整树热重载，可能让 host `exit(1)`（压缩仓 2026-11-01 实机事故）。要改配置走设置 UI。
