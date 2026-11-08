@@ -16,7 +16,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, truncateSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, truncateSync, statSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -1259,9 +1259,10 @@ test('T268 ①: collectMessages=false ⇒ 完全不写文件（配置为唯一�
   } finally { rmT2(dir, { recursive: true, force: true }); }
 });
 
-test('T268 ②: 写失败 ⇒ 只返回 false，不抛（采集不许拖垮注入）', () => {
+test('T268 ②: 写失败 ⇒ 返回 failed、不抛（采集不许拖垮注入）', () => {
   const boom = { mkdirSync() { throw new Error('EACCES'); }, appendFileSync() { throw new Error('EACCES'); } };
-  assert.equal(appendMessageCorpus('D:/nope', messageCorpusRow({ messages: [{ role: 'user', content: 'x' }] }), { fsImpl: boom }), false);
+  // T20：返回值从 boolean 改成状态对象（调用方要能区分"写失败"与"到上限"）
+  assert.equal(appendMessageCorpus('D:/nope', messageCorpusRow({ messages: [{ role: 'user', content: 'x' }] }), { fsImpl: boom }).status, 'failed');
 });
 
 test('T268 ③: 语料行形状正确（role/text/episode/scopeKey/at）+ 超长截断 + 脱敏', () => {
@@ -1297,7 +1298,7 @@ test('T282 ② tombstone: 写入只落 store root，**仓库目录里不出现�
   const storeRoot = mkTmp2(path2.join(tmp2(), 'kifuin-t282-write-'));
   try {
     const ok = appendMessageCorpus(storeRoot, messageCorpusRow({ episode: 'ep-t282', messages: [{ role: 'user', content: '你好' }] }));
-    assert.equal(ok, true, '写 store root 必须成功');
+    assert.equal(ok.status, 'written', '写 store root 必须成功'); // T20：返回值改成状态对象
     assert.equal(existsF2(messageCorpusPath(storeRoot)), true, '语料必须落在 sidecar');
     const after = new Set(existsF2(repoEvidence) ? readdirSync(repoEvidence) : []);
     const added = [...after].filter((f) => !before.has(f));
@@ -1305,9 +1306,9 @@ test('T282 ② tombstone: 写入只落 store root，**仓库目录里不出现�
   } finally { rmT2(storeRoot, { recursive: true, force: true }); }
 });
 
-test('T282 ③: 写失败静默降级（返回 false，不抛）', () => {
+test('T282 ③: 写失败静默降级（返回 failed，不抛）', () => {
   const boom = { mkdirSync() { throw new Error('EACCES'); }, appendFileSync() { throw new Error('EACCES'); } };
-  assert.equal(appendMessageCorpus('D:/nope-t282', messageCorpusRow({ messages: [{ role: 'user', content: 'x' }] }), { fsImpl: boom }), false);
+  assert.equal(appendMessageCorpus('D:/nope-t282', messageCorpusRow({ messages: [{ role: 'user', content: 'x' }] }), { fsImpl: boom }).status, 'failed');
 });
 
 test('T282 ④: 真实 pre-step 语料只写 <storeRoot>/corpus/messages.jsonl', async () => {
@@ -1623,6 +1624,94 @@ test('T18 ④ 读者: scripts/live-stats.mjs 照常读（含墓碑行）—— �
     assert.equal(summary.actions.skip, 2);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// T20 · 消息语料 corpus/messages.jsonl：无上限 → 64MB，且**撞上限不许静默**
+//
+// 背景（T18 遗留）：T268 采集每步一行（555 行 / 1.1MB / 1,985 B/行），同样无上限。
+// 读者清单：全仓只有 **1 个读者** `scripts/t267-replay.mjs`（整文件 readFileSync + 逐行重放），
+// 且不在本任务可写范围 ⇒ 与 T16/T18 同一约束：任何分段/轮转都会让它静默少读 ⇒ 抬上限、零读侧改动。
+//
+// tombstone：① 删掉 `stat.size >= cap` 判定 ⇒ T20 ① 红、T20 ③ 红（不会出现 messages-corpus-cap 行）；
+//            ② 删掉 decidePreStep 里的 `traceMessageCorpusCap(...)` ⇒ T20 ③ 红。
+// ---------------------------------------------------------------------------
+import { MESSAGE_CORPUS_CAP_BYTES, traceMessageCorpusCap } from '../src/plugin.mjs';
+
+test('T20 ①: 语料到上限就停写、返回 capped、旧行一字不动（capBytes 注入小文件）', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-t20-cap-'));
+  try {
+    const row = () => messageCorpusRow({ messages: [{ role: 'user', content: 'corpus-cap-test' }] });
+    const first = appendMessageCorpus(dir, row());
+    assert.equal(first.status, 'written', '第一次照常写');
+    const file = messageCorpusPath(dir);
+    const before = readFileSync(file, 'utf8');
+    const capped = appendMessageCorpus(dir, row(), { capBytes: 1 });
+    assert.equal(capped.status, 'capped', '到上限必须说 capped（旧实现会一直写）');
+    assert.equal(capped.fileBytes, Buffer.byteLength(before, 'utf8'), '要如实报当前字节数（痕迹要用）');
+    assert.equal(readFileSync(file, 'utf8'), before, '撞上限后旧行必须一字不动');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T20 ②: traceMessageCorpusCap —— warn 一次 + live-stats 一条 messages-corpus-cap，不刷屏', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-t20-trace-'));
+  try {
+    const { ctx, warns } = makeCtx();
+    const notified = new Set();
+    const result = { status: 'capped', fileBytes: MESSAGE_CORPUS_CAP_BYTES };
+    assert.equal(traceMessageCorpusCap({ ctx, storeRoot: dir, result, notified }), true);
+    assert.ok(warns.some((w) => w.includes('消息语料已到上限')), `要给 warn，实际：${warns.join(' | ')}`);
+    const liveFile = path.join(dir, 'live-stats.jsonl');
+    const readLive = () => readFileSync(liveFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const rows = readLive();
+    assert.equal(rows.length, 1, '撞线痕迹就一条（不是每步一条）');
+    assert.equal(rows[0].kind, 'messages-corpus-cap');
+    assert.equal(rows[0].reason, 'messages-corpus-cap');
+    assert.equal(rows[0].capBytes, MESSAGE_CORPUS_CAP_BYTES);
+    assert.equal(rows[0].fileBytes, MESSAGE_CORPUS_CAP_BYTES);
+    assert.equal(rows[0].pid, process.pid);
+    assert.equal(traceMessageCorpusCap({ ctx, storeRoot: dir, result, notified }), false);
+    assert.equal(readLive().length, 1, '第二次不许再写');
+    assert.equal(traceMessageCorpusCap({ ctx, storeRoot: dir, result: { status: 'written' }, notified }), false);
+    assert.equal(readLive().length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T20 ③ 接线: 真 pre-step 撞语料上限 ⇒ live-stats 出现 messages-corpus-cap（不是静默停采）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const corpusDir = path.join(storeRoot, 'corpus');
+    mkdirSync(corpusDir, { recursive: true });
+    const corpusFile = path.join(corpusDir, 'messages.jsonl');
+    writeFileSync(corpusFile, '');
+    truncateSync(corpusFile, MESSAGE_CORPUS_CAP_BYTES - 1); // 稀疏文件，不真写 64MB
+    writeFileSync(corpusFile, '\n', { flag: 'a' }); // 末尾留换行
+    assert.equal(statSync(corpusFile).size, MESSAGE_CORPUS_CAP_BYTES);
+
+    const { ctx, hooks, warns } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot, probeValidity: false }));
+    const step = async () => {
+      const { session } = makeSession(workspace);
+      const claimed = [userMessage('今天天气不错，随便聊聊')];
+      await runHook({ hooks, payload: { agent: { session }, messages: claimed }, decision: enterDecision([...claimed]) });
+    };
+    await step();
+    await step();
+
+    assert.equal(statSync(corpusFile).size, MESSAGE_CORPUS_CAP_BYTES, '到上限后语料文件不许再长（旧行不动）');
+    const capRows = readFileSync(path.join(storeRoot, 'live-stats.jsonl'), 'utf8').trim().split('\n')
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+      .filter((r) => r && r.kind === 'messages-corpus-cap');
+    assert.equal(capRows.length, 1, '两次 step 只报一次（一次性告警，不刷屏）');
+    assert.equal(capRows[0].capBytes, MESSAGE_CORPUS_CAP_BYTES);
+    assert.equal(warns.filter((w) => w.includes('消息语料已到上限')).length, 1);
+  } finally {
+    cleanup();
   }
 });
 
