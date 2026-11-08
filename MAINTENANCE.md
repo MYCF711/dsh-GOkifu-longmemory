@@ -10,7 +10,7 @@
 |---|---|
 | 仓库 | `MYCF711/dsh-gokifu-longmemory`（**公开**；main 由 ruleset 保护：必须经 PR + required check `rules`，禁 force push/删除；单机单人，不强制审批） |
 | 包名 | `dsh-gokifu-longmemory`（**不发 npm**） |
-| 当前版本 | `0.8.87` |
+| 当前版本 | `0.8.88` |
 | 定位 | DSH 长期记忆系统（棋院 / Kifu-in）：棋谱入馆、相关边成网、定式可更新；只在相关时顺藤摸瓜 |
 | 当前负责人 | Lead（superagent 会话） |
 

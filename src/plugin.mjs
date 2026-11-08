@@ -333,6 +333,32 @@ export function cardText(card) {
 }
 
 /**
+ * T49（2026-11-09）：**这张卡已经在本轮上下文里了** ⇒ 别再投一次（无状态去重）。
+ *
+ * 为什么 `oncePerSession` 不够：它是 `apply()` 内的内存 `Set`，宿主**重新 apply**（新 agent 作用域 /
+ * 插件重载 / 会话再 seed）之后就空了。本机实测：`tools-registered.json` 只由 `apply` 写，
+ * 它在宿主启动（01:52）之后 1.5 小时（03:22）又被重写 ⇒ 同一进程里 `apply` 跑了不止一次；
+ * 于是同一张卡在**每个 `turn/start`** 又被投一遍，`A1.redundant` 浪费 **36 对 / 291 次 = 10.5%**（闸 1%）。
+ *
+ * 判据用**上下文事实**而不是内存状态：卡正文（`cardText(card)`，也就是注入那条消息的正文）逐字
+ * 出现在 `messages` 里 ⇒ 再投一次必然是浪费。压缩把那条消息压掉之后正文不再在 ⇒ 自然恢复注入
+ * （即 `A1.redundant` 分档里的「必要重注」，不误伤）。
+ *
+ * @param {unknown} messages `payload.messages`（宿主本轮上下文）
+ * @param {object|null} card  `decidePreStep` 产出的卡
+ * @returns {boolean} 卡正文是否已逐字出现在上下文里
+ */
+export function cardAlreadyInContext(messages, card) {
+  const text = cardText(card);
+  if (!text) return false; // 没有正文可比 ⇒ 不去重（宁可多投一次，也不误判成"已在"）
+  const list = Array.isArray(messages) ? messages : [];
+  for (const message of list) {
+    if (messageText(message) === text) return true;
+  }
+  return false;
+}
+
+/**
  * T268：把**本轮真实消息**追加进语料（只本机、只追加）。
  *
  * 用途：T267 的收益（最近 N 条消息的硬实体）在现有考卷上**测不出来** —— 考卷只有根用户原话。
@@ -1581,7 +1607,8 @@ export function apply(ctx, rawConfig = {}) {
                 decision,
                 lifecycle,
               });
-              if (inner?.action === 'inject') {
+              // T49：D5 也吃同一条去重 —— 卡已在上下文里就别再投（否则每次重新 apply 后 D5 会补同一张）
+              if (inner?.action === 'inject' && !cardAlreadyInContext(payload?.messages, inner.card)) {
                 state.injected += 1;
                 // D5 遥测（2026-11-02）：真注入后要能统计"二次命中触发率与误报"。
                 // 只写影子台账目录；任何异常不影响本轮注入。
@@ -1604,7 +1631,15 @@ export function apply(ctx, rawConfig = {}) {
       }
 
       const deps = await resolveDeps(config);
-      const result = await decidePreStep({ ctx, config, deps, payload, decision, lifecycle });
+      let result = await decidePreStep({ ctx, config, deps, payload, decision, lifecycle });
+      // T49：**无状态去重**（`oncePerSession` 只在同一个 apply 实例里有效；宿主重新 apply 后它一定是空的）。
+      // 卡正文已经逐字出现在本轮上下文里 ⇒ 再投一次是确定的浪费。降级成 `skip`（带 reason）而不是
+      // 静默返回：心跳台账要能看见"本来会投、因为已在上下文里所以没投"，否则这条闸无法被审计。
+      if (result.action === 'inject' && cardAlreadyInContext(payload?.messages, result.card)) {
+        // **`decision` 必须是官方入参那个原对象** —— `result.decision` 已经带上了那张卡（`{ ...decision, messages }`），
+        // 拿它返回等于照样注入（T49 ① 实测 4≠3 就是踩在这里）。
+        result = { ...result, action: 'skip', reason: 'already-in-context', decision };
+      }
       // enabled=false 时的 "skip disabled" 没有诊断价值，别写（任何库内调用都会带出来一堆噪声）。
       // 统一用 `=== true`（与 abstainIrrelevant 一致）。
       // 注意：`liveStats` 上游有 `boolOf(src.liveStats, true)` 保护（未设置 ⇒ true），

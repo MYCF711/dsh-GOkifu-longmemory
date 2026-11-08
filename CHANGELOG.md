@@ -17,6 +17,34 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.88（2026-11-09）
+
+### T49 · 同一张卡在每个 turn 重投：去重改「卡已在上下文里」
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 按主人 2026-11-05 的裁定落 **patch**（`version-suggest` 建议
+minor 时也落 patch）。改动面是 `src/plugin.mjs` 的注入闸，行为收紧、无契约破坏。
+
+**触发**：`node scripts/patrol.mjs` 红 —— `A1.redundant` 冗余浪费 **10.53%**（闸 1%），
+24h 窗口 291 次注入里 **36 对**同会话同卡重投（最长的会话 `aa0b0da9-…` 一张卡投了 **8 次**）。
+
+**根因**（两条事实叠加）：
+
+1. 信号每轮重复 —— agent-teams 每轮重投任务书，`lastUserText` 拿到的还是同一段 ⇒ 同一张卡被重新构建；
+2. `oncePerSession` 是 `apply()` 内的内存 `Set`，宿主**重新 apply** 之后就是空的 ——
+   `tools-registered.json`（只由 `apply` 写）在宿主启动（01:52）后 1.5 小时（03:22）又被重写，
+   证明同一进程里 apply 跑了不止一次。
+
+**修法**：判据从「内存态」换成「上下文事实」——卡正文已经逐字出现在 `payload.messages` 里 ⇒
+`skip / already-in-context`（新增 `cardAlreadyInContext`，主路径与 D5 补卡路径共用）。
+压缩把卡压掉之后正文不在 ⇒ 自然恢复注入（不误伤"必要重注"那一档）。
+
+**踩过的坑**：去重分支必须返回**官方入参那个 `decision`** —— `result.decision` 已经带上卡
+（`{ ...decision, messages }`），照它返回等于照样注入（T49 ① 实测 `4 !== 3`）。
+
+**验收**：T49 ①②③ 3/3（关掉闸 ⇒ ① 红 `4 !== 3`）；`npm test` 1219 条 / 1213 pass / 0 fail / 6 skip；
+`check.mjs` PASS。证据 `evidence/T49-already-in-context.md`。
+**线上效果要等下一次宿主重启**（软链加载，不影响已运行进程）。
+
 ## 0.8.87（2026-11-09）
 
 ### HANDOFF.md（会话归档交接）
