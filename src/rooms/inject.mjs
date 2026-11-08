@@ -735,7 +735,7 @@ export function recordInjectionTrials({ storeRoot, claims = [], at = null } = {}
  * 机械来源（按优先级，全都不成 ⇒ `null`，**不编**）：
  *  ① `claim.class` / `claim.errorClass` 字段（数据里若将来带就直接用）；
  *  ② claim 文本的 `class:<slug>` 前缀（类级章节 claim 的既有形态）；
- *  ③ 仓库既有分类器 `classifyErrorClass`（`claim.mjs`，闭集 8 类）对 claim 原文的机械判定。
+ *  ③ 仓库既有分类器 `classifyErrorClass`（`claim.mjs`；**扩类** 19 类，仅洞见层用）对 claim 原文的机械判定。
  * 返回值统一成 `class:<slug>`；没有类 ⇒ null（卡行与不加洞见层时**逐字节一致**）。
  * @param {object} claim
  * @returns {string|null}
@@ -753,7 +753,7 @@ export function recoveryInsightClass(claim) {
   if (fromField) return fromField;
   const m = /^class:([a-z0-9][a-z0-9-]*)/i.exec(String(claim?.text ?? '').trim());
   if (m) return `class:${m[1].toLowerCase()}`;
-  const derived = classifyErrorClass(claim?.text);
+  const derived = classifyErrorClass(claim?.text, { extended: true });
   return derived ? `class:${derived}` : null;
 }
 

@@ -215,19 +215,69 @@ const ERROR_CLASSES = [
 
 ];
 
+/**
+ * T38 · 扩类（**来自真库实际分布**，每类都有机械判据；排在原 8 类**之后**，不改旧类行为）：
+ *
+ * | 类 | 判据（正则） | 真库命中 |
+ * |---|---|---|
+ * | agent-not-found    | `active teammate … not found` / `task space not found` | 154 |
+ * | file-not-found     | `ENOENT` / `FileNotFoundError` / `no such file or directory` | 124 |
+ * | syntax-error       | `SyntaxError` / `syntax error`（含 bash `-c`） | 120 |
+ * | search-io-error    | `grep/glob search failed … io error` | 39 |
+ * | network            | `failed to connect` / `unable to access` / `ECONNREFUSED` / `ENOTFOUND` / 非公网 IP | 18 |
+ * | type-error         | `TypeError` | 41 |
+ * | arg-out-of-range   | `offset N is out of range` | 9 |
+ * | git-not-repo       | `not a git repository` | 14 |
+ * | path-not-directory | `not a directory` | 8 |
+ * | regex-error        | `regex parse error` / `PatternError` / `unterminated character set` | 11 |
+ * | python-exception   | `AttributeError` / `KeyError` / `UnicodeEncodeError` / `IndexError` / `ValueError` | 29 |
+ *
+ * 纪律：**只加机械判据**（正则/关键词），不"看着像"；命中数由 `tmp/t38-dist.mjs` 在真库上复核。
+ *
+ * **默认关闭**（`extended` 默认 `false`）：扩类只服务**洞见层标注**（T37 的 `recoveryInsightClass` 显式
+ * 传 `{extended:true}`），**不参与 claim 合并** —— `errorKeyOf` / `ensureClassClaims` / 插件的
+ * `errorClassKeyOf` 仍只认原 8 类「环境/协议」类（D2 的「代码语法/模块缺失保留具体原文」契约不变）。
+ * 需要扩类时显式开；关掉时行为与原 8 类**逐字节一致**（tombstone）。
+ */
+const ERROR_CLASSES_EXTENDED = [
+  ['agent-not-found', /active teammate [^\n]* not found|task space not found/i],
+  ['file-not-found', /enoent|filenotfounderror|no such file or directory/i],
+  ['syntax-error', /\bsyntaxerror\b|syntax error/i],
+  ['search-io-error', /(?:grep|glob) search failed[^\n]*io error|io error for operation/i],
+  ['network', /failed to connect|unable to access|could not resolve host|non-public ip address|ECONNREFUSED|ENOTFOUND|socket hang up/i],
+  ['type-error', /\btypeerror\b/i],
+  ['arg-out-of-range', /out of range for "|offset \d+ is out of range/i],
+  ['git-not-repo', /not a git repository/i],
+  ['path-not-directory', /not a directory/i],
+  ['regex-error', /regex parse error|patternerror|unterminated character set|invalid regular expression/i],
+  ['python-exception', /\b(?:AttributeError|KeyError|UnicodeEncodeError|IndexError|ValueError)\b/],
+];
+
+
 
 
 /** 已知的「环境/协议」错误类；返回 null 表示保持原签名（不合并）。 */
 
-export function classifyErrorClass(text) {
+export function classifyErrorClass(text, { extended = false } = {}) {
 
   const s = String(text ?? '');
 
   for (const [name, re] of ERROR_CLASSES) if (re.test(s)) return name;
 
+  // T38：扩类（关掉 ⇒ 与原 8 类逐字节一致）
+  if (!extended) return null;
+
+  for (const [name, re] of ERROR_CLASSES_EXTENDED) if (re.test(s)) return name;
+
   return null;
 
 }
+
+/** T38：坑类名单（原 8 类 + 扩类；单一来源，供文档/测试引用）。 */
+export const ERROR_CLASS_NAMES = Object.freeze([
+  ...ERROR_CLASSES.map(([name]) => name),
+  ...ERROR_CLASSES_EXTENDED.map(([name]) => name),
+]);
 
 
 
