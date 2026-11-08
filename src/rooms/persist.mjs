@@ -66,6 +66,9 @@ export const ENTRY_KINDS = Object.freeze([
 export const AUTHORITATIVE_KINDS = Object.freeze(['episodes', 'joseki', 'claims', 'adjudications']);
 /** 派生：可从权威重算（§4.11 规则 5）。 */
 export const DERIVED_KINDS = Object.freeze(['topics', 'links', 'threads']);
+/** T30：恢复索引 sidecar（`<root>/recovery-index.json`）——派生索引，可由归档层重算。 */
+export const RECOVERY_INDEX_FILE = 'recovery-index.json';
+export const RECOVERY_INDEX_VERSION = 1;
 /** store 里的全部目录（含 journal）。 */
 export const STORE_DIRS = Object.freeze([...ENTRY_KINDS, 'journal']);
 
@@ -118,6 +121,117 @@ export function canonicalJson(value) {
 /** 稳定落盘文本：深排序 + 2 空格缩进 + 结尾换行（人可读、机器可校验）。 */
 export function stableText(value) {
   return `${JSON.stringify(sortValue(value), null, 2)}\n`;
+}
+
+// ---------------------------------------------------------------------------
+// T30 · 恢复索引（sidecar）：`<root>/recovery-index.json`
+//
+// 形状：`{version:1, entries:{ "c-xxx": {kind, seq, at, failureSeq, episode, prefix} },
+//         supports:{ "ep-xxx:44262": {claimId, kind, seq, at, failureSeq, prefix} }, counts:{entries, supports}}`
+//   · `entries` 按 claimId（卡按信号挑 support 时的兜底）；
+//   · `supports` 按 (episode, supportSeq) **精确对应卡上出处**（首选，避免同一 claim 的多条 support 串用）。
+// 纪律：
+//   · **只增不改**：同一 claimId 已有条目 ⇒ 保留原值（差异只计数 `conflicts`，不覆盖）；
+//   · **确定性字节**：没有 `generatedAt` 一类时钟字段，深排序（`stableText`）⇒ 同一输入重放两次字节相同；
+//   · 原子写（同目录 `.tmp-*` → rename），崩溃不会留下半截 JSON。
+// ---------------------------------------------------------------------------
+
+/** 恢复索引文件路径（只读判定用；不创建目录）。 */
+export function recoveryIndexPath(root) {
+  return path.join(path.resolve(root), RECOVERY_INDEX_FILE);
+}
+
+/** 读恢复索引：不存在/坏 JSON/版本不认识/形状不对 ⇒ `null`（不抛，调用方回退）。 */
+export function readRecoveryIndex(root) {
+  try {
+    const data = JSON.parse(fs.readFileSync(recoveryIndexPath(root), 'utf8'));
+    if (!data || data.version !== RECOVERY_INDEX_VERSION) return null;
+    if (!data.entries || typeof data.entries !== 'object' || Array.isArray(data.entries)) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 合并条目（纯函数，**只增不改**）。
+ * @param {{version:number, entries:object}|null} prev 现有索引（null/坏 ⇒ 从空开始）
+ * @param {Array<{claimId:string, kind:string, seq:number, at:number, failureSeq?:number|null, episode?:string|null, prefix?:string|null}>} facts
+ * @returns {{index:object, added:number, kept:number, conflicts:number}}
+ */
+export function mergeRecoveryIndex(prev, facts = []) {
+  const base = prev && prev.version === RECOVERY_INDEX_VERSION && prev.entries && typeof prev.entries === 'object'
+    ? prev
+    : { version: RECOVERY_INDEX_VERSION, entries: {} };
+  const entries = { ...base.entries };
+  const supports = { ...(base.supports ?? {}) };
+  let added = 0;
+  let kept = 0;
+  let conflicts = 0;
+  for (const fact of Array.isArray(facts) ? facts : []) {
+    const claimId = fact && typeof fact.claimId === 'string' ? fact.claimId : '';
+    if (!claimId) continue;
+    if (!Number.isFinite(fact.seq) || !Number.isFinite(fact.at)) continue;
+    if (typeof fact.kind !== 'string' || !fact.kind) continue;
+    const entry = {
+      kind: fact.kind,
+      seq: fact.seq,
+      at: fact.at,
+      failureSeq: Number.isFinite(fact.failureSeq) ? fact.failureSeq : null,
+      episode: typeof fact.episode === 'string' && fact.episode ? fact.episode : null,
+      prefix: typeof fact.prefix === 'string' && fact.prefix ? fact.prefix : null,
+    };
+    // (episode, supportSeq) 精确键：卡按信号挑 support 时首选
+    if (entry.episode && Number.isFinite(fact.supportSeq)) {
+      const key = `${entry.episode}:${fact.supportSeq}`;
+      if (Object.prototype.hasOwnProperty.call(supports, key)) {
+        kept += 1;
+        if (canonicalJson(supports[key]) !== canonicalJson({ ...entry, claimId })) conflicts += 1;
+      } else {
+        supports[key] = { claimId, ...entry };
+        added += 1;
+      }
+    }
+    // claimId 兜底键（卡渲染的 support 不在 supports 里时用；带 episode/prefix 校验）。
+    // 同一 claim 的多条 support 各有各的事实 ⇒ claimId 只留**第一条**兜底，不把后续的算冲突。
+    if (Object.prototype.hasOwnProperty.call(entries, claimId)) {
+      kept += 1;
+      continue;
+    }
+    entries[claimId] = entry;
+    added += 1;
+  }
+  const index = {
+    version: RECOVERY_INDEX_VERSION,
+    entries,
+    supports,
+    counts: { entries: Object.keys(entries).length, supports: Object.keys(supports).length },
+  };
+  return { index, added, kept, conflicts };
+}
+
+/** 原子写恢复索引（确定性字节：`stableText` 深排序，无时钟）。 */
+export function writeRecoveryIndex(root, index) {
+  const dir = path.resolve(root);
+  fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, RECOVERY_INDEX_FILE);
+  const tmp = path.join(dir, `.tmp-recovery-index-${process.pid}-${Date.now().toString(36)}`);
+  const buf = Buffer.from(stableText(index), 'utf8');
+  const fd = fs.openSync(tmp, 'w');
+  try {
+    let offset = 0;
+    while (offset < buf.length) offset += fs.writeSync(fd, buf, offset, buf.length - offset);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  try {
+    fs.renameSync(tmp, target);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { /* 清理失败不影响主错误 */ }
+    throw err;
+  }
+  return target;
 }
 
 /**

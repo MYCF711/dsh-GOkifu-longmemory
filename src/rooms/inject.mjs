@@ -28,6 +28,8 @@ import { deriveFalsifiableWhen, buildRecoveryIndex, findRecoveryFact, RECOVERY_F
 // 这是 inject 的第一条 R01 依赖：**读时派生**，只读、不写库；读不到/解析失败 ⇒ 零输出（卡行不变）。
 import { readFrames, parseEvents } from './logread.mjs';
 import { markerWithPolarity, detectPolarity, isCold, decayWeight } from './abstain.mjs';
+// T30：归档层落好的恢复索引（sidecar，只读）；索引缺失/坏 ⇒ 回退到读时派生（T28）。
+import { readRecoveryIndex } from './persist.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -664,12 +666,64 @@ function recoveryIndexForLog(logPath) {
 }
 
 /**
- * T28：给一条**失败 claim**找「同一主体后来成功」的事实（读时派生，不回填）。
- * 只对 `kind === 'antipattern'` 生效；没有日志/没有证据 ⇒ null（卡行逐字节不变）。
+ * T30：恢复索引的进程内缓存（key = size+mtime；索引是派生数据，变了自动失效）。
+ * 索引条目 = 归档层预先算好的恢复事实；**只读**，查不到再走 T28 的读时派生。
+ */
+const RECOVERY_SIDECAR_CACHE = new Map();
+
+function loadRecoveryIndexCached(storeRoot) {
+  if (typeof storeRoot !== 'string' || !storeRoot) return null;
+  let st;
+  try { st = fs.statSync(path.join(storeRoot, 'recovery-index.json')); } catch { return null; }
+  const key = `${st.size}:${st.mtimeMs}`;
+  const hit = RECOVERY_SIDECAR_CACHE.get(storeRoot);
+  if (hit && hit.key === key) return hit.index;
+  const index = readRecoveryIndex(storeRoot);
+  RECOVERY_SIDECAR_CACHE.set(storeRoot, { key, index });
+  return index;
+}
+
+/**
+ * T30：先查归档层索引（`claimId` 键）。校验：种类合法、seq/at 有值、episode 对得上、
+ * 失败原文前缀与卡上引文**兼容**（同一 claim 的多个 support 不串用）。
+ * 任何一项不满足 ⇒ `null`（交给读时派生兜底，不猜）。
+ */
+function indexedRecoveryFact({ claim, src, storeRoot }) {
+  const index = loadRecoveryIndexCached(storeRoot);
+  if (!index) return null;
+  const ep = String(src?.episode ?? '');
+  const srcSeq = Number(src?.seq);
+  // ① 精确键（归档层按每条 support 记的）：卡上出处与索引一一对应，不需要前缀校验
+  const supportKey = ep && Number.isFinite(srcSeq) ? `${ep}:${srcSeq}` : null;
+  const viaSupport = supportKey ? index.supports?.[supportKey] : null;
+  if (viaSupport && viaSupport.claimId === String(claim?.id ?? '')) {
+    if (RECOVERY_FACT_KINDS.includes(viaSupport.kind) && Number.isFinite(viaSupport.seq) && Number.isFinite(viaSupport.at)) {
+      return { kind: viaSupport.kind, seq: viaSupport.seq, at: viaSupport.at, failureSeq: Number.isFinite(viaSupport.failureSeq) ? viaSupport.failureSeq : null };
+    }
+    return null;
+  }
+  // ② claimId 兜底（旧索引 / 渲染的 support 没进 supports 时）：再校验 episode + 引文前缀
+  const entry = index.entries?.[String(claim?.id ?? '')];
+  if (!entry) return null;
+  if (!RECOVERY_FACT_KINDS.includes(entry.kind)) return null;
+  if (!Number.isFinite(entry.seq) || !Number.isFinite(entry.at)) return null;
+  if (typeof entry.episode === 'string' && entry.episode && ep && entry.episode !== ep) return null;
+  const quote = String(src?.quote ?? claim?.text ?? '').replace(/…$/, '').trim().slice(0, 60);
+  const prefix = String(entry.prefix ?? '').replace(/…$/, '').trim();
+  if (prefix && quote && !(quote.startsWith(prefix) || prefix.startsWith(quote))) return null;
+  return { kind: entry.kind, seq: entry.seq, at: entry.at, failureSeq: Number.isFinite(entry.failureSeq) ? entry.failureSeq : null };
+}
+
+/**
+ * T28/T30：给一条**失败 claim**找「同一主体后来成功」的事实。
+ * 只对 `kind === 'antipattern'` 生效；**索引优先，读时派生兜底**；都没有 ⇒ null（卡行逐字节不变）。
  */
 function recoveryFactOf({ claim, src, options }) {
   if (!claim || claim.kind !== 'antipattern') return null;
   if (options?.recoveryOnCard === false) return null;
+  const storeRoot = typeof options?.recoveryStoreRoot === 'string' ? options.recoveryStoreRoot : null;
+  const indexed = indexedRecoveryFact({ claim, src, storeRoot });
+  if (indexed) return indexed;
   const base = typeof options?.recoveryBaseDir === 'string' ? options.recoveryBaseDir : null;
   if (!base) return null;
   const ep = options?.episodesById?.get?.(String(src?.episode ?? '')) ?? null;
@@ -860,8 +914,9 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
   costIndex = null,
   // T347：F3 上卡开关（默认开；关掉只用于 A/B 对照或紧急回退）
   f3OnCard = true,
-  // T28：恢复事实（同一主体后来成功）上卡开关 + 日志根目录（默认开；关掉 ⇒ 与旧版逐字节一致）。
+  // T28/T30：恢复事实上卡开关 + 恢复索引所在库根 + 日志根目录（默认开；关掉 ⇒ 与旧版逐字节一致）。
   recoveryOnCard = true,
+  recoveryStoreRoot = null,
   recoveryBaseDir = null,
   // 知识库 90：**冷却**（主人纠正："不被调用就冷却，等于没写"）。
   // **默认关**（`null` ⇒ 不过滤）：因为"冷却"依赖"注入记录"，
@@ -904,7 +959,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       continue;
     }
     const entry = claim
-      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryBaseDir,
+      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryStoreRoot, recoveryBaseDir,
         // 知识库 84：把**信号原文**也传下去 —— 与信号**方向相反**的 claim 标 `[disputed]`（不以"建议"出现）。
         // 取不到原文 ⇒ 空串 ⇒ `hasAnySignalHandle` 为 false ⇒ **不拒绝、不改标记**（保守，向后兼容）。
         signalText: signal?.text ?? signal?.quote ?? (Array.isArray(signal?.terms) ? signal.terms.join(' ') : '') })
@@ -1278,7 +1333,7 @@ export function buildMemoryCard({
   }
 
   const recoveryBaseDir = store && typeof store.root === 'string' ? path.dirname(path.resolve(store.root)) : null;
-  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryBaseDir });
+  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryStoreRoot: store && typeof store.root === 'string' ? store.root : null, recoveryBaseDir });
   // T162a：认「合并节点」。合流（consolidate）会把多条近似 claim 压成一个带 `merge.members` 的节点；
   // 消费侧不认它，合并节点与它的成员就会在同一张卡里重复出现。规则见 collapseMergeNodes 的注释。
   const { entries, stats: collapseStats } = collapseMergeNodes({

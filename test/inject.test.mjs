@@ -14,7 +14,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync, mkdirSync, unlinkSync } from 'node:fs';
 import { zstdCompressSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -51,7 +51,8 @@ import {
   writeShadow,
   InjectError,
 } from '../src/rooms/inject.mjs';
-import { createStore } from '../src/rooms/persist.mjs';
+import { createStore, readRecoveryIndex, mergeRecoveryIndex, writeRecoveryIndex } from '../src/rooms/persist.mjs';
+import { buildRecoveryIndex as buildRecoveryIndexForStore } from '../scripts/archive.mjs';
 // T28：恢复事实的纯函数判据（读时派生在 inject 里；这里只测判据本身）。
 import { buildRecoveryIndex, findRecoveryFact } from '../src/rooms/extract.mjs';
 import { runGates } from '../src/rooms/gates.mjs';
@@ -2316,4 +2317,87 @@ test('T28 ⑥: 纯函数判据（同命令才算；不同命令/再次失败都�
   ]);
   assert.equal(findRecoveryFact(d, 'Error: boom', { nearSeq: 11 })?.failureSeq, 11);
   assert.equal(findRecoveryFact(d, 'Error: boom', { nearSeq: 2 })?.failureSeq, 2);
+});
+
+// ---------------------------------------------------------------------------
+// T30 · 归档层恢复索引：读时**索引优先**、缺失回退读时派生、索引只增不改/重放幂等。
+// ---------------------------------------------------------------------------
+
+const t30IndexEntry = (over = {}) => ({
+  kind: 'same-command-exit-0', seq: 4, at: T28(12) + 3 * 60_000, failureSeq: 2, episode: 'ep-aaaaaaa1', prefix: 'Error: boom', ...over,
+});
+
+test('T30 ④: 索引优先 —— 日志不在也能从索引拿到恢复事实', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    const before = t28Card(store);
+    assert.ok(!String(before.section).includes('恢复：'), '没有索引、也没有日志 ⇒ 无恢复事实');
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry() } });
+    const after = t28Card(store);
+    const line = cardLines(after).find((l) => l.includes('Error: boom'));
+    assert.match(line, / · 恢复：后于 2026-10-20 同一命令成功（exit 0, seq 4）$/, '索引命中 ⇒ 不解日志也能出尾注');
+    // 索引里没有条目的 claim ⇒ 行与关掉恢复事实逐字节相同（不猜、不串）
+    const off = t28Card(store, { recoveryOnCard: false });
+    const other = (card) => cardLines(card).find((l) => l.includes('never recovered'));
+    assert.equal(other(after), other(off), '无索引条目 ⇒ 逐字节不变');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T30 ⑤: 索引条目的 episode/前缀对不上 ⇒ 不用（不猜、不串用别的 support）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry({ episode: 'ep-other' }) } });
+    assert.ok(!String(t28Card(store).section).includes('恢复：'), 'episode 不匹配 ⇒ 不用');
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry({ prefix: 'Error: something else entirely (longer prefix)' }) } });
+    assert.ok(!String(t28Card(store).section).includes('恢复：'), '前缀不兼容 ⇒ 不用');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T30 ⑥: 索引缺失 ⇒ 回退读时派生（行为与 T28 一致）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    const withLog = t28Card(store);
+    const boom = cardLines(withLog).find((l) => l.includes('Error: boom'));
+    assert.match(boom, / · 恢复：/, '没有索引时，日志在 ⇒ 读时派生照常给事实（T28 行为不变）');
+    unlinkSync(path.join(root, T28_REL_LOG));
+    const noLog = t28Card(store);
+    const off = t28Card(store, { recoveryOnCard: false });
+    assert.deepEqual(cardLines(noLog), cardLines(off), '没有索引也没有日志 ⇒ 与关掉恢复事实逐字节相同');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T30 ⑦: buildRecoveryIndex 重放幂等（两次字节相同、第二次 0 新增）', async () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    const a = await buildRecoveryIndexForStore({ dataRoot: root, storeRoot: store.root });
+    const file = path.join(store.root, 'recovery-index.json');
+    const bytesA = readFileSync(file, 'utf8');
+    const b = await buildRecoveryIndexForStore({ dataRoot: root, storeRoot: store.root });
+    const bytesB = readFileSync(file, 'utf8');
+    assert.equal(bytesA, bytesB, '同一 store+日志 ⇒ 索引字节完全相同（无时钟字段）');
+    assert.equal(a.facts, 2, '两条失败各有恢复（boom / edit）');
+    assert.equal(a.entries, 2);
+    assert.equal(b.added, 0, '第二次 0 新增');
+    assert.equal(b.kept, 4, '已有条目原样保留（2 个 claim 键 + 2 个 support 键）');
+    assert.equal(b.conflicts, 0);
+    const parsed = JSON.parse(bytesA);
+    assert.equal(parsed.entries['c-0000aa01'].kind, 'same-command-exit-0');
+    assert.equal(parsed.entries['c-0000aa02'].kind, 'same-file-write-ok');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T30 ⑧: 索引只增不改（同键冲突只计数不覆盖；同一 claim 的多条 support 不误记冲突）', () => {
+  const prev = { version: 1, entries: { 'c-x': { kind: 'same-command-exit-0', seq: 4, at: 1, failureSeq: 2, episode: 'ep-a', prefix: 'Error: boom' } }, supports: { 'ep-a:5': { claimId: 'c-x', kind: 'same-command-exit-0', seq: 4, at: 1, failureSeq: 2, episode: 'ep-a', prefix: 'Error: boom' } } };
+  const merged = mergeRecoveryIndex(prev, [
+    // 同一个 (episode, supportSeq) 键、不同事实 ⇒ 冲突只计数，原值保留
+    { claimId: 'c-x', episode: 'ep-a', supportSeq: 5, kind: 'same-file-write-ok', seq: 9, at: 2, failureSeq: 3, prefix: 'Error: boom' },
+    // 同一 claim 的另一条 support ⇒ 新键，正常加入（不是冲突）
+    { claimId: 'c-x', episode: 'ep-a', supportSeq: 6, kind: 'same-command-no-failure', seq: 11, at: 3, failureSeq: 4, prefix: 'Error: other' },
+  ]);
+  assert.equal(merged.conflicts, 1, '只有同键不同值算冲突');
+  assert.equal(merged.index.supports['ep-a:5'].kind, 'same-command-exit-0', '原值保留（只增不改）');
+  assert.equal(merged.index.entries['c-x'].kind, 'same-command-exit-0', 'claimId 兜底也保留原值');
+  assert.ok(merged.index.supports['ep-a:6'], '同一 claim 的多 support 正常加入');
 });
