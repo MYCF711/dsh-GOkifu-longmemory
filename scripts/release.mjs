@@ -178,6 +178,113 @@ export async function waitForCi({ commit, deps = {}, timeoutMs = 20 * 60 * 1000,
 }
 
 // ---------------------------------------------------------------------------
+// GitHub Release 创建（T14：重试幂等）
+// ---------------------------------------------------------------------------
+//
+// 事故形态（上轮实测误报）：tag 推成功、`gh release create` 也**建成功了**，但那次调用返回非零
+// （并发/网关抖动），stderr 落在 `tag_name already exists`。旧逻辑把所有非零退出都当"API 故障"，
+// 于是白退避重试 5 次、最后打印"Release 未能创建（API 持续故障）"——**假故障**，一次 0 副作用的重跑能解决。
+//
+// 判据只认一条机械事实：**这次失败是否证明"Release 不在"**。
+//   · `tag_name already exists`（GitHub 校验错误，HTTP 422）⇒ Release **已在**，本次目标已达成 ⇒ 幂等成功；
+//   · 其它任何失败（网络、501/502/503、鉴权、404）⇒ 不能证明它在 ⇒ 仍按故障报错（fail-closed）。
+// 反例（不得误判成成功）：`401 Bad credentials`、`Not Found`、
+// `Cannot create release for tag nonexistent: tag_name is not valid` —— tag 还没到远端，Release 必然不在。
+//
+// 幂等半径：只把**这一条**错误消息当成功；建成功之后绝不因为"又收到一次 422"而回滚/重打 tag。
+
+/** GitHub 校验错误：tag 已存在（Release 也在），可判定为「本次目标已达成」。 */
+// gh 的常见措辞是 `tag_name already exists`；API 原始 JSON 形态是 `"code":"already_exists"` + `"field":"tag_name"`。两种都认。
+export const TAG_EXISTS_RE = /tag_name\s+already\s+exists|already_exists[\s\S]{0,300}tag_name|tag_name[\s\S]{0,300}already_exists/i;
+
+/** 反例哨兵：这些消息**不得**被判定成已存在（防止把鉴权/网络故障误判为成功）。 */
+export const NOT_TAG_EXISTS_RE = /bad\s+credentials|not\s+found|not\s+valid|tag_name\s+is\s+not\s+valid|release\s+not\s+found/i;
+
+/** 把 gh/execSync 的失败对象摊成一行可读文本（旧代码各分支各自 slice/join，这里统一定口径）。 */
+export function commandFailureText(error) {
+  const parts = [error?.stderr, error?.stdout, error?.message]
+    .filter((x) => x !== null && x !== undefined && String(x).trim() !== '')
+    .map((x) => String(x));
+  return parts.join(' | ').split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join(' | ').slice(0, 400);
+}
+
+/**
+ * 本次 Release 创建调用是否应视为**已成功**（幂等）。
+ * @param {{error?: unknown}|string|null} result execSync 的异常对象，或原始错误文本
+ * @returns {{isTagExists: boolean, text: string}}
+ */
+export function classifyReleaseFailure(result) {
+  const text = typeof result === 'string' ? result : commandFailureText(result?.error ?? result);
+  if (!text) return { isTagExists: false, text: '' };
+  if (NOT_TAG_EXISTS_RE.test(text)) return { isTagExists: false, text };
+  return { isTagExists: TAG_EXISTS_RE.test(text), text };
+}
+
+/**
+ * 判定一次 Release 创建尝试的结果。
+ * @param {{error?: unknown}|null} attempt execSync 抛出的异常（成功时传 null）
+ * @returns {{ok: boolean, status: 'created'|'already-exists'|'failed', text: string}}
+ */
+export function classifyReleaseAttempt(attempt) {
+  // 允许直接传 execSync 抛出的 Error（便于调用方少包一层）；否则约定 {error} 包装。
+  const failure = attempt instanceof Error ? attempt : (attempt && attempt.error != null ? attempt.error : null);
+  if (!failure) return { ok: true, status: 'created', text: '' };
+  const { isTagExists, text } = classifyReleaseFailure(failure);
+  if (isTagExists) return { ok: true, status: 'already-exists', text };
+  return { ok: false, status: 'failed', text };
+}
+
+/**
+ * 创建 GitHub Release；`tag_name already exists` ⇒ 幂等成功（不再重试），真故障仍重试到上限后报失败。
+ * @param {string} tag
+ * @param {string} notesPath
+ * @param {{log?: Function, createRelease?: Function, wait?: Function, attempts?: number}} opts
+ *   `wait(ms)` 默认用 `Atomics.wait` 同步退避（调用方是同步 CLI 流程）。
+ */
+export function createReleaseIdempotent(tag, notesPath, opts = {}) {
+  const log = opts.log ?? ((level, message) => (level === 'error' ? console.error(message) : console.log(message)));
+  const createRelease = opts.createRelease;
+  if (typeof createRelease !== 'function') throw new TypeError('createReleaseIdempotent: 缺少 createRelease 依赖');
+  const wait = opts.wait ?? ((ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms));
+  const attempts = Number.isFinite(opts.attempts) && opts.attempts > 0 ? Math.floor(opts.attempts) : 5;
+
+  const tried = [];
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let error = null;
+    try {
+      createRelease(tag, notesPath);
+    } catch (caught) {
+      error = caught;
+    }
+    const verdict = classifyReleaseAttempt(error ? { error } : null);
+    tried.push({ attempt, status: verdict.status, text: verdict.text });
+    if (verdict.ok) {
+      if (verdict.status === 'already-exists') {
+        log('log', `release: ${tag} 的 Release 已存在（gh 报 tag_name already exists）—— 视为已发布，不重试。`);
+      }
+      return { ok: true, status: verdict.status, attempts: attempt, tried };
+    }
+    log('error', `release: 第 ${attempt} 次创建 Release 失败：${verdict.text.slice(0, 240)}`);
+    if (attempt < attempts) wait(15000 * attempt);
+  }
+  return { ok: false, status: 'failed', attempts, tried };
+}
+
+/**
+ * 把 createRelease 依赖的返回值归一成三态：created / already-exists / failed。
+ * 兼容三种形态：boolean（旧依赖）、状态字符串、`createReleaseIdempotent` 的完整结果对象。
+ */
+export function releaseStatusOf(value) {
+  if (typeof value === 'boolean') return value ? 'created' : 'failed';
+  if (typeof value === 'string') return ['created', 'already-exists', 'failed'].includes(value) ? value : 'failed';
+  if (value && typeof value === 'object') {
+    if (value.status === 'created' || value.status === 'already-exists' || value.status === 'failed') return value.status;
+    if (value.ok === true) return 'created';
+  }
+  return 'failed';
+}
+
+// ---------------------------------------------------------------------------
 // 发布主流程（全部副作用走 deps，便于测试；CLI 用 realDeps()）
 // ---------------------------------------------------------------------------
 
@@ -228,19 +335,19 @@ export function realDeps() {
       execSync(`git tag -a ${t} -m ${t}`, { cwd: REPO_ROOT, stdio: 'inherit' });
       execSync(`git push origin ${t}`, { cwd: REPO_ROOT, stdio: 'inherit' });
     },
-    createRelease: (t, notesPath) => {
-      for (let attempt = 1; attempt <= 5; attempt += 1) {
-        try {
-          execSync(`gh release create ${t} --title ${t} --notes-file "${notesPath}"`, { cwd: REPO_ROOT, stdio: 'inherit' });
-          return true;
-        } catch (error) {
-          const msg = String(error?.stderr ?? error?.message ?? error).split('\n').filter(Boolean).slice(0, 2).join(' | ');
-          console.error(`release: 第 ${attempt} 次创建 Release 失败：${msg.slice(0, 240)}`);
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15000 * attempt);
-        }
-      }
-      return false;
-    },
+    createRelease: (t, notesPath) => createReleaseIdempotent(t, notesPath, {
+      // 必须**捕获** stderr：`stdio:'inherit'` 时 gh 的报错只进终端、不进 Error 对象，
+      // 判据拿到的只剩 "Command failed: ..."，于是 `tag_name already exists` 永远认不出来 ——
+      // 这正是 T14 误报的根因（旧代码把 stderr 吞了）。
+      createRelease: (tagArg, notesArg) => {
+        const stdout = execSync(`gh release create ${tagArg} --title ${tagArg} --notes-file "${notesArg}"`, {
+          cwd: REPO_ROOT,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        if (stdout && stdout.trim()) console.log(stdout.trim());
+      },
+    }),
     writeFile: (file, text) => writeFileSync(file, text),
     mkdtemp: () => mkdtempSync(join(tmpdir(), 'kifuin-rel-')),
     fileExists: (file) => existsSync(file),
@@ -398,13 +505,20 @@ export async function performRelease(opts = {}) {
   }
 
   deps.tag(tag);
-  if (!deps.createRelease(tag, notesPath)) {
+  // T14：`tag_name already exists` 属于**幂等成功**（Release 已在），不再报成 API 故障；
+  // 只有确实没建出来（真故障重试到上限仍失败）才走下面这条补救分支。
+  const release = deps.createRelease(tag, notesPath);
+  const releaseStatus = releaseStatusOf(release);
+  if (releaseStatus === 'failed') {
     console.error(`release: tag ${tag} 已推出，但 GitHub Release 未能创建（API 持续故障）。恢复后运行：`);
     console.error(`  gh release create ${tag} --title ${tag} --notes-file "${notesPath}"`);
-    return { code: 0, reason: 'release-failed-but-tagged', tag };
+    return { code: 0, reason: 'release-failed-but-tagged', tag, releaseStatus };
+  }
+  if (releaseStatus === 'already-exists') {
+    console.log(`release: ${tag} 的 Release 已在（幂等：tag_name already exists 视为成功）`);
   }
   console.log(`released ${tag} (no npm publish)`);
-  return { code: 0, reason: 'released', tag, ledger };
+  return { code: 0, reason: 'released', tag, ledger, releaseStatus };
 }
 
 // ---------------------------------------------------------------------------

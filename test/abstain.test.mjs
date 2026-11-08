@@ -341,3 +341,162 @@ test('知识库 90 **冷却**：距最后注入 >30 天 ⇒ 冷却；最近被�
   assert.equal(isCold({ counters: { injections: 0, lastInjectedAt: now - 5 * day } }, now), false,
     '`injections === 0` 但**最近被调用过** ⇒ **不冷却**（不按 `=== 0` 杀）');
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// T12 · 修线上误杀（T11 实测 77.3%）+ 两个结构性 bug
+//
+// 数据来源：`evidence/T11-abstain-live.md`（79 判定点 / 33 条真实拒绝，逐条核：
+// 强误杀 5 · 弱误杀 12 · 正确拒绝 5 · 无害 11）。下面的信号/claim 都是**线上原文**。
+// 每个桥各有一条 tombstone：删掉对应的桥（`fileBasenames` / `TOOL_FAMILIES` / `PIT_CLASS_APPLIES`），
+// 它自己的那条必须红；5 条负样本必须**一直**是 false（负样本丢了 = 把 abstain 关掉了，不算修好）。
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── 线上原文（T11 §四 逐条表；编号即 T11 的重放序号）──────────────────────────
+// #16（D 桶）：插件 `AGENTS.md` 指令；卡上是**另一个插件目录**下的 `AGENTS.md` 不存在。
+const SIG_16 = "<system-reminder>\nAdditional instructions from: projects\\dsh\\plugins\\dsh-agent-teams-preset\\AGENTS.md\n\nThese instructions apply to work under `projects\\dsh\\plugins\\dsh-agent-teams-preset`. Use them as guidance when relevant; more specific instructions take precedence. They do not override system, developer, or direct user instructions.\n\n# Project maintenance skills\n\nBefore using a DSH plugin lifecycle skill in this r";
+const CL_16 = ["FileNotFoundError: [Errno 2] No such file or directory: 'D:/DeepSeek Harness/home/profiles/desktop/cordis.patch.yml.bak-before-compress-20261105-022716'", "Error: cannot read \"/d/DeepSeek Harness/default-workspace/projects/dsh/plugins/ptc-domain-presets/AGENTS.md\": not found", "FileNotFoundError: [Errno 2] No such file or directory: 'D:/DeepSeek Harness/home/profiles/desktop/cordis.patch.yml.bak-before-compress-20261105-022716'"];
+// #18（A 桶）：AgentTeams 任务分配；卡上是 AgentTeams 的 `plan` 契约报错。
+const SIG_18 = "<chess-ledger>\nROOT USER (verbatim): AgentTeams automatic task assignment from the shared task list. You are executing as configured member \"model-defaults\"…\nCONSTRAINTS: 9\n# path: n1 → n2\nUNVERIFIED: 1 unproven\nNO_FAILED_ATTEMPTS_YET\n</chess-ledger>";
+const CL_18 = ["Error: invalid arguments: missing required property \"plan.members\"; missing required property \"plan.tasks\""];
+// #5（B 桶）：release 任务；卡上是 `gh release` 的 push 失败。
+const SIG_5 = "<chess-ledger>\nROOT USER (verbatim): AgentTeams automatic task assignment from the shared task list. You are executing as configured member \"release-dev\". D…\nGOAL: 我先领取任务，并阅读任务要求。\nCONSTRAINTS: 9\n# path: n1 → n2\nUNVERIFIED: 2 unproven\nNO_FAILED_ATTEMPTS_YET\n</chess-ledger>";
+const CL_5 = ["error: failed to push some refs to 'https://github.com/MYCF711/dsh-GOkifu-longmemory.git' https://github.com/MYCF711/dsh-GOkifu-longmemory/releases/tag/v0.2.41…"];
+// #33（B 桶）：查仓库状态；卡上是 git 远端读不到。
+const SIG_33 = "<chess-ledger>\nROOT USER (verbatim): AgentTeams automatic task assignment from the shared task list. You are executing as configured member \"evidence\". Do n…\nGOAL: I'll first claim the task, then check the repo state.\nCONSTRAINTS: 9\n# path: n1 → n2\nUNVERIFIED: 2 unproven\nNO_FAILED_ATTEMPTS_YET\n</chess-ledger>";
+const CL_33 = ["fatal: Could not read from remote repository. Please make sure you have the correct access rights"];
+// #13（C 桶）：要写 evidence 文件；卡上是"写前没读"的类级教训（换了文件名）。
+const SIG_13 = "<chess-ledger>\nROOT USER (verbatim): AgentTeams automatic task assignment from the shared task list. You are executing as configured member \"label-reviewer\"…\nGOAL: I'll claim the task first, then read the T13 requirements.\nCONSTRAINTS: 8\n# path: n1 → n2\nUNVERIFIED: 1 unproven\nNO_FAILED_ATTEMPTS_YET\n</chess-ledger>";
+const CL_13 = ["class:fs-read-before-write · Error: cannot write \"/d/DeepSeek Harness/default-workspace/长期记忆系统/scripts/re-enable.mjs\": file no longer exists — re-read the…"];
+// #1（C 桶，全量任务分配）的**真实片段**：写 evidence 文件。
+const WRITE_TASK_SNIPPET = '只写 evidence/T11-abstain-live.md，不改代码。';
+
+// ── 负样本：T11 #3 / #7 / #10 / #21 / #26（**正确拒绝**，一条都不许变成"相关"）──
+const SIG_3 = "<chess-ledger>\nROOT USER (verbatim): AgentTeams automatic task assignment from the shared task list. You are executing as configured member \"live-analyst\". …\nGOAL: I'll start by claiming the task and reading the requirements.\nCONSTRAINTS: 8\n# path: n1 → n2\nUNVERIFIED: 2 unproven\nNO_FAILED_ATTEMPTS_YET\n</chess-ledger>";
+const CL_3 = ["MISS \"const DANGER = /(>>|\\\\btee\\\\b|\\\\bgh\\\\s+(pr|release|api)\\\\b|\\\\bnpm\\\\s+publish\\\\b|\\\\bmagpie\\\\b|\\\\btaskkill\\\\b|Stop-Process|Start-Process|\\\\brm\\\\s+-rf\\\\b|\\\\…"];
+const SIG_7 = "<chess-ledger>\nROOT USER (verbatim): AgentTeams automatic task assignment from the shared task list. You are executing as configured member \"ablation-runner…\nGOAL: I'll start by claiming the task and reading the task requirements.\nCONSTRAINTS: 9\n# path: n1 → n2\nUNVERIFIED: 2 unproven\nNO_FAILED_ATTEMPTS_YET\n</chess-ledger>";
+const CL_7 = ["MISS \"const DANGER = /(>>|\\\\btee\\\\b|\\\\bgh\\\\s+(pr|release|api)\\\\b|\\\\bnpm\\\\s+publish\\\\b|\\\\bmagpie\\\\b|\\\\btaskkill\\\\b|Stop-Process|Start-Process|\\\\brm\\\\s+-rf\\\\b|\\\\…"];
+const SIG_10 = "<chess-ledger>\nROOT USER (verbatim): AgentTeams automatic task assignment from the shared task list. You are executing as configured member \"plugin-dev\". Do…\nGOAL: I'll claim the task first.\nCONSTRAINTS: 9\n# path: n1 → n2\nUNVERIFIED: 1 unproven\nNO_FAILED_ATTEMPTS_YET\n</chess-ledger>";
+const CL_10 = ["371:test('N1: promoteClaim 输出 validFrom，validTo 初始为 null；人纠错写 validTo', async () => { 376: if (sample) { 0"];
+const SIG_21 = "<chess-ledger>\nROOT USER (verbatim): AgentTeams message from captain: 基线提醒：本项目无 test 脚本，pnpm test 空跑不算通过。测试门禁用 pnpm verify。写单测后跑 pnpm verify 验收。\nGOAL: I'll start by checking the team state and my assigned task.\nCONSTRAINTS: 0\n# path: n1 → n2\nUNVERIFIED: 1 unproven\nNO_FAILED_ATTEMPTS_YET\n</chess-ledger>";
+const CL_21 = ["代表 5 条 · 详见 c-ec0fcd25 · Error: glob search failed (exit 2): rg: /d/DeepSeek Harness/default-workspace/tmp/dsh-upgrade-0.2.2-rc.1/production/rollback-test: IO…"];
+const SIG_26 = "AgentTeams message from captain for task t2, attempt_id 064ff4d3-1593-4141-b128-c4f943735675:\n\n基线已绿。技术确认：0.2.1-rc.2 的 startActivation 同样接受 agentPreset（subagent/lib/index.js:348,374-377 已核实），两版本都可行。修改点 spawnMember(src/members.ts:1039-1059) request 加 agentPreset；managed 分支 harness-compat.ts:22 ...request 透传无需改签名。测试用 pnpm verify（无 test 脚本）。";
+const CL_26 = ["Error: glob search failed (exit 2): rg: /d/DeepSeek Harness/default-workspace/tmp/dsh-latest-upgrade/node_modules: IO error for operation on /d/DeepSeek…"];
+
+const cardOf = (texts) => ({ claims: texts.map((text) => ({ text })) });
+
+test('T12 桥①（D 桶，同名文件）：两个插件目录下的 AGENTS.md ⇒ 相关（不再因目录不同误杀）', async () => {
+  const { hasRelevantClaim, abstainEntities, fileBasenames } = await import('../src/rooms/abstain.mjs');
+  // 误杀根因：硬实体是**完整路径**，两个 AGENTS.md 分属不同插件目录 ⇒ 字面零重合。
+  const shared = [...abstainEntities(SIG_16)].filter((e) => abstainEntities(CL_16.join('\n')).has(e));
+  assert.deepEqual(shared, [], '字面判据在这条上确实零重合（否则这条测的不是桥）');
+  assert.ok(fileBasenames(SIG_16).has('agents.md'), '信号侧要抽到文件名 AGENTS.md');
+  assert.equal(hasRelevantClaim(cardOf(CL_16), SIG_16), true, '同坑类（插件 AGENTS.md 路径不存在）⇒ 必须算相关');
+});
+
+test('T12 桥①单元：`cordis.patch.yml.bak-…` 取到扩展名前的完整文件名（不是 `patch.yml`）', async () => {
+  const { fileBasenames } = await import('../src/rooms/abstain.mjs');
+  assert.deepEqual([...fileBasenames("'/D:/x/desktop/cordis.patch.yml.bak-before-compress-20261105-022716'")], ['cordis.patch.yml']);
+});
+
+test('T12 桥②（A 桶，工具族）：AgentTeams 任务分配 + `plan.members` 契约报错 ⇒ 相关', async () => {
+  const { hasRelevantClaim } = await import('../src/rooms/abstain.mjs');
+  assert.equal(hasRelevantClaim(cardOf(CL_18), SIG_18), true, '同一工具族（AgentTeams plan 契约）⇒ 相关');
+});
+
+test('T12 桥②（B 桶，工具族）：release 任务 + push 失败 / 查仓库 + 远端读不到 ⇒ 相关', async () => {
+  const { hasRelevantClaim } = await import('../src/rooms/abstain.mjs');
+  assert.equal(hasRelevantClaim(cardOf(CL_5), SIG_5), true, 'release 就是这条任务的活儿 ⇒ 相关');
+  assert.equal(hasRelevantClaim(cardOf(CL_33), SIG_33), true, '查仓库状态 + 远端读不到 ⇒ 相关');
+  // **不误扩**：claim 侧只认这一族的具体报错签名 —— 只有 "release" 字样不算（T11 #3 的负样本就是它）。
+  assert.equal(hasRelevantClaim(cardOf(['the guard regex rejects gh release and npm publish']), SIG_5), false,
+    'claim 里出现 release 字样 ≠ release 族报错实例');
+});
+
+test('T12 桥③（C 桶，坑类）：`class:fs-read-before-write` + 文件工作类请求 ⇒ 相关', async () => {
+  const { hasRelevantClaim } = await import('../src/rooms/abstain.mjs');
+  // 误杀根因：坑类是"写文件前先读"，判据只看**完整路径**（换了文件名就判不相关）。
+  assert.equal(hasRelevantClaim(cardOf(CL_13), SIG_13), true, '任务要写文件 ⇒ 该坑类适用');
+  assert.equal(hasRelevantClaim(cardOf(CL_13), WRITE_TASK_SNIPPET), true, '全量任务分配里"只写 …，不改代码"同样适用');
+  // **适用面要收住**：跟"动文件"无关的闲聊，不拿这条坑类去兜底（否则等于"什么都注入"）
+  assert.equal(hasRelevantClaim(cardOf(CL_13), '帮我查一下明天的天气预报和气温变化情况'), false,
+    '坑类只在文件工作类请求上有适用性');
+});
+
+test('T12 负样本 5 条（T11 #3/#7/#10/#21/#26）必须**仍然拒绝**', async () => {
+  const { hasRelevantClaim, hasReliableHandle } = await import('../src/rooms/abstain.mjs');
+  const negatives = [
+    [3, SIG_3, CL_3], [7, SIG_7, CL_7], [10, SIG_10, CL_10], [21, SIG_21, CL_21], [26, SIG_26, CL_26],
+  ];
+  for (const [n, signal, claims] of negatives) {
+    assert.equal(hasReliableHandle(signal), true, `#${n} 判据可靠（否则这条测不到相关性判据）`);
+    assert.equal(hasRelevantClaim(cardOf(claims), signal), false, `#${n} 是 T11 的正确拒绝，不许被桥拉成相关`);
+  }
+});
+
+// ── 结构 bug ①：`crossScopeWalk`（整库跨域丢弃总数，恒 200–1000）不许参与本次拒绝的归因 ──
+test('T12 tombstone ① `cross-scope` 只看**本次**是否全被挡掉，不看整库的 `crossScopeWalk`', async () => {
+  const { classifyAbstainReason } = await import('../src/plugin.mjs');
+  const card = { claims: [{ kind: 'antipattern', state: 'candidate', decay: 1, text: 'x' }] };
+  // T11 实测：卡上有行（hits 非空）、本次 crossScope/unknownScope 全 0，而整库 crossScopeWalk=649。
+  // 旧判据把 649 加进 cross ⇒ `cross > 0` 恒真 ⇒ 33/33 全塌成 cross-scope。
+  assert.equal(
+    classifyAbstainReason({ card, walkResult: { hits: [{}], crossScope: 0, unknownScope: 0, crossScopeWalk: 649 } }),
+    'no-relevant-claim',
+    '卡上有行 + 本次零跨域丢弃 ⇒ 不是 cross-scope',
+  );
+  // 真正"库里有、只是不属于本项目"：本次命中**全**被挡掉（hits 空）且有跨域丢弃 ⇒ cross-scope
+  assert.equal(
+    classifyAbstainReason({ card: { claims: [] }, walkResult: { hits: [], crossScope: 3, crossScopeWalk: 649 } }),
+    'cross-scope',
+    '本次命中全被作用域挡掉 ⇒ 才是 cross-scope',
+  );
+  // 本次没有任何丢弃 ⇒ 也不是 cross-scope（不能靠整库计数凑出来）
+  assert.equal(
+    classifyAbstainReason({ card, walkResult: { hits: [], crossScope: 0, unknownScope: 0, crossScopeWalk: 649 } }),
+    'no-relevant-claim',
+  );
+});
+
+// ── 结构 bug ②：`card.claims` 投影必须带 `decay`，否则 `stale` 是死码（T11 实测 95 行全 null）──
+test('T12 tombstone ② `buildMemoryCard` 的 claims 投影带 decay ⇒ `stale` 能被返回', async () => {
+  const { buildMemoryCard, signalFromText } = await import('../src/rooms/inject.mjs');
+  const { createStore } = await import('../src/rooms/persist.mjs');
+  const { classifyAbstainReason } = await import('../src/plugin.mjs');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const pathMod = await import('node:path');
+  const root = mkdtempSync(pathMod.join(tmpdir(), 'kifuin-t12-stale-'));
+  const SCOPE_T12 = 'w:d:/work/demo';
+  const OLD = Date.UTC(2026, 6, 1, 12, 0, 0);   // 2026-07-01
+  const NOW = Date.UTC(2026, 10, 8, 12, 0, 0);  // 2026-11-08（≈130 天，半衰期 30 天 ⇒ decay ≈ 0.05）
+  const store = createStore({ root, now: NOW });
+  store.ensureDirs();
+  store.putMany('episodes', [{
+    id: 'ep-t12aaa1', sessionId: 's-t12aaa1', scopeKey: SCOPE_T12,
+    startedAt: OLD, endedAt: OLD + 1000, firstEventAt: OLD, lastEventAt: OLD + 1000, recordedAt: null,
+    closure: { logPath: 'x', graphPath: 'y', seqFrom: 1, seqTo: 2 }, l0: '',
+    signals: { failures: 1, successes: 0, unsettled: 0, constraints: 0, tools: [] }, threadIds: [], state: 'archived',
+  }]);
+  store.putMany('claims', [{
+    id: 'c-t12aaa1', kind: 'antipattern', text: 'Error: months-old lesson that has not been injected since',
+    scopeKey: SCOPE_T12, threadIds: [], state: 'candidate',
+    support: [{ episode: 'ep-t12aaa1', seq: 1, quote: 'Error: months-old lesson that has not been injected since', occurredAt: OLD }],
+    counter: [], validity: { type: 'none', value: null }, preconditions: [],
+    occurredAt: OLD, recordedAt: OLD, validFrom: null, validTo: null,
+    counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null }, supersedes: null,
+  }]);
+  try {
+    const card = buildMemoryCard({
+      signal: signalFromText('读一下这个文件'),
+      walkResult: { hits: [{ episode: 'ep-t12aaa1', seq: 1, kind: 'failure', weight: 1, why: ['x'], depth: 1 }] },
+      store, scope: SCOPE_T12, now: NOW, pointerTier: false,
+    });
+    assert.equal(card.claims.length, 1, '夹具要先真的渲染出一行');
+    assert.ok(Number.isFinite(card.claims[0].decay), 'claims 投影必须带 decay（缺 = 消费方只能拿到 undefined）');
+    assert.ok(card.claims[0].decay < 0.5, `超过半衰期的行权重必须 < 0.5，实际 ${card.claims[0].decay}`);
+    assert.equal(classifyAbstainReason({ card, walkResult: { hits: [{}] } }), 'stale',
+      '投影缺 decay ⇒ Number(undefined ?? 1) 恒 1 ⇒ 这条reason永远是死码');
+  } finally {
+    try { rmSync(root, { recursive: true, force: true }); } catch { /* 清理失败不影响结论 */ }
+  }
+});

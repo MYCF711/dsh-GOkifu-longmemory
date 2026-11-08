@@ -1300,6 +1300,10 @@ export function buildMemoryCard({
     kind: e.kind,
     marker: e.marker,
     state: e.state,
+    // T12 修②：**投影补 `decay`** —— `classifyAbstainReason` 的 `stale` 判据读 `card.claims[].decay`，
+    // 而此前这张投影不含该字段 ⇒ `Number(c?.decay ?? 1)` 恒取 1 ⇒ `stale` 永远是死码（T11 §六实测 95 行全 null）。
+    // 只用 entry 上已有的值（`buildEntry`/`entryFromClaim` 都算过 `decayWeight`），不改渲染、不改排序。
+    decay: Number.isFinite(e.decay) ? e.decay : 1,
     occurredAt: e.occurredAt,
     date: e.date,
     source: e.source,
