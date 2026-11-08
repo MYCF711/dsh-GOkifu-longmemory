@@ -1119,18 +1119,65 @@ export function cardSampleSignal(messages, { limit = CARD_SAMPLE_SIGNAL_LIMIT } 
   return { signalPreview: full.slice(0, max), signalPreviewTruncated: full.length > max };
 }
 
-/** 注入质量抽样：只写 sidecar；失败不影响注入（2026-11-04）。 */
-export function appendCardSample(storeRoot, row) {
+/**
+ * T16（T10 遗留）：卡样本文件的**字节上限** —— 8 MB → **64 MB**。
+ *
+ * 为什么选「抬上限」而不是「按大小轮转」：
+ *   `card-samples.jsonl` 在本仓有**两个独立读者** —— `scripts/audit-card-samples.mjs` 与
+ *   `scripts/offset-attribution.mjs`（后者自己 readFileSync 规范路径，不在本任务可写范围）。
+ *   轮转会让「card-samples.jsonl」这个名字的含义静默改变（只剩最新一段），第二个读者会**无声**少读历史；
+ *   抬上限是零读者改动、旧文件原样可读（append-only），代价只是磁盘：按 T10 后的行宽估算
+ *   64MB ≈ 2.8 万条 ≈ 94–114 天（8MB 只够 ≈ 3.5 千条 ≈ 12–14 天；见 evidence/T16-card-sample-cap.md 的实测口径）。
+ * 撞线不再静默：`appendCardSample` 返回 `capped`，`traceCardSampleCap` 会 warn 一次并写一条 live-stats。
+ */
+export const CARD_SAMPLE_CAP_BYTES = 64 * 1024 * 1024;
+
+/**
+ * 注入质量抽样：只写 sidecar；失败不影响注入（2026-11-04）。
+ *
+ * T16：返回值从 `undefined` 改成状态对象 `{ status, fileBytes }`，`status ∈ written|capped|absent|failed`
+ * —— 让调用方能把「撞上限」记成可发现的痕迹（旧调用方忽略返回值 ⇒ 行为不变）。
+ * `capBytes` 只给测试注入小上限；生产永远走 `CARD_SAMPLE_CAP_BYTES`。
+ */
+export function appendCardSample(storeRoot, row, { capBytes = CARD_SAMPLE_CAP_BYTES } = {}) {
   try {
-    if (!storeRoot || !fs.existsSync(storeRoot)) return;
+    if (!storeRoot || !fs.existsSync(storeRoot)) return { status: 'absent', fileBytes: 0 };
     const file = path.join(storeRoot, 'card-samples.jsonl');
     const stat = fs.existsSync(file) ? fs.statSync(file) : null;
-    if (stat && stat.size > 8 * 1024 * 1024) return; // 8 MB 上限，避免无限增长
+    const fileBytes = stat ? stat.size : 0;
+    const cap = Number.isFinite(capBytes) && capBytes > 0 ? capBytes : CARD_SAMPLE_CAP_BYTES;
+    if (stat && stat.size >= cap) return { status: 'capped', fileBytes }; // 到上限就停写（旧行一字不动）
     // 2026-11-04：留样带 pid —— 宿主重启后新旧进程会混写同一文件，
     // 审计要能按进程切（`audit-card-samples --pid <n>`），否则"旧代码的账"会被误读成回归。
     fs.appendFileSync(file, `${JSON.stringify({ at: Date.now(), pid: process.pid, ...row })}
 `);
+    return { status: 'written', fileBytes };
   } catch { /* 抽样失败不影响注入 */ }
+  return { status: 'failed', fileBytes: 0 };
+}
+
+/**
+ * T16：卡样本撞上限时留**可发现**的痕迹（一次性 warn + 一条 live-stats 行）。
+ *
+ * `notified` 由 `apply()` 的闭包持有（每个插件实例、每个 store 只报一次）——
+ * 撞线后每一次注入都会走到 `appendCardSample`，不设一次性的闸就会每步刷一行。
+ * 返回 true = 本次真的记了；false = 没撞线 / 已经报过 / 参数不全。
+ */
+export function traceCardSampleCap({ ctx = null, storeRoot = null, sample = null, notified = null } = {}) {
+  if (!sample || sample.status !== 'capped' || !storeRoot) return false;
+  const seen = notified instanceof Set ? notified : new Set();
+  if (seen.has(storeRoot)) return false;
+  seen.add(storeRoot);
+  const file = path.join(storeRoot, 'card-samples.jsonl');
+  warn(ctx, `卡样本已到上限 ${CARD_SAMPLE_CAP_BYTES} 字节（${file}，当前 ${sample.fileBytes}）：后续注入不再留样，归档或抬高上限后恢复；本提示每个进程只发一次。`);
+  appendLiveStats(storeRoot, {
+    kind: 'card-samples-cap',
+    action: 'skip',
+    reason: 'card-samples-cap',
+    capBytes: CARD_SAMPLE_CAP_BYTES,
+    fileBytes: Number.isFinite(sample.fileBytes) ? sample.fileBytes : null,
+  });
+  return true;
 }
 
 export function writeRepeatTelemetry({ config, trigger, card = null, digest = null, at = Date.now(), shadow = false } = {}) {
@@ -1245,6 +1292,7 @@ export function apply(ctx, rawConfig = {}) {
   const config = resolveConfig(rawConfig);
   const injected = new WeakSet(); // 每会话只注入一次（对象身份；WeakSet 不留引用）
   const repeatStates = new Map(); // D5：每个会话的「同类失败计数」
+  const cardSampleCapNotified = new Set(); // T16：撞卡样本上限只报一次（按 storeRoot）
   const disposers = [];
   let disposed = false;
 
@@ -1259,6 +1307,7 @@ export function apply(ctx, rawConfig = {}) {
       disposed = true;
       disposePromise = (async () => {
         repeatStates.clear();
+        cardSampleCapNotified.clear();
         const pending = [];
         for (const off of disposers.splice(0).reverse()) {
           const result = off();
@@ -1437,7 +1486,7 @@ export function apply(ctx, rawConfig = {}) {
       if (config.liveStats === true && !(result.action === 'skip' && result.reason === 'disabled')) {
         const storeRootForStats = resolveStoreRoot(config);
         if (config.sampleCards === true && (result.action === 'inject') && result.card?.section) {
-          appendCardSample(storeRootForStats, {
+          const cardSample = appendCardSample(storeRootForStats, {
             scope: lastResolvedScope(session?.id)?.scope ?? null,
             scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
             digest: result.digest ?? null,
@@ -1456,6 +1505,8 @@ export function apply(ctx, rawConfig = {}) {
             tier: typeof result.card?.tier === 'string' ? result.card.tier : null,
             pointerCount: Number.isFinite(result.card?.pointerCount) ? Number(result.card.pointerCount) : null,
           });
+          // T16：撞上限不许静默 —— 一次性 warn（宿主日志）+ 一条 live-stats（kind=card-samples-cap）。
+          traceCardSampleCap({ ctx, storeRoot: storeRootForStats, sample: cardSample, notified: cardSampleCapNotified });
         }
         appendLiveStats(storeRootForStats, {
           kind: 'pre-step',
@@ -1533,6 +1584,9 @@ export default {
   lastUserText,
   CARD_SAMPLE_SIGNAL_LIMIT,
   cardSampleSignal,
+  CARD_SAMPLE_CAP_BYTES,
+  appendCardSample,
+  traceCardSampleCap,
   digestOf,
   insertAfterClaimed,
   cardText,

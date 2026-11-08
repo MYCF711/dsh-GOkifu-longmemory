@@ -16,7 +16,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, truncateSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -1037,10 +1037,15 @@ test('R16: 宿主包不可解析时，本地消息工厂形状与宿主一致（
   assert.ok(Object.isFrozen(msg) && Object.isFrozen(msg.content));
 });
 
-test('M4: 注入抽样只写 sidecar，且 8MB 上限后停止', async () => {
-  const { appendCardSample } = await import('../src/plugin.mjs');
+test('M4/T16: 注入抽样只写 sidecar，且到默认上限（64MB）后停止', async () => {
+  const { appendCardSample, CARD_SAMPLE_CAP_BYTES } = await import('../src/plugin.mjs');
+  // T16：8MB → 64MB（T10 把 signalPreview 换完整信号后，8MB 会约 2 倍速撞线）
+  assert.ok(CARD_SAMPLE_CAP_BYTES >= 32 * 1024 * 1024 && CARD_SAMPLE_CAP_BYTES <= 64 * 1024 * 1024,
+    `默认上限要在 32–64MB 之间，实际 ${CARD_SAMPLE_CAP_BYTES}`);
   const dir = mkdtempSync(path.join(tmpdir(), 'kifu-sample-'));
-  appendCardSample(dir, { digest: 'd1', tokens: 12, section: '<memory-ledger>x</memory-ledger>' });
+  const wrote = appendCardSample(dir, { digest: 'd1', tokens: 12, section: '<memory-ledger>x</memory-ledger>' });
+  // T16：返回值改成状态对象（调用方据此把"撞上限"记成可发现的痕迹）
+  assert.equal(wrote.status, 'written');
   // 2026-11-04：留样必须带 pid，审计才能按宿主进程切新旧代码的账
   const firstRow = JSON.parse(readFileSync(path.join(dir, 'card-samples.jsonl'), 'utf8').trim().split('\n')[0]);
   assert.equal(firstRow.pid, process.pid, '留样要带 pid');
@@ -1051,8 +1056,9 @@ test('M4: 注入抽样只写 sidecar，且 8MB 上限后停止', async () => {
   assert.match(rows[0].section, /memory-ledger/);
   // 库不存在时不写（不把"无库"变成"有库"）
   const missing = path.join(tmpdir(), 'kifu-missing-' + Date.now());
-  appendCardSample(missing, { digest: 'd2' });
+  const missingResult = appendCardSample(missing, { digest: 'd2' });
   assert.equal(existsSync(path.join(missing, 'card-samples.jsonl')), false);
+  assert.equal(missingResult.status, 'absent', '没有库要说 absent（不是悄悄写失败）');
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1410,6 +1416,93 @@ test('T10 ④ 接线: 真注入时卡样本里的 signalPreview 是完整信号�
     assert.ok(row.signalPreview.length > 160, '长度必须超过 160（旧实现的天花板）');
     assert.equal(row.signalPreviewTruncated, false);
     assert.equal(row.pid, process.pid, '原有字段不许丢（审计按 pid 切新旧进程）');
+  } finally {
+    cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// T16 · 卡样本上限：8MB → 64MB，且**撞上限不许静默**
+//
+// 背景（T10 遗留）：signalPreview 换成完整信号后行宽从 ~880B 涨到 ~2.6KB，8MB 会约 2 倍速撞线，
+// 然后 `appendCardSample` 直接 return —— 抽样在无人察觉中停掉，之后所有离线审计都失明。
+//
+// 这一组是 tombstone：① 删掉 `stat.size >= cap` 那行 ⇒ T16 ① 红（会继续写）；
+//                    ② 删掉 apply 里的 `traceCardSampleCap(...)` ⇒ T16 ③ 红（撞线后 live-stats 没有痕迹）。
+// ---------------------------------------------------------------------------
+import { appendCardSample, CARD_SAMPLE_CAP_BYTES, traceCardSampleCap } from '../src/plugin.mjs';
+
+test('T16 ①: 到上限就停写、返回 capped，且**旧行一字不动**（capBytes 可注入以便测小文件）', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-t16-cap-'));
+  try {
+    const file = path.join(dir, 'card-samples.jsonl');
+    writeFileSync(file, '{"legacy":true,"at":1}\n');
+    const before = readFileSync(file, 'utf8');
+    const capped = appendCardSample(dir, { digest: 'd' }, { capBytes: 1 });
+    assert.equal(capped.status, 'capped', '到上限必须说 capped（旧实现是静默 return）');
+    assert.equal(capped.fileBytes, before.length, '要如实报当前字节数（撞线痕迹要用）');
+    assert.equal(readFileSync(file, 'utf8'), before, '撞上限后旧行必须一字不动');
+    const written = appendCardSample(dir, { digest: 'd' }, { capBytes: before.length + 1024 });
+    assert.equal(written.status, 'written');
+    assert.equal(readFileSync(file, 'utf8').trim().split('\n').length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T16 ②: traceCardSampleCap —— warn 一次 + 一条 live-stats，同一 store 只报一次', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-t16-trace-'));
+  try {
+    const { ctx, warns } = makeCtx();
+    const notified = new Set();
+    const sample = { status: 'capped', fileBytes: CARD_SAMPLE_CAP_BYTES };
+    assert.equal(traceCardSampleCap({ ctx, storeRoot: dir, sample, notified }), true);
+    assert.ok(warns.some((w) => w.includes('卡样本已到上限')), `要给 warn，实际：${warns.join(' | ')}`);
+    const liveFile = path.join(dir, 'live-stats.jsonl');
+    const readLive = () => readFileSync(liveFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const rows = readLive();
+    assert.equal(rows.length, 1, '撞线痕迹就一行（不是每步一行）');
+    assert.equal(rows[0].kind, 'card-samples-cap');
+    assert.equal(rows[0].reason, 'card-samples-cap');
+    assert.equal(rows[0].capBytes, CARD_SAMPLE_CAP_BYTES);
+    assert.equal(rows[0].fileBytes, CARD_SAMPLE_CAP_BYTES);
+    assert.equal(rows[0].pid, process.pid, '心跳行要能按进程切');
+    // 一次性：同一 store 再撞不重复写
+    assert.equal(traceCardSampleCap({ ctx, storeRoot: dir, sample, notified }), false);
+    assert.equal(readLive().length, 1, '第二次不许再写');
+    // 没撞线 ⇒ 什么都不写
+    assert.equal(traceCardSampleCap({ ctx, storeRoot: dir, sample: { status: 'written' }, notified }), false);
+    assert.equal(readLive().length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T16 ③ 接线: 真注入撞上限 ⇒ live-stats 出现 card-samples-cap（不是静默停采）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const file = path.join(storeRoot, 'card-samples.jsonl');
+    writeFileSync(file, '');
+    truncateSync(file, CARD_SAMPLE_CAP_BYTES); // 设成"已经写满"，不用真写 64MB
+    assert.equal(statSync(file).size, CARD_SAMPLE_CAP_BYTES);
+
+    const { ctx, hooks, warns } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot, sampleCards: true, liveStats: true, probeValidity: false }));
+    const injectOnce = async () => {
+      const { session } = makeSession(workspace);
+      const claimed = [userMessage('yaml 装不上')];
+      const out = await runHook({ hooks, payload: { agent: { session }, messages: claimed }, decision: enterDecision([...claimed]) });
+      assert.equal(out.messages.length, 2, '有命中就必须注入（否则撞不到留样这一步）');
+    };
+    await injectOnce();
+    await injectOnce();
+
+    assert.equal(statSync(file).size, CARD_SAMPLE_CAP_BYTES, '撞上限后不许再写（文件不再长大）');
+    const capRows = readFileSync(path.join(storeRoot, 'live-stats.jsonl'), 'utf8').trim().split('\n')
+      .map((l) => JSON.parse(l)).filter((r) => r.kind === 'card-samples-cap');
+    assert.equal(capRows.length, 1, '两次注入只报一次（一次性告警）');
+    assert.equal(capRows[0].capBytes, CARD_SAMPLE_CAP_BYTES);
+    assert.equal(warns.filter((w) => w.includes('卡样本已到上限')).length, 1);
   } finally {
     cleanup();
   }
