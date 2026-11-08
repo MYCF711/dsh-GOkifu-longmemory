@@ -263,11 +263,13 @@ function report() {
   lines.push('');
   lines.push('判据：B（无记忆）复发显著更多（`onlyB > onlyA` 且 `p < 0.05`）才算「记忆有用」；');
   lines.push('`onlyA == onlyB` 判「无差别」，此时该查**卡上写了什么**，不是「要不要插件」。');
-  if (dir) lines.push('', `沙箱：\`${dir.replace(ROOT, '<REPO>')}\``);
+  // 脱敏：沙箱在 os.tmpdir()（含本机用户名，privacy-scan 的 user-home 闸会抓），统一打 <TMP>。
+  const mask = (s) => String(s ?? '').replace(ROOT, '<REPO>').split(os.tmpdir()).join('<TMP>');
+  if (dir) lines.push('', `沙箱：\`${mask(dir)}\``);
   const out = path.join(ROOT, 'evidence', 'T353-ablation-report.md');
   fs.writeFileSync(out, lines.join('\n') + '\n');
   console.log(lines.join('\n'));
-  console.log(`\n[report] 已写 ${out.replace(ROOT, '<REPO>')}`);
+  console.log(`\n[report] 已写 ${mask(out)}`);
   return 0;
 }
 
