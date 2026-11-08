@@ -2588,3 +2588,66 @@ test('T35 ⑤: 方向感知 —— expect=missing（ENOENT 派生）⇒ 路径�
     assert.equal(t35Card(store, legacy).section, null, '旧记录按 missing 判（gates 同一规则）');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// T37 · 恢复事实的洞见层（坑类陈述；raw → insight）
+// ---------------------------------------------------------------------------
+const t37Claim = (store, text, over = {}) => t35Claim(store, { text, support: [{ episode: 'ep-aaaaaaa1', seq: 2, quote: text, occurredAt: T28(12) }], ...over });
+
+test('T37 ①: claim 文本带 class: 前缀 ⇒ 恢复尾注标出坑类', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry({ prefix: 'class:fs-read-before-write' }) } });
+    const claim = t37Claim(store, 'class:fs-read-before-write · Error: file changed since it was read');
+    const line = cardLines(t35Card(store, claim)).find((l) => l.includes('file changed since it was read'));
+    assert.ok(line, '该行必须渲染');
+    assert.match(line, / · 恢复（class:fs-read-before-write）：后于 2026-10-20 同一命令成功（exit 0, seq 4）$/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T37 ②: 没有 class 前缀、但分类器认得出 ⇒ 同样标坑类（机械分类，不编）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry({ prefix: 'Error: cannot edit' }) } });
+    const claim = t37Claim(store, 'Error: cannot edit "a.mjs": file changed since it was read — re-read the file, then retry');
+    const line = cardLines(t35Card(store, claim)).find((l) => l.includes('cannot edit'));
+    assert.match(line, / · 恢复（class:fs-read-before-write）：/, '由 claim.mjs 的分类器机械判定');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T37 ③: same-tool 档 + 坑类 ⇒ 档位与坑类同时标（不混）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry({ kind: 'same-tool', seq: 4, prefix: 'Error: cannot edit' }) } });
+    const claim = t37Claim(store, 'Error: cannot edit "a.mjs": file changed since it was read');
+    const line = cardLines(t35Card(store, claim)).find((l) => l.includes('cannot edit'));
+    assert.match(line, / · 恢复（同工具族 · class:fs-read-before-write）：后于 2026-10-20 同工具族后来成功（seq 4）$/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T37 ④: 没有坑类 ⇒ 卡行与现状逐字节一致（tombstone）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry() } });
+    const line = cardLines(t35Card(store, t37Claim(store, 'Error: boom'))).find((l) => l.includes('Error: boom'));
+    assert.equal(line, '- [antipattern] Error: boom (ep-aaaaaaa1, 2026-10-20, seq 2) · 恢复：后于 2026-10-20 同一命令成功（exit 0, seq 4）', '无坑类 ⇒ 与 T28/T34 的文案逐字节一致');
+    assert.ok(!line.includes('（class:'), '不许凭空加坑类');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T37 ⑤: 洞见层不制造恢复事实（没有恢复事实 ⇒ 连坑类也不出现）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    const claim = t37Claim(store, 'class:module-missing · Error: Cannot find module "x"');
+    const card = t35Card(store, claim);
+    const line = cardLines(card).find((l) => l.includes('Cannot find module'));
+    assert.ok(line, '该行仍渲染（只是没有恢复事实）');
+    assert.ok(!line.includes('恢复'), '洞见层只加注已有恢复事实');
+    assert.ok(!line.includes('（class:'), '没有恢复事实时坑类不单独出现');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
