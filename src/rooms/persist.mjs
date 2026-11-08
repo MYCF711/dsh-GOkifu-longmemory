@@ -68,6 +68,8 @@ export const AUTHORITATIVE_KINDS = Object.freeze(['episodes', 'joseki', 'claims'
 export const DERIVED_KINDS = Object.freeze(['topics', 'links', 'threads']);
 /** T30：恢复索引 sidecar（`<root>/recovery-index.json`）——派生索引，可由归档层重算。 */
 export const RECOVERY_INDEX_FILE = 'recovery-index.json';
+/** T33：trial 记录（append-only JSONL；每条 = 上一次注入之后观察到的结果）。 */
+export const TRIALS_FILE = 'trials.jsonl';
 export const RECOVERY_INDEX_VERSION = 1;
 /** store 里的全部目录（含 journal）。 */
 export const STORE_DIRS = Object.freeze([...ENTRY_KINDS, 'journal']);
@@ -135,6 +137,78 @@ export function stableText(value) {
 //   · **确定性字节**：没有 `generatedAt` 一类时钟字段，深排序（`stableText`）⇒ 同一输入重放两次字节相同；
 //   · 原子写（同目录 `.tmp-*` → rename），崩溃不会留下半截 JSON。
 // ---------------------------------------------------------------------------
+
+/**
+ * T33 · trial 记录：`<root>/trials.jsonl`（append-only，一行一条）。
+ *
+ * 记录形状：`{claimId, injectedAt, outcome: recurred|avoided|unknown, evidenceEpisode, evidenceSeq, at}`
+ *   · `injectedAt` = **上一次**注入该 claim 的时间（trial 的起点）；
+ *   · `at` = 本次观察时间（= 本次注入时间）；
+ *   · 同一 `(claimId, injectedAt)` 只允许一条 —— 重放幂等。
+ * 纪律：**只增不改**（追加写、不重写历史）；文件不存在 ⇒ 空（tombstone：行为与现状一致）。
+ */
+export function trialsPath(root) {
+  return path.join(path.resolve(root), TRIALS_FILE);
+}
+
+/** 读 trials（坏行丢弃 + 计数；不存在 ⇒ records=[]、exists=false）。 */
+export function readTrials(root) {
+  const records = [];
+  let badLines = 0;
+  let raw = '';
+  try {
+    raw = fs.readFileSync(trialsPath(root), 'utf8');
+  } catch {
+    return { records, badLines, exists: false };
+  }
+  for (const line of raw.split(String.fromCharCode(10))) {
+    const text = line.trim();
+    if (!text) continue;
+    try {
+      const row = JSON.parse(text);
+      if (row && typeof row.claimId === 'string' && row.claimId) records.push(row);
+      else badLines += 1;
+    } catch {
+      badLines += 1;
+    }
+  }
+  return { records, badLines, exists: true };
+}
+
+/**
+ * 追加 trial 记录（只增不改、幂等）。
+ * @param {string} root store 根
+ * @param {Array<object>} rows 候选记录
+ * @returns {{appended:number, skipped:number, path:string}}
+ */
+export function appendTrials(root, rows = []) {
+  const existing = readTrials(root);
+  const seen = new Set(existing.records.map((r) => `${r.claimId}@${r.injectedAt}`));
+  const out = [];
+  let skipped = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row || typeof row.claimId !== 'string' || !row.claimId) { skipped += 1; continue; }
+    if (!Number.isFinite(row.injectedAt) || !Number.isFinite(row.at)) { skipped += 1; continue; }
+    if (!['recurred', 'avoided', 'unknown'].includes(row.outcome)) { skipped += 1; continue; }
+    const key = `${row.claimId}@${row.injectedAt}`;
+    if (seen.has(key)) { skipped += 1; continue; }
+    seen.add(key);
+    out.push({
+      claimId: row.claimId,
+      injectedAt: row.injectedAt,
+      outcome: row.outcome,
+      evidenceEpisode: typeof row.evidenceEpisode === 'string' && row.evidenceEpisode ? row.evidenceEpisode : null,
+      evidenceSeq: Number.isFinite(row.evidenceSeq) ? row.evidenceSeq : null,
+      at: row.at,
+    });
+  }
+  if (!out.length) return { appended: 0, skipped, path: trialsPath(root) };
+  fs.mkdirSync(path.resolve(root), { recursive: true });
+  const target = trialsPath(root);
+  const text = out.map((row) => JSON.stringify(row)).join(String.fromCharCode(10)) + String.fromCharCode(10);
+  fs.appendFileSync(target, text, 'utf8');
+  return { appended: out.length, skipped, path: target };
+}
 
 /** 恢复索引文件路径（只读判定用；不创建目录）。 */
 export function recoveryIndexPath(root) {

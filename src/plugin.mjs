@@ -54,6 +54,8 @@ import {
   scopeKeyFromPath,
   signalFromText,
   writeShadow,
+  // T33：注入时结算 trial（只写 sidecar，不改可见性/不退役）
+  recordInjectionTrials,
 } from './rooms/inject.mjs';
 import { probeValidity, validityKeyOf, workspaceOf, runGates } from './rooms/gates.mjs';
 import { classifyErrorClass } from './rooms/claim.mjs';
@@ -846,6 +848,14 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
   if (!messages) {
     warn(ctx, 'decision.messages 不是可拼接的数组（本轮不注入）');
     return { decision, action: 'skip', reason: 'no-message-list', card, gates, digest };
+  }
+  // T33：**trial 记录** —— 只写 `<store>/trials.jsonl`（append-only），不改可见性/不退役。
+  // 失败静默（记 trial 失败不许影响本轮注入）；没有上一条 trial ⇒ 本次只开 trial、不写记录。
+  try {
+    const antipatterns = (Array.isArray(card?.claims) ? card.claims : []).filter((c) => c && c.kind === 'antipattern');
+    if (antipatterns.length) recordInjectionTrials({ storeRoot, claims: antipatterns, at });
+  } catch (error) {
+    warn(ctx, `trial 记录失败（已忽略）：${String(error?.message ?? error)}`);
   }
   return { decision: { ...decision, messages }, action: 'inject', reason: null, card, gates, digest };
 }
