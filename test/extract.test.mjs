@@ -21,6 +21,11 @@ import { join } from 'node:path';
 import {
   extractSignals,
   collectRecoveryFacts,
+  recoveryCommandFamily,
+  recoveryDirOf,
+  recoveryTierOf,
+  buildRecoveryIndex,
+  findRecoveryFact,
   extractConstraints,
   matchedConstraintWords,
   messageText,
@@ -538,4 +543,75 @@ test('T30 ③: 纯函数（同输入两次 deepEqual；缺 episode 也能算）'
   assert.deepEqual(a, b);
   const c = collectRecoveryFacts({ events: t30Events() });
   assert.equal(c[0].episode, null, '不给 episode 就不编');
+});
+
+// ---------------------------------------------------------------------------
+// T34 · 恢复事实分档（exact / same-file / same-tool）
+// ---------------------------------------------------------------------------
+const t34Events = (pairs) => pairs.map(([seq, kind, name, text]) => (
+  kind === 'call'
+    ? { type: 'tool/call', seq, time: 1_790_000_000_000 + seq * 1000, data: { callId: `c${seq}`, name, arguments: JSON.stringify(text) } }
+    : { type: 'tool/result', seq, time: 1_790_000_000_000 + seq * 1000, data: { toolCallId: `c${seq - 1}`, message: { content: [{ type: 'text', text }] } } }
+));
+
+test('T34 ①: 工具族归一（命令族 / 目录）+ 档位映射', () => {
+  assert.equal(recoveryCommandFamily('git push origin main'), 'git push');
+  assert.equal(recoveryCommandFamily('git push --force'), 'git push');
+  assert.equal(recoveryCommandFamily('FOO=1 git push origin main'), 'git push', '跳过前置环境变量');
+  assert.equal(recoveryCommandFamily('node scripts/check.mjs --x'), 'node scripts/check.mjs');
+  assert.equal(recoveryCommandFamily('ls -la'), 'ls');
+  assert.equal(recoveryDirOf('D:/a/b/c.mjs'), 'd:/a/b');
+  assert.equal(recoveryDirOf('/tmp/x.mjs'), '/tmp');
+  assert.equal(recoveryTierOf('same-command-exit-0'), 'exact');
+  assert.equal(recoveryTierOf('same-file-write-ok'), 'same-file');
+  assert.equal(recoveryTierOf('same-tool'), 'same-tool');
+  assert.equal(recoveryTierOf('nope'), null);
+});
+
+test('T34 ②: 同工具族后来 exit 0 ⇒ same-tool；关掉（includeSameTool:false）⇒ 与旧行为一致（null）', () => {
+  const index = buildRecoveryIndex(t34Events([
+    [1, 'call', 'bash', { command: 'git push origin main' }],
+    [2, 'result', null, 'error: failed to push some refs\n[exit code: 1]'],
+    [3, 'call', 'bash', { command: 'git push --force' }],
+    [4, 'result', null, 'ok\n[exit code: 0]'],
+  ]));
+  const on = findRecoveryFact(index, 'error: failed to push some refs');
+  assert.equal(on?.kind, 'same-tool', '不同命令、同工具族 ⇒ same-tool');
+  assert.equal(on?.seq, 4);
+  assert.equal(on?.subject, 'git push');
+  assert.equal(findRecoveryFact(index, 'error: failed to push some refs', { includeSameTool: false }), null, '关掉 ⇒ 旧行为（tombstone）');
+});
+
+test('T34 ③: 同一命令仍走 exact（不许被 same-tool 抢）；不同工具族不算', () => {
+  const exact = buildRecoveryIndex(t34Events([
+    [1, 'call', 'bash', { command: 'git push origin main' }],
+    [2, 'result', null, 'error: failed to push some refs\n[exit code: 1]'],
+    [3, 'call', 'bash', { command: 'git push origin main' }],
+    [4, 'result', null, 'ok\n[exit code: 0]'],
+  ]));
+  assert.equal(findRecoveryFact(exact, 'error: failed to push some refs')?.kind, 'same-command-exit-0');
+
+  const other = buildRecoveryIndex(t34Events([
+    [1, 'call', 'bash', { command: 'git push origin main' }],
+    [2, 'result', null, 'error: failed to push some refs\n[exit code: 1]'],
+    [3, 'call', 'bash', { command: 'npm publish' }],
+    [4, 'result', null, 'ok\n[exit code: 0]'],
+  ]));
+  assert.equal(findRecoveryFact(other, 'error: failed to push some refs'), null, '不同工具族不算恢复');
+
+  // 文件：同目录另一个文件写成功 ⇒ same-tool；不同目录 ⇒ 不算
+  const file = buildRecoveryIndex(t34Events([
+    [1, 'call', 'edit', { file_path: 'D:/repo/a/x.mjs' }],
+    [2, 'result', null, 'Error: cannot edit "D:/repo/a/x.mjs": binary file'],
+    [3, 'call', 'edit', { file_path: 'D:/repo/a/y.mjs' }],
+    [4, 'result', null, 'The file D:/repo/a/y.mjs has been updated successfully.'],
+  ]));
+  assert.equal(findRecoveryFact(file, 'Error: cannot edit "D:/repo/a/x.mjs": binary file')?.kind, 'same-tool');
+  const elsewhere = buildRecoveryIndex(t34Events([
+    [1, 'call', 'edit', { file_path: 'D:/repo/a/x.mjs' }],
+    [2, 'result', null, 'Error: cannot edit "D:/repo/a/x.mjs": binary file'],
+    [3, 'call', 'edit', { file_path: 'D:/repo/b/y.mjs' }],
+    [4, 'result', null, 'The file D:/repo/b/y.mjs has been updated successfully.'],
+  ]));
+  assert.equal(findRecoveryFact(elsewhere, 'Error: cannot edit "D:/repo/a/x.mjs": binary file'), null, '不同目录不算');
 });

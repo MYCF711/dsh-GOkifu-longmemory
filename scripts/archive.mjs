@@ -198,10 +198,13 @@ export function recoveryIndexFactsForClaims(claims, factsByEpisode) {
       if (supportSeq === null) {
         hit = candidates[0];
       } else {
+        // 先按档位（exact / same-file 优先于 same-tool），再按'support.seq 距离'最近 ——
+        // 否则同工具族的事实可能把"同一条命令"的事实挤掉（T34 分档之后才有这个竞争）。
+        const rankOf = (f) => (f.kind === 'same-tool' ? 1 : 0);
         const near = candidates
-          .map((f) => ({ f, d: Math.abs(Number(f.failureSeq) - supportSeq) }))
+          .map((f) => ({ f, r: rankOf(f), d: Math.abs(Number(f.failureSeq) - supportSeq) }))
           .filter((x) => Number.isFinite(x.d) && x.d <= RECOVERY_SUPPORT_MAX_DISTANCE)
-          .sort((a, b) => a.d - b.d)[0];
+          .sort((a, b) => a.r - b.r || a.d - b.d)[0];
         hit = near ? near.f : null;
       }
       if (!hit) continue;

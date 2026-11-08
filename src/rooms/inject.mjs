@@ -835,6 +835,8 @@ function recoverySuffix(recovery) {
   const date = formatCardDate(recovery.at);
   if (!date || date.startsWith('????')) return '';
   if (recovery.kind === 'same-file-write-ok') return ` · 恢复：后于 ${date} 同一文件写入成功（seq ${recovery.seq}）`;
+  // T34：**同工具族**是最弱档 —— 文案必须写清"同工具族"，不许写成"同一命令"（否则是编）。
+  if (recovery.kind === 'same-tool') return ` · 恢复（同工具族）：后于 ${date} 同工具族后来成功（seq ${recovery.seq}）`;
   const label = recovery.kind === 'same-command-exit-0' ? '同一命令成功（exit 0' : '同一命令重跑（无失败输出';
   return ` · 恢复：后于 ${date} ${label}, seq ${recovery.seq}）`;
 }
