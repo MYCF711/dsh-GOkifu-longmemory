@@ -33,6 +33,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { scopeKeyFromPath } from '../src/rooms/inject.mjs';
+import { createStore } from '../src/rooms/persist.mjs';
+
 const REPO = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const HOME = process.env.DSH_HOME || 'D:/DeepSeek Harness/home';
 const DEFAULT_STORE = path.join(HOME, 'memory-context');
@@ -201,19 +204,63 @@ export function judgeDuplicateInjections(injectRows = []) {
 }
 
 /** ⑤ T28/T31：卡上是否有「 · 恢复」尾注。 */
-export function judgeRecoveryTail(text = '', { exitCode = 0, stderr = '' } = {}) {
+export function judgeRecoveryTail(text = '', { exitCode = 0, stderr = '', signal = null, note = null } = {}) {
   const raw = String(text ?? '');
+  const NL = String.fromCharCode(10);
+  // T28b（2026-11-09）：把"用的什么信号"写进证据 —— 否则 NO-SAMPLE 时分不清
+  // "库里没有恢复事实" 还是 "这条信号恰好没命中"。写死信号会永远 NO-SAMPLE（实测踩过）。
+  const how = signal ? `signal=${JSON.stringify(String(signal).slice(0, 80))}` : '';
   if (exitCode !== 0) {
     return item('t28-recovery', 'T28/T31：卡上出现「 · 恢复」尾注', STATUS.FAIL,
-      `inject --shadow 退出码 ${exitCode}${stderr ? ` · ${String(stderr).split('\n')[0].slice(0, 160)}` : ''}`);
+      `inject --shadow 退出码 ${exitCode}${stderr ? ` · ${String(stderr).split(NL)[0].slice(0, 160)}` : ''}${how ? ` · ${how}` : ''}`);
   }
   if (/ · 恢复/u.test(raw)) {
-    const line = raw.split('\n').find((l) => / · 恢复/u.test(l)) ?? '';
+    const line = raw.split(NL).find((l) => / · 恢复/u.test(l)) ?? '';
     return item('t28-recovery', 'T28/T31：卡上出现「 · 恢复」尾注', STATUS.PASS,
-      `命中尾注：${line.trim().slice(0, 200)}`);
+      `命中尾注：${line.trim().slice(0, 200)}${how ? ` · ${how}` : ''}`);
   }
   return item('t28-recovery', 'T28/T31：卡上出现「 · 恢复」尾注', STATUS.NO_SAMPLE,
-    '本次信号没有命中带恢复事实的 claim（卡上没有 · 恢复 尾注 —— 没样本，不能判过）');
+    `${note ?? '本次信号没有命中带恢复事实的 claim'}（卡上没有 · 恢复 尾注 —— 没样本，不能判过）${how ? ` · ${how}` : ''}`);
+}
+
+/**
+ * ⑤ 用的信号：**优先挑一条真的带恢复事实、且在本作用域里的 claim**，用它的正文当信号。
+ *
+ * 为什么不能写死信号：老的固定信号（"推进任务表"）命中不到任何带恢复事实的 claim ⇒ 永远 NO-SAMPLE，
+ * 这条闸等于永远不判（2026-11-09 实测就是这样）。判据本身没错，是**取样**错了。
+ *
+ * @param {{store?:string, repo?:string}} opts
+ * @returns {{signal:string, claimId:string, tier:string}|null} 找不到 ⇒ null（调用方退回固定信号）
+ */
+export function pickRecoverySignal({ store = DEFAULT_STORE, repo = REPO } = {}) {
+  const scope = String(scopeKeyFromPath(repo) ?? '').toLowerCase();
+  if (!scope) return null;
+  let index = null;
+  try {
+    index = JSON.parse(fs.readFileSync(path.join(store, 'recovery-index.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+  const entries = index?.entries && typeof index.entries === 'object' ? index.entries : {};
+  const ids = Object.keys(entries).sort(); // 稳定顺序：同库同结果，便于复现
+  if (!ids.length) return null;
+  let memory = null;
+  try {
+    memory = createStore({ root: store });
+  } catch {
+    return null;
+  }
+  for (const id of ids) {
+    let claim = null;
+    try { claim = memory.get ? memory.get('claims', id) : null; } catch { claim = null; }
+    if (!claim || typeof claim !== 'object') continue;
+    if (!['observed', 'candidate', 'semantic'].includes(String(claim.state ?? ''))) continue;
+    if (String(claim.scopeKey ?? '').toLowerCase() !== scope) continue;
+    const text = String(claim.text ?? '').trim();
+    if (text.length < 4) continue;
+    return { signal: text.slice(0, 200), claimId: id, tier: String(entries[id]?.kind ?? '') };
+  }
+  return null;
 }
 
 /** ⑥ T16/T18/T20：三个 cap 常量都 = 64MB。 */
@@ -329,8 +376,16 @@ export function runChecks({ store = DEFAULT_STORE, repo = REPO, timeoutMs = 6000
   items.push(judgeDuplicateInjections(curRows.filter((r) => r?.action === 'inject')));
 
   // ⑤
-  const shadow = runNode([path.join(repo, 'scripts', 'cli.mjs'), 'inject', '--shadow', '--signal', '推进任务表', '--store', store], { timeoutMs });
-  items.push(judgeRecoveryTail(`${shadow.stdout}\n${shadow.stderr}`, { exitCode: shadow.code, stderr: shadow.stderr }));
+  // ⑤（T28b：取样改成"带恢复事实的那条 claim 自己的正文"；找不到才退回固定信号）
+  const picked = pickRecoverySignal({ store, repo });
+  const signal = picked?.signal ?? '推进任务表';
+  const shadow = runNode([path.join(repo, 'scripts', 'cli.mjs'), 'inject', '--shadow', '--signal', signal, '--store', store], { timeoutMs });
+  items.push(judgeRecoveryTail(`${shadow.stdout}\n${shadow.stderr}`, {
+    exitCode: shadow.code,
+    stderr: shadow.stderr,
+    signal,
+    note: picked ? `取样=${picked.claimId}（tier ${picked.tier || '?'}）` : '库里没有同域且带恢复事实的 claim',
+  }));
 
   // ⑥
   let pluginSource = '';
