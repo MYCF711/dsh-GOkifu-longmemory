@@ -80,7 +80,7 @@ export function hasAnySignalHandle(signalText) {
  * 线上误杀的根因是"同一个坑类换了文件名/目录"，不是"内容真的无关"（见 `evidence/T11-abstain-live.md`）。
  * **没有卡 / 没有 claim ⇒ 返回 false**（由调用方走既有的 `no-hit`，不走 abstain）。
  */
-export function hasRelevantClaim(card, signalText) {
+export function hasRelevantClaim(card, signalText, { exactAnchor = true } = {}) {
   const claims = Array.isArray(card?.claims) ? card.claims : [];
   if (!claims.length) return false;
   // 判据不可用（信号里**什么可判别的都没有**，如纯短中文句）⇒ **不拒绝**（保守，不误杀）。
@@ -115,6 +115,9 @@ export function hasRelevantClaim(card, signalText) {
   // T12：字面**全不命中** ⇒ 再看「坑类 / 工具族」（T11 的 17 条误杀全部落在这一层）。
   // 位置很关键：**只在字面判据之后兜底** —— 字面能判的部分行为一字不改（向后兼容）。
   if (hasPitClassBridge(claims, signalText)) return true;
+  // T44：**精确身份锚定**（同一 repo / 同一错误签名 / 同一任务链）——最后兜底，只增相关不增拒绝。
+  // 关掉（`{exactAnchor:false}`）⇒ 与改动前逐字节一致（tombstone）。
+  if (exactAnchor && hasExactAnchor(claims, signalText)) return true;
   return false;
 }
 
@@ -212,7 +215,108 @@ export function hasPitClassBridge(claims, signalText) {
   return false;
 }
 
-export default { hasRelevantClaim, abstainEntities, chineseBigrams, hasAnySignalHandle, fileBasenames, hasPitClassBridge };
+// ── T44：**精确身份锚定**（同一 repo / 同一错误签名 / 同一任务链）──────────────────
+// 依据：T43 试点（`evidence/T43-semantic-retrieval.md`）——语义相似度在 A2b 口径下**输给机械判据**
+//      （AUC 0.839 vs 0.850；全库检索 hit@5 0.33 vs 0.67），失败点是**口径错位**：要找的是"同一件事"，
+//      不是"相似的事"。所以这里只做**结构化身份**，不做语义打分。
+//
+// 三条锚定，全部机械（正则 + 归一化，无模型）：
+//   ① 同一 repo/remote —— 两侧出现同一个 `github.com/<owner>/<repo>`（或 gitee）；
+//   ② 同一错误签名 —— 归一化后的错误行（去引号/路径/数字）逐字相同；
+//   ③ 同一任务链 —— 同一条命令的「动作 + 对象」（`git push <remote>` / `gh release create <tag>` /
+//      `pnpm add <pkg>` / `git worktree add <path>`）相同。
+// **只增相关不增拒绝**（T12 的负样本纪律）：它只在 `hasRelevantClaim` 的字面 + 桥都**不命中**之后兜底，
+// 返回 `true` 只会**减少拒绝**；关掉（`hasRelevantClaim(card, text, {exactAnchor:false})`）⇒ 与现状逐字节一致。
+
+/** repo 键：`github.com/<owner>/<repo>` / `git@github.com:<owner>/<repo>` / `gitee.com/...`（小写 owner/repo）。 */
+const REPO_KEY_RE = /(?:github\.com|gitee\.com)[/:]([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git\b|[/\s'"`)]|$)/gi;
+
+/** 文本里出现过的 repo 键集合（`owner/repo`，小写；去掉 `.git`）。 */
+export function repoKeysOf(text) {
+  const out = new Set();
+  for (const m of String(text ?? '').matchAll(REPO_KEY_RE)) {
+    const owner = String(m[1] ?? '').toLowerCase();
+    const repo = String(m[2] ?? '').replace(/\.git$/i, '').toLowerCase();
+    if (owner && repo && repo.length >= 2) out.add(`${owner}/${repo}`);
+  }
+  return out;
+}
+
+/** 归一化错误行：去引号内内容 / 路径 / 数字，压空白、小写；只收"像错误"的行。 */
+function normalizedErrorLine(line) {
+  const raw = String(line ?? '').trim();
+  if (!/^(?:[A-Za-z_]*Error|Exception|fatal)\b\s*:?/i.test(raw)) return null;
+  const norm = raw
+    .toLowerCase()
+    // T44：**保留引号里的主体**（host / 包名 / tag）——早先把引号内容一律换成 `<x>`，
+    // 结果 `"127.0.0.1"` 与 `"raw.githubusercontent.com"` 成了"同一签名"（holdout 实测 2 个假阳）。
+    .replace(/(?:[a-z]:)?[/\\][^\s"',;)]+/g, '<path>')
+    .replace(/\b\d+\b/g, '<n>')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return norm.length >= 16 ? norm.slice(0, 160) : null;
+}
+
+/** 文本里的**错误签名**集合（归一化后的错误行；没有 ⇒ 空集）。 */
+export function errorSignaturesOf(text) {
+  const out = new Set();
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const sig = normalizedErrorLine(line);
+    if (sig) out.add(sig);
+  }
+  return out;
+}
+
+/** 命令 → 「动作 + 对象」链（机械；只认白名单里的动词组合，宁缺勿编）。 */
+export function taskChainsOf(text) {
+  const out = new Set();
+  const s = String(text ?? '');
+  const clean = (x) => String(x ?? '').replace(/[)"'`,.;]+$/g, '').toLowerCase();
+  for (const m of s.matchAll(/\bgit\s+(push|pull|fetch|clone|worktree\s+add|rebase|merge|tag|checkout|commit)\s+([^\s"'`]+)/gi)) {
+    const obj = clean(m[2]);
+    if (obj && !obj.startsWith('-')) out.add(`git ${m[1].toLowerCase().replace(/\s+/g, ' ')} ${obj}`);
+  }
+  for (const m of s.matchAll(/\bgh\s+(release\s+create|release\s+edit|pr\s+create|pr\s+merge|api)\s+([^\s"'`]+)/gi)) {
+    const obj = clean(m[2]);
+    if (obj && !obj.startsWith('-')) out.add(`gh ${m[1].toLowerCase().replace(/\s+/g, ' ')} ${obj}`);
+  }
+  for (const m of s.matchAll(/\b(pnpm|npm|yarn)\s+(add|install|run|publish)\s+([^\s"'`]+)/gi)) {
+    const obj = clean(m[3]);
+    if (obj && !obj.startsWith('-')) out.add(`${m[1].toLowerCase()} ${m[2].toLowerCase()} ${obj}`);
+  }
+  return out;
+}
+
+/**
+ * T44 · **精确身份锚定**：两侧是不是"同一件事"（同一 repo / 同一错误签名 / 同一任务链）。
+ * @param {Array<object>|object} claims 卡上的 claim 列表（或用整张卡）
+ * @param {string} signalText 信号原文
+ * @returns {boolean} 命中任一锚定 ⇒ `true`（相关；**只增相关**）
+ */
+export function hasExactAnchor(claims, signalText) {
+  const list = Array.isArray(claims) ? claims : (Array.isArray(claims?.claims) ? claims.claims : []);
+  const texts = list.map((c) => String(c?.text ?? c?.rawText ?? '')).filter(Boolean);
+  if (!texts.length) return false;
+  const signal = String(signalText ?? '');
+  const sigRepos = repoKeysOf(signal);
+  const sigErrors = errorSignaturesOf(signal);
+  const sigChains = taskChainsOf(signal);
+  if (!sigRepos.size && !sigErrors.size && !sigChains.size) return false;
+  for (const text of texts) {
+    if (sigRepos.size) {
+      for (const r of repoKeysOf(text)) if (sigRepos.has(r)) return true;
+    }
+    if (sigErrors.size) {
+      for (const e of errorSignaturesOf(text)) if (sigErrors.has(e)) return true;
+    }
+    if (sigChains.size) {
+      for (const ch of taskChainsOf(text)) if (sigChains.has(ch)) return true;
+    }
+  }
+  return false;
+}
+
+export default { hasRelevantClaim, abstainEntities, chineseBigrams, hasAnySignalHandle, fileBasenames, hasPitClassBridge, hasExactAnchor, repoKeysOf, errorSignaturesOf, taskChainsOf };
 
 // ── T366c：方向（polarity）——"相关但反向"的记忆是负迁移，A1 现在测不到 ──
 // 依据：用户要 A、claim 指向非 A ⇒ 给了会误导。
