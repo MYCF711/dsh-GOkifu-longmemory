@@ -47,7 +47,8 @@
 //   上挑到的 claim 随"库里有没有合并节点"漂移（④b 最后 3 行的根因）；关掉后两库的
 //   claim 候选集只由 claim 自己的 support/文本决定。
 //   没有 `merge` 字段的 claim 行为**一字不改**（不加块标记、不碰排序）。
-// 预算：每 hit 的 tokens = estimateTokens(episode + claim + kind + why + text)；
+// 预算：每 hit 的 tokens = estimateTokens(episode + claim + text)（**只算会注入的可见内容**；
+//   `kind`/`why` 是审计字段，不进模型上下文、不计价 —— T21 修了"why 常带 30+ key 把预算吃光"的缺陷）；
 //   CJK 1.5 字/token、ASCII 4 字/token（契约 §7.2「≤500 tokens」的估法）。
 //   截断是**前缀式**的：按排序结果依次收，碰到 limit 或 budget 就停，后面的全部计入 omitted。
 //   ⇒ 同输入 + 同预算永远得到同一个前缀（可复现、可单测）。
@@ -433,9 +434,15 @@ function isInvalidated(claim) {
   return claim?.state === 'invalidated';
 }
 
-/** 单条命中的 token 文本（估的就是将来要注入的那点内容：指针 + why + 一句话）。 */
+/**
+ * 单条命中的 token 文本（**估的就是将来要注入的那点内容**：指针 + 原文）。
+ *
+ * T21：`why` / `kind` 是审计字段（via 的主题 key 列表，给 path/provenance 用），**不进模型上下文**。
+ * 此前把它们计入预算 ⇒ 一条正文 22 tokens 的行按 270 tokens 扣（why 常带 30+ 个历史 key），
+ * 500 预算实际只装得下 1–2 条（limit=5 形同虚设）。预算口径必须与可见内容一致。
+ */
 function hitTokenText(hit) {
-  return [hit.episode ?? '', hit.claim ?? '', hit.kind, hit.why.join(' '), hit.text ?? '']
+  return [hit.episode ?? '', hit.claim ?? '', hit.text ?? '']
     .filter((part) => part !== '' && part !== null && part !== undefined)
     .join(' ');
 }

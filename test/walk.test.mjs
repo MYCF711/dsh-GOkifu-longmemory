@@ -465,6 +465,21 @@ test('R11: budgetTokens 前缀式截断（token 超了就停，后面的全计�
   assert.equal(full.tokens, all.hits.reduce((sum, hit) => sum + hit.tokens, 0));
 });
 
+test('T21: hit.tokens 只估**可见内容**（指针 + 原文），审计字段 why/kind 不计入预算', () => {
+  const all = walk({ limit: 100, budgetTokens: 10_000 });
+  assert.ok(all.hits.length >= 2, '夹具应有多个 hit');
+  for (const hit of all.hits) {
+    assert.ok(Array.isArray(hit.why) && hit.why.length > 0, '夹具 hit 必须带 why（否则测不到「why 被计入 token」）');
+    const visible = [hit.episode ?? '', hit.claim ?? '', hit.text ?? ''].filter(Boolean).join(' ');
+    assert.equal(hit.tokens, estimateTokens(visible),
+      `hit.tokens 必须按可见内容估（期望 ${estimateTokens(visible)}，实际 ${hit.tokens}）—— why 是审计字段，不进模型上下文`);
+  }
+  // 预算与「可见内容」同口径：给刚好够前两条可见内容的预算，必须装下 2 条（旧口径按 why 多扣 ⇒ 只装 1 条）
+  const need = all.hits.slice(0, 2).reduce((sum, hit) => sum + hit.tokens, 0);
+  const fitted = walk({ limit: 100, budgetTokens: need });
+  assert.equal(fitted.hits.length, 2, '预算按可见内容计时必须装得下 2 条');
+});
+
 // ---------------------------------------------------------------------------
 // 4 · 无命中 / 沉默
 // ---------------------------------------------------------------------------
