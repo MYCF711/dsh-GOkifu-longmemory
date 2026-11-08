@@ -817,8 +817,15 @@ export function walkFromSignals(opts = {}) {
   });
 
   if (picked.length === 0) {
-    dropped.noTopic += 1;
-    return emptyResult();
+    // T46：**锚定检索通路**存在时，即使没有任何主题命中，也要走完候选构造 ——
+    // 否则"同一件事"（同 repo / 同错误签名 / 同任务链）永远进不了候选池（这正是 T45 0 收益的原因之一）。
+    // 没有锚定通路 ⇒ 与改动前**逐字节一致**（同一条 early return）。
+    const anchorRetrievalOn = typeof opts.anchorMatchOf === 'function' && opts.anchorRetrieval !== false
+      && typeof opts.signalText === 'string' && opts.signalText !== '';
+    if (!anchorRetrievalOn) {
+      dropped.noTopic += 1;
+      return emptyResult();
+    }
   }
 
   const matchedKeys = new Set(picked.map((m) => m.topic.key));
@@ -1223,6 +1230,59 @@ export function walkFromSignals(opts = {}) {
     addVia(hit, { kind: 'claim', from: textMatch.topic.id, to: claim.id, why: [textMatch.topic.key] });
     hit.tokens = hitTokens(hit);
     claimHits.set(claim.id, hit);
+  }
+
+  // ---- T46：**锚定检索通路**（第 4 条）：同 repo / 同错误签名 / 同任务链的 claim 直接进候选池 ----
+  // 为什么需要它（evidence/T45-walk-anchor.md）：A2b 的 strict 是**集合口径**，只在排序上加键
+  // 不可能改变 hit@5（T21 放宽 limit、T45 重排，两次 Δ=0）；要动集合，就得让**同一件事**的条目
+  // 先进入候选池。判据由调用方注入（walk 保持零 import，R11 tombstone 不变）：
+  // `opts.anchorMatchOf(claimText, signalText) => boolean`。
+  // 与现有通路**合并去重**（claimHits 里已有的 claim 不重复加）；不传 ⇒ 该通路不存在（tombstone）。
+  {
+    const anchorMatchOf = typeof opts.anchorMatchOf === 'function' && opts.anchorRetrieval !== false ? opts.anchorMatchOf : null;
+    if (anchorMatchOf && typeof opts.signalText === 'string' && opts.signalText) {
+      const signalTextForAnchor = opts.signalText;
+      let allClaims = [];
+      try { allClaims = store.list('claims').map((entry) => entry?.record ?? entry).filter(Boolean); } catch { allClaims = []; }
+      for (const claim of allClaims) {
+        if (!claim || typeof claim.id !== 'string' || claimHits.has(claim.id)) continue;
+        if (claim.state === 'invalidated') continue;
+        const text = String(claim.text ?? '');
+        if (!text || !anchorMatchOf(text, signalTextForAnchor)) continue;
+        const support = Array.isArray(claim.support) ? claim.support : [];
+        const visibleSupport = support.find((entry) => {
+          const ep = episodeById.get(String(entry?.episode ?? ''));
+          if (ep === undefined) return false;
+          if (isFolded(ep)) return false;
+          return currentScope === null || allowRecord(ep, `episodes:${entry.episode}`);
+        });
+        if (!visibleSupport) { dropped.crossScope += 1; continue; }
+        const occurredAt = claimTime(claim, { episode: String(visibleSupport.episode), occurredAt: visibleSupport.occurredAt });
+        if (!finiteNumber(occurredAt)) { dropped.noTime += 1; continue; }
+        if (!allowRecord(claim, `claims:${claim.id}`)) continue;
+        const hit = makeHit({
+          episode: String(visibleSupport.episode),
+          nodeId: typeof visibleSupport.nodeId === 'string' && visibleSupport.nodeId !== '' ? visibleSupport.nodeId : null,
+          claim: claim.id,
+          claimKind: typeof claim.kind === 'string' ? claim.kind : null,
+          claimState: typeof claim.state === 'string' ? claim.state : null,
+          link: null,
+          why: ['anchor'],
+          weight: 0.5,
+          occurredAt,
+          seq: finiteNumber(visibleSupport.seq) ? visibleSupport.seq : null,
+          kind: claimHitClass(claim),
+          depth: 1,
+          text,
+          scopeKey: recordScopeKey(claim),
+          repeat: supportEpisodeCount(claim),
+          direct: true,
+        });
+        addVia(hit, { kind: 'claim', from: String(visibleSupport.episode), to: claim.id, why: ['anchor'] });
+        hit.tokens = hitTokens(hit);
+        claimHits.set(claim.id, hit);
+      }
+    }
   }
 
   // ---- T179：合并节点命中 ⇒ 成员 claim 同一跳展开（R12 折叠需要成员行）----

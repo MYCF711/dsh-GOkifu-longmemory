@@ -1258,3 +1258,78 @@ test('T45 ②: walk 集成 —— 关掉锚定与现状逐字节一致；锚定�
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// T46 · 锚定检索通路（同一 repo/错误签名/任务链 ⇒ 直接进候选池）
+// ---------------------------------------------------------------------------
+test('T46 ①: 锚定 claim 直接进候选池（topic/link 走不到也能进）；不传 ⇒ 不存在（tombstone）', async () => {
+  const { walkFromSignals } = await import('../src/rooms/walk.mjs');
+  const { createStore } = await import('../src/rooms/persist.mjs');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const root = mkdtempSync(path.join(os.tmpdir(), 'kifu-t46-'));
+  try {
+    const store = createStore({ root, now: T0 });
+    store.ensureDirs();
+    store.putMany('episodes', [
+      { id: 'ep-t46', scopeKey: SCOPE, sessionId: 's1', startedAt: T0, endedAt: T0 + 10, firstEventAt: T0, lastEventAt: T0 + 10, recordedAt: T0 },
+    ], { at: T0 });
+    store.putMany('claims', [{
+      id: 'c-t46', kind: 'antipattern', text: "fatal: failed to push some refs to 'https://github.com/acme/widget.git'",
+      state: 'observed', scopeKey: SCOPE, support: [{ episode: 'ep-t46', seq: 2, quote: 'failed to push', occurredAt: T0 }],
+      counter: [], occurredAt: T0, recordedAt: T0,
+    }], { at: T0 });
+    const signal = { kind: 'root-message', terms: ['zzz-unique-term'], entities: [], at: T0 + 40 };
+    const base = walkFromSignals({ signal, store, scope: SCOPE, limit: 5, budgetTokens: 500 });
+    assert.equal((base.hits ?? []).some((h) => h.claim === 'c-t46'), false, 'topic/link 走不到 ⇒ 不在候选池');
+
+    const on = walkFromSignals({
+      signal, store, scope: SCOPE, limit: 5, budgetTokens: 500,
+      signalText: '推 github.com/acme/widget 的 tag',
+      anchorMatchOf: (claimText, sigText) => claimText.includes('github.com/acme/widget') && sigText.includes('github.com/acme/widget'),
+    });
+    assert.ok((on.hits ?? []).some((h) => h.claim === 'c-t46'), '锚定通路 ⇒ 直接进候选池');
+
+    // tombstone：关掉通路（或不传回调）⇒ 与基线逐字节一致
+    const off = walkFromSignals({
+      signal, store, scope: SCOPE, limit: 5, budgetTokens: 500,
+      signalText: '推 github.com/acme/widget 的 tag', anchorRetrieval: false,
+      anchorMatchOf: () => true,
+    });
+    assert.equal(JSON.stringify(off), JSON.stringify(base), '关掉锚定通路 ⇒ 与现状逐字节一致');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T46 ②: 作用域闸优先 —— 跨 scope 的锚定 claim 不许进池，只记 crossScope', async () => {
+  const { walkFromSignals } = await import('../src/rooms/walk.mjs');
+  const { createStore } = await import('../src/rooms/persist.mjs');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const root = mkdtempSync(path.join(os.tmpdir(), 'kifu-t46b-'));
+  try {
+    const store = createStore({ root, now: T0 });
+    store.ensureDirs();
+    store.putMany('episodes', [
+      { id: 'ep-other', scopeKey: 'w:e:/other-project', sessionId: 's2', startedAt: T0, endedAt: T0 + 10, firstEventAt: T0, lastEventAt: T0 + 10, recordedAt: T0 },
+    ], { at: T0 });
+    store.putMany('claims', [{
+      id: 'c-t46-x', kind: 'antipattern', text: 'error: failed to push some refs to https://github.com/acme/widget.git',
+      state: 'observed', scopeKey: 'w:e:/other-project', support: [{ episode: 'ep-other', seq: 2, quote: 'failed to push', occurredAt: T0 }],
+      counter: [], occurredAt: T0, recordedAt: T0,
+    }], { at: T0 });
+    const signal = { kind: 'root-message', terms: ['zzz-unique-term'], entities: [], at: T0 + 40 };
+    const on = walkFromSignals({
+      signal, store, scope: SCOPE, limit: 5, budgetTokens: 500,
+      signalText: '推 github.com/acme/widget 的 tag',
+      anchorMatchOf: () => true,
+    });
+    assert.equal((on.hits ?? []).some((h) => h.claim === 'c-t46-x'), false, '跨 scope ⇒ 不进池');
+    assert.ok((on.omitted?.crossScope ?? 0) >= 1, '被作用域闸挡下并计数');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
