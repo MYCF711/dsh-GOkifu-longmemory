@@ -524,6 +524,11 @@ function pickClaimBase(hit, view) {
       text: c.text,
       occurredAt: Number.isFinite(c.occurredAt) ? c.occurredAt : null,
       support: Array.isArray(c.support) ? c.support.filter((s) => s && typeof s === 'object') : [],
+      // T35：**适用条件必须跟着 claim 走** —— 投影里漏掉 `preconditions`，file-exists 核验（以及 T298
+      // 的 `preconditionOk` 回调）在"hit 自带 claim 对象"这条旁路上会静默失效（等于永不失效）。
+      preconditions: Array.isArray(c.preconditions) ? c.preconditions.filter((p) => p && typeof p === 'object') : [],
+      // T35：`validity.expect` 决定 file 类适用条件的方向（T158）—— 投影里同样不能丢。
+      validity: c.validity && typeof c.validity === 'object' ? { ...c.validity } : null,
     };
   }
   const claimId = typeof hit?.claim === 'string' ? hit.claim : (typeof hit?.claimId === 'string' ? hit.claimId : null);
@@ -841,12 +846,74 @@ function recoverySuffix(recovery) {
   return ` · 恢复：后于 ${date} ${label}, seq ${recovery.seq}）`;
 }
 
+/** T35：`file-exists` 核验结果缓存（同一进程内按绝对路径复用；上限 512 条后整体清空）。 */
+const FILE_EXISTS_CACHE = new Map();
+const FILE_EXISTS_CACHE_MAX = 512;
+
+function fileExistsCached(absPath) {
+  const key = String(absPath ?? '');
+  if (!key) return false;
+  if (FILE_EXISTS_CACHE.has(key)) return FILE_EXISTS_CACHE.get(key);
+  let ok = false;
+  try { ok = fs.existsSync(key); } catch { ok = false; }
+  if (FILE_EXISTS_CACHE.size >= FILE_EXISTS_CACHE_MAX) FILE_EXISTS_CACHE.clear();
+  FILE_EXISTS_CACHE.set(key, ok);
+  return ok;
+}
+
+/**
+ * T35 · `file-exists` 适用条件的**机械核验**（负迁移机械消除）。
+ *
+ * 判据（**方向感知**，与 `gates.expectedExistenceOf` 同一口径 —— T158/T159 的 file `expect`）：
+ *  · `expect === 'missing'`（ENOENT 派生的 fact：证据是"该路径不存在"）⇒ 路径**出现**才失效；
+ *  · `expect === 'exists'`（普通文件 fact）⇒ 文件**消失**才失效；
+ *  · 旧记录没有 `validity.expect` 时按 gates 的旧记录规则判：`validity.value` 等于该 precondition 的
+ *    `value` ⇒ `missing`（precondition 就是 missing 标记），否则 `exists`。
+ * 任何一条失效 ⇒ 这条记忆的适用条件已不成立 ⇒ **不注入**（`false`）。
+ *
+ * 边界（宁缺勿编的对称面：**不许误杀**）：
+ *  · 只认 `file-exists`；`scope` / `cmd` / `tool` / `step-range` **一概不动**（作用域归 A5，命令/工具由各自的闸管）；
+ *  · `value` 取不到（空/非字符串）⇒ **无法核验 ⇒ 放行**（不拿"缺字段"当失效理由）；
+ *  · 相对路径按 `options.preconditionBaseDir`（默认 `process.cwd()`）解析，绝对路径原样；
+ *  · 结果按绝对路径缓存（热路径每 claim 一次 `existsSync`，同文件只查一次）。
+ *
+ * @param {object} claim
+ * @param {object} [options] `{preconditionBaseDir?}`
+ * @returns {boolean} `true` = 适用条件成立（或无法核验）；`false` = 有 file-exists 指向的文件已不存在
+ */
+export function fileExistsPreconditionOk(claim, options = {}) {
+  const pre = Array.isArray(claim?.preconditions) ? claim.preconditions : [];
+  if (!pre.length) return true;
+  const base = typeof options?.preconditionBaseDir === 'string' && options.preconditionBaseDir
+    ? options.preconditionBaseDir
+    : process.cwd();
+  // 方向（T158）：`validity.expect` 显式优先；旧记录按 gates 的规则推断（见上）。
+  const expectRaw = typeof claim?.validity?.expect === 'string' ? claim.validity.expect.trim().toLowerCase() : '';
+  const validityValue = String(claim?.validity?.value ?? '');
+  for (const item of pre) {
+    if (!item || typeof item !== 'object' || item.check !== 'file-exists') continue;
+    const value = typeof item.value === 'string' ? item.value.trim() : '';
+    if (!value) continue; // 无法核验 ⇒ 放行
+    const abs = path.isAbsolute(value) ? value : path.resolve(base, value);
+    const expect = expectRaw === 'missing' || expectRaw === 'exists'
+      ? expectRaw
+      : (validityValue && validityValue === value ? 'missing' : 'exists');
+    const exists = fileExistsCached(abs);
+    // expect=missing ⇒ 路径出现就失效；expect=exists ⇒ 文件消失就失效
+    if (expect === 'missing' ? exists : !exists) return false;
+  }
+  return true;
+}
+
 function entryFromClaim(hit, claim, options = {}) {
   // T252（2026-11-05）：`invalidated` 的 claim 一律不渲染。
   // walk 的候选集早已剔除它（`dropped.invalidated`），但 hit 自带 claim 对象、
   // 或 hit 直接点名 claimId 的**旁路**会绕过那道过滤 —— 这里在渲染入口再堵一次。
   // stale / disputed **不在此列**：它们仍进卡并带各自 marker（有信息量）。
   if (claim && claim.state === 'invalidated') return null;
+  // T35：`file-exists` 适用条件失效 ⇒ **不注入**（文件都没了，这条记忆就是错的；宁可不给，
+  // 也不降级成指针行——指针行仍在说"这里有信息量"）。
+  if (claim && !fileExistsPreconditionOk(claim, options)) return null;
   // T298（知识库 64）：stale / `validUntil` 过期 **不占位**；preconditions 重跑通过 ⇒ 可复活。
   if (claim) {
     const revived = typeof options.preconditionOk === 'function' ? options.preconditionOk(claim) === true : false;
@@ -1012,6 +1079,8 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
   recoveryOnCard = true,
   recoveryStoreRoot = null,
   recoveryBaseDir = null,
+  // T35：`file-exists` 相对路径的解析根（默认 process.cwd()；测试用临时目录）
+  preconditionBaseDir = null,
   // 知识库 90：**冷却**（主人纠正："不被调用就冷却，等于没写"）。
   // **默认关**（`null` ⇒ 不过滤）：因为"冷却"依赖"注入记录"，
   // 而当前宿主只有 CLI 进程、没有真实流量，注入记录不可靠 ⇒ 默认关，不误杀。
@@ -1053,7 +1122,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       continue;
     }
     const entry = claim
-      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryStoreRoot, recoveryBaseDir,
+      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryStoreRoot, recoveryBaseDir, preconditionBaseDir,
         // 知识库 84：把**信号原文**也传下去 —— 与信号**方向相反**的 claim 标 `[disputed]`（不以"建议"出现）。
         // 取不到原文 ⇒ 空串 ⇒ `hasAnySignalHandle` 为 false ⇒ **不拒绝、不改标记**（保守，向后兼容）。
         signalText: signal?.text ?? signal?.quote ?? (Array.isArray(signal?.terms) ? signal.terms.join(' ') : '') })
@@ -1373,6 +1442,8 @@ export function buildMemoryCard({
   pointerTier = POINTER_TIER_DEFAULT,
   // T28：恢复事实上卡开关（默认开）。关掉 ⇒ 卡片与本次改动前逐字节一致（A/B 对照 / 紧急回退）。
   recoveryOnCard = true,
+  // T35：`file-exists` 相对路径解析根（默认 process.cwd()；测试/离线脚本可传）
+  preconditionBaseDir = null,
 } = {}) {
   const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
   const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
@@ -1427,7 +1498,7 @@ export function buildMemoryCard({
   }
 
   const recoveryBaseDir = store && typeof store.root === 'string' ? path.dirname(path.resolve(store.root)) : null;
-  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryStoreRoot: store && typeof store.root === 'string' ? store.root : null, recoveryBaseDir });
+  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryStoreRoot: store && typeof store.root === 'string' ? store.root : null, recoveryBaseDir, preconditionBaseDir });
   // T162a：认「合并节点」。合流（consolidate）会把多条近似 claim 压成一个带 `merge.members` 的节点；
   // 消费侧不认它，合并节点与它的成员就会在同一张卡里重复出现。规则见 collapseMergeNodes 的注释。
   const { entries, stats: collapseStats } = collapseMergeNodes({

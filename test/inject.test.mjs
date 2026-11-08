@@ -2513,3 +2513,78 @@ test('T34 ⑤: exact 档文案与 same-file 档文案不受影响（分档不改
     assert.match(edit, / · 恢复：后于 2026-10-20 同一文件写入成功（seq 8）$/, 'same-file 文案不变');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// T35 · `file-exists` 适用条件失效 ⇒ 不注入（负迁移机械消除）
+// ---------------------------------------------------------------------------
+const t35Claim = (store, over = {}) => {
+  const base = JSON.parse(readFileSync(path.join(store.root, 'claims', 'c-0000aa01.json'), 'utf8'));
+  return { ...base, ...over };
+};
+const t35Card = (store, claim, extra = {}) => buildMemoryCard({
+  walkResult: walkOf([{ episode: 'ep-aaaaaaa1', nodeId: null, link: null, why: [], weight: 1, occurredAt: T28(12), kind: 'failure', seq: 2, depth: 1, claimId: claim.id, claim }]),
+  store, scope: SCOPE, now: T28(12), pointerTier: false, ...extra,
+});
+
+test('T35 ①: 文件存在 ⇒ 卡行与本改动前逐字节一致（tombstone）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    writeFileSync(path.join(root, 'exists.txt'), 'x');
+    const withPre = t35Claim(store, { preconditions: [{ check: 'file-exists', value: path.join(root, 'exists.txt'), why: 'demo' }] });
+    const without = t35Claim(store);
+    assert.equal(t35Card(store, withPre).section, t35Card(store, without).section, '文件存在 ⇒ 行为不变');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T35 ②: 文件不存在 ⇒ 该 claim 不注入（文件存在时才渲染）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    writeFileSync(path.join(root, 'exists.txt'), 'x');
+    const missing = t35Claim(store, { preconditions: [{ check: 'file-exists', value: path.join(root, 'no-such-file.txt'), why: 'demo' }] });
+    assert.equal(t35Card(store, missing).section, null, '失效 ⇒ 整行不出现（不是降级成指针）');
+    const present = t35Claim(store, { preconditions: [{ check: 'file-exists', value: path.join(root, 'exists.txt'), why: 'demo' }] });
+    assert.ok(String(t35Card(store, present).section ?? '').includes('Error: boom'), '文件存在 ⇒ 照常渲染');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T35 ③: 只认 file-exists —— scope / 其它类 precondition 不动（照常注入）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    const scopePre = t35Claim(store, { preconditions: [{ check: 'scope', value: 'w:other', why: 'demo' }] });
+    assert.ok(String(t35Card(store, scopePre).section ?? '').includes('Error: boom'), 'scope 类不由本刀处理');
+    const cmdPre = t35Claim(store, { preconditions: [{ check: 'cmd', value: 'node --version' }] });
+    assert.ok(String(t35Card(store, cmdPre).section ?? '').includes('Error: boom'), 'cmd 类不由本刀处理');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T35 ④: 无法核验（value 缺失/空）⇒ 放行（不拿缺字段当失效理由）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    for (const pre of [[{ check: 'file-exists' }], [{ check: 'file-exists', value: '' }], [{ check: 'file-exists', value: '   ' }]]) {
+      const c = t35Claim(store, { preconditions: pre });
+      assert.ok(String(t35Card(store, c).section ?? '').includes('Error: boom'), '无法核验 ⇒ 放行');
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T35 ⑤: 方向感知 —— expect=missing（ENOENT 派生）⇒ 路径出现才失效（真实语料全是这一档）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    writeFileSync(path.join(root, 'appeared.txt'), 'x');
+    const missingExpect = (value) => t35Claim(store, {
+      validity: { type: 'file', value, expect: 'missing' },
+      preconditions: [{ check: 'file-exists', value, why: '该条记录的是证据时刻「此路径不存在」' }],
+    });
+    // 路径还在（不存在）⇒ 记录仍成立 ⇒ 照常渲染
+    assert.ok(String(t35Card(store, missingExpect(path.join(root, 'still-absent.txt'))).section ?? '').includes('Error: boom'), '路径仍不存在 ⇒ 不误杀');
+    // 路径出现了 ⇒ 记录失效 ⇒ 不注入
+    assert.equal(t35Card(store, missingExpect(path.join(root, 'appeared.txt'))).section, null, '路径出现 ⇒ 不注入');
+
+    // 旧记录：没有 validity.expect，但 validity.value 与 precondition.value 相同 ⇒ 按 missing 判
+    const legacy = t35Claim(store, {
+      validity: { type: 'file', value: path.join(root, 'appeared.txt') },
+      preconditions: [{ check: 'file-exists', value: path.join(root, 'appeared.txt') }],
+    });
+    assert.equal(t35Card(store, legacy).section, null, '旧记录按 missing 判（gates 同一规则）');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
