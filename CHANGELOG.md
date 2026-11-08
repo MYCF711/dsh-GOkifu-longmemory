@@ -17,6 +17,34 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.91（2026-11-09）
+
+### T28b · 重启验证 ⑤ 的**取样**错了：写死信号 ⇒ 永远 NO-SAMPLE
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `scripts/post-restart-verify.mjs` 的取样与证据。
+
+**现象**：⑤「T28/T31 卡上出现 ` · 恢复` 尾注」长期 **NO-SAMPLE**（本轮之前每次跑都是）。
+NO-SAMPLE 本身不是错，但它**永远**是 NO-SAMPLE 就不是样本问题了 —— 是取样写死了。
+
+**根因**：⑤ 用固定信号 `推进任务表` 调 `inject --shadow`。那条信号命中的 claim 恰好都不带恢复事实，
+而恢复事实的真库覆盖率只有 7.05%（T34）⇒ 固定取样几乎必然落空。
+
+**修法**：`pickRecoverySignal()` —— 从 `recovery-index.json` 的 entries 里，挑一条**同作用域、仍未失效、
+真有恢复事实**的 claim，用它的正文当信号。挑不到才退回固定信号，并在证据里写明
+`取样=<claimId>（tier …）` / `signal="…"` —— 否则 NO-SAMPLE 时分不清"库里没有"和"这条信号没命中"。
+
+**验收**：
+```
+node scripts/post-restart-verify.mjs
+  改前 5/7（FAIL=1 · NO-SAMPLE=1）→ 改后 **6/7**（FAIL=1 · NO-SAMPLE=0）
+  ⑤ PASS：命中尾注：… AssertionError: scanPrivacy 头部没找到 … · 恢复（同工具族）：后于 2026-11-06 …
+          · signal="AssertionError: scanPrivacy 头部没找到"
+```
+`test/post-restart-verify.test.mjs` T28b ①②（跨域/已失效的 claim 不许挑；没有索引不编造）；
+全量 1228 条 / 1222 pass / 0 fail / 6 skip；`check.mjs` PASS。
+
+**边界**：剩下那条 FAIL 是**真红**（T49/T50 的提交晚于宿主首心跳），不是判据问题。
+
 ## 0.8.90（2026-11-09）
 
 ### T49 真库回放：线上那 144 次「同卡重投」新的去重闸会拦下几次

@@ -7,12 +7,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+import { scopeKeyFromPath } from '../src/rooms/inject.mjs';
+import { createStore } from '../src/rooms/persist.mjs';
 
 import {
   compareVersions,
   parseInstanceStatus,
   judgeNewCode,
   lastRuntimeCommitAt,
+  pickRecoverySignal,
   judgeAbstainReasons,
   judgeSignalPreview,
   judgeDuplicateInjections,
@@ -105,6 +110,67 @@ test('T50 ②: lastRuntimeCommitAt 只看 src/ 与 packages/（docs-only 提交�
     assert.equal(lastRuntimeCommitAt({ repo: dir }), Date.parse('2026-03-03T00:00:00Z'));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// T28b（2026-11-09）：⑤ 的**取样**错了 —— 写死信号"推进任务表"命中不到任何带恢复事实的 claim
+// ⇒ 这条闸永远 NO-SAMPLE（等于永远不判）。判据本身没错，改成"挑一条真带恢复事实、且在本作用域里的 claim"。
+test('T28b ①: judgeRecoveryTail 的证据里必须带"用的什么信号"', () => {
+  const pass = judgeRecoveryTail('x · 恢复（同工具族）：后于 2026-11-06 …', { signal: 'sig-A' });
+  assert.equal(pass.status, P);
+  assert.match(pass.evidence, /signal="sig-A"/);
+  const none = judgeRecoveryTail('卡上没有尾注', { signal: 'sig-B', note: '取样=c-1（tier same-tool）' });
+  assert.equal(none.status, N);
+  assert.match(none.evidence, /取样=c-1/, '要说清是"库里没有"还是"这条信号没命中"');
+  assert.match(none.evidence, /signal="sig-B"/);
+});
+
+test('T28b ②: pickRecoverySignal 只挑同域、仍有效、且真有恢复事实的 claim', () => {
+  const storeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 't28b-store-'));
+  const repo = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+  const scope = scopeKeyFromPath(repo);
+  try {
+    const store = createStore({ root: storeRoot, now: Date.UTC(2026, 10, 9) });
+    store.ensureDirs();
+    const claim = (id, over = {}) => ({
+      id,
+      kind: 'antipattern',
+      text: `失败原文 ${id}`,
+      scopeKey: scope,
+      threadIds: [],
+      state: 'observed',
+      support: [{ episode: 'ep-x', seq: 1, quote: 'q' }],
+      counter: [],
+      validity: { type: 'none', value: null },
+      preconditions: [],
+      occurredAt: Date.UTC(2026, 9, 1),
+      recordedAt: Date.UTC(2026, 9, 1),
+      counters: { support: 1, counter: 0, injections: 0, lastInjectedAt: null },
+      supersedes: null,
+      ...over,
+    });
+    store.putMany('claims', [
+      claim('c-badscope', { scopeKey: 'w:/elsewhere' }),
+      claim('c-invalid', { state: 'invalidated' }),
+      claim('c-good'),
+    ]);
+    fs.writeFileSync(path.join(storeRoot, 'recovery-index.json'), JSON.stringify({
+      version: 1,
+      counts: { entries: 2, supports: 2 },
+      entries: { 'c-badscope': { kind: 'same-tool' }, 'c-invalid': { kind: 'same-tool' }, 'c-good': { kind: 'same-file' } },
+      supports: {},
+    }));
+    const picked = pickRecoverySignal({ store: storeRoot, repo });
+    assert.ok(picked, '应当挑到一条');
+    assert.equal(picked.claimId, 'c-good', '跨域 / 已失效的都不许挑');
+    assert.equal(picked.tier, 'same-file');
+    assert.equal(picked.signal, '失败原文 c-good');
+
+    // 没有恢复索引 ⇒ 不编造
+    fs.rmSync(path.join(storeRoot, 'recovery-index.json'));
+    assert.equal(pickRecoverySignal({ store: storeRoot, repo }), null);
+  } finally {
+    fs.rmSync(storeRoot, { recursive: true, force: true });
   }
 });
 
