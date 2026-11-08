@@ -1,3 +1,5 @@
+// T45：精确锚定（同一 repo / 同一错误签名 / 同一任务链）用于**排序**；abstain.mjs 零依赖，不成环。
+
 // R11 walk —— 顺藤摸瓜（只读 store；深度 ≤2；每跳必须带 why；条数/预算截断）
 //
 // ── 契约（docs/数据契约.md §7.1/§7.2、方案.md §4.4、AGENTS.md §11 R11）──
@@ -490,6 +492,11 @@ export function compareHits(a, b) {
   // 起因（evidence/T237-self-attribution.md）：self/root 未命中的 28 条 E 类，全是 top-5 被"同局通用错误"占满，
   // 任务原话最重合的 claim（tokOverlap=5）被 depth/support 的档位压在外面。
   // 只改**键的顺序**：depth / repeat / weight / occurredAt 的定义与候选集一字不改，全部降为 tie-break。
+  // T45：**精确身份锚定**是最高优先的排序键 —— 与当前任务"同一件事"的候选排前面
+  // （同 repo / 同错误签名 / 同任务链）。关掉时 `_anchorRank` 全部缺省为 1 ⇒ 排序与改动前逐字节一致。
+  const anchorA = finiteNumber(a?._anchorRank) ? a._anchorRank : 1;
+  const anchorB = finiteNumber(b?._anchorRank) ? b._anchorRank : 1;
+  if (anchorA !== anchorB) return anchorA - anchorB;
   const overlapA = finiteNumber(a?._tokOverlap) ? a._tokOverlap : 0;
   const overlapB = finiteNumber(b?._tokOverlap) ? b._tokOverlap : 0;
   if (overlapA !== overlapB) return overlapB - overlapA;
@@ -1232,6 +1239,18 @@ export function walkFromSignals(opts = {}) {
   };
   for (const hit of episodeHits.values()) hit._tokOverlap = overlapOf(hit.text);
   for (const hit of claimHits.values()) hit._tokOverlap = overlapOf(hit.text);
+  // T45：精确锚定排序（**不 import**：R11 是叶子房间，源码零依赖这条 tombstone 不能破）——
+  // 锚定判据由**调用方**以纯函数 `opts.anchorRankOf(claimText, signalText) => boolean` 传入；
+  // 不传 ⇒ 不计算 `_anchorRank` ⇒ 排序与改动前逐字节一致（`anchorRanking:false` 同效，兼容两种写法）。
+  const anchorRankOf = typeof opts.anchorRankOf === 'function' && opts.anchorRanking !== false ? opts.anchorRankOf : null;
+  if (anchorRankOf) {
+    const signalText = typeof opts.signalText === 'string' && opts.signalText
+      ? opts.signalText
+      : [...(Array.isArray(sig?.terms) ? sig.terms : []), ...(Array.isArray(sig?.entities) ? sig.entities.map((e) => e?.key ?? '') : [])].join(' ');
+    for (const hit of [...episodeHits.values(), ...claimHits.values()]) {
+      hit._anchorRank = hit.text && anchorRankOf(String(hit.text), signalText) ? 0 : 1;
+    }
+  }
 
   // ---- 排序 + 前缀式截断（limit / budget）----
   const candidates = [...episodeHits.values(), ...claimHits.values()].sort(compareHits);
