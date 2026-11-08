@@ -2651,3 +2651,44 @@ test('T37 ⑤: 洞见层不制造恢复事实（没有恢复事实 ⇒ 连坑类
     assert.ok(!line.includes('（class:'), '没有恢复事实时坑类不单独出现');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// T48 · A2b 三视图（V1 现状 / V2 claim+来源 / V3 同源包）—— 呈现层可切换、默认逐字节不变
+// ---------------------------------------------------------------------------
+const t48Card = (store, view) => {
+  const long1 = 'Error: boom ' + 'x'.repeat(180);
+  const long2 = 'Error: bang ' + 'y'.repeat(180);
+  const hits = walkOf([
+    { episode: 'ep-aaaaaaa1', nodeId: null, link: null, why: [], weight: 1, occurredAt: T28(12), kind: 'failure', seq: 2, depth: 1, claimId: 'c-t48-a', claim: { id: 'c-t48-a', kind: 'antipattern', text: long1, state: 'observed', support: [{ episode: 'ep-aaaaaaa1', seq: 2, quote: long1, occurredAt: T28(12) }], occurredAt: T28(12) } },
+    { episode: 'ep-aaaaaaa1', nodeId: null, link: null, why: [], weight: 1, occurredAt: T28(12), kind: 'failure', seq: 3, depth: 1, claimId: 'c-t48-b', claim: { id: 'c-t48-b', kind: 'antipattern', text: long2, state: 'observed', support: [{ episode: 'ep-aaaaaaa1', seq: 3, quote: long2, occurredAt: T28(12) }], occurredAt: T28(12) } },
+  ]);
+  return buildMemoryCard({ walkResult: hits, store, scope: SCOPE, now: T28(12), limit: 5, budgetTokens: 2000, pointerTier: false, ...(view ? { cardView: view } : {}) });
+};
+
+test('T48 ①: 默认视图逐字节不变（V1 = 不传 cardView）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    assert.equal(t48Card(store).section, t48Card(store, 'claim').section, '默认 ⇒ 与不传时逐字节一致');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T48 ②: V2「claim + 来源块」在行后附**未裁剪**原文（默认视图不含）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    const v1 = String(t48Card(store).section ?? '');
+    const v2 = String(t48Card(store, 'claim+source').section ?? '');
+    assert.ok(!v1.includes(' · 原文：'), 'V1 不附来源块');
+    assert.ok(v2.includes(' · 原文：'), 'V2 附来源块');
+    assert.ok(v2.length > v1.length, 'V2 更厚（token 成本更高）');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T48 ③: V3「同源 claim 包」把同一 episode 折成一块（头行一次 episode+日期，组内只留 seq）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    const v3 = String(t48Card(store, 'claim-pack').section ?? '');
+    assert.match(v3, /- \[同源\] ep-aaaaaaa1 · 2026-10-20 · 2 条/, '同源头行');
+    assert.equal((v3.match(/\(ep-aaaaaaa1,/g) ?? []).length, 0, '组内不再重复 episode 坐标');
+    assert.match(v3, /  - \[antipattern\] .*· seq 2/, '组内保留 seq');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

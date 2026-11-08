@@ -574,6 +574,8 @@ function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text
   const date = formatCardDate(occurredAt);
   return {
     rawText,
+    // T48：**未裁剪**的原文（V2「claim + 来源块」用；V1 不读它 ⇒ 逐字节不变）。
+    fullQuote: singleLine(text),
     kind,
     marker,
     // T333：cost 只作**同分次序**（tokOverlap/rank 等主键都相同才比），不参与硬过滤。
@@ -1403,7 +1405,7 @@ export function displayPath(p) {
   return String(p ?? '').replace(/\\/g, '/');
 }
 
-function renderEntryLine(entry, clip) {
+function renderEntryLine(entry, clip, view = 'claim') {
   const body = clipLine(entry.rawText, clip);
   const flag = entry.crossScope ? ' [跨项目]' : '';
   // T345：F3 尾注放在**坐标之后**（正文仍是逐字原文，A6 文字层只核正文）。
@@ -1411,11 +1413,43 @@ function renderEntryLine(entry, clip) {
   const f3 = entry.f3?.when ? ` · ${entry.f3.when}${entry.f3.rule ? ` [${entry.f3.rule}]` : ''}` : '';
   // T28：恢复事实尾注（只写事实，不写「你该这么做」）。无恢复证据 ⇒ 空串 ⇒ 该行逐字节不变。
   const recovery = recoverySuffix(entry.recovery, entry.recoveryClass);
-  return `- [${entry.marker}] ${body}${flag} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})${f3}${recovery}`;
+  // T48 · V2「claim + 来源块」：附上**未裁剪**的原文（比正文长才附；带 episode+seq 的坐标本来就在行内）。
+  // V1（默认）⇒ 空串 ⇒ 该行逐字节不变（tombstone）。
+  const sourceBlock = view === 'claim+source' && entry.fullQuote && entry.fullQuote.length > body.length
+    ? ` · 原文：${clipLine(entry.fullQuote, 240)}`
+    : '';
+  return `- [${entry.marker}] ${body}${flag} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})${f3}${recovery}${sourceBlock}`;
 }
 
-function renderSection({ entries, beyond, droppedProvenance, limit, budgetTokens, clip, withMarkers = true, droppedCrossScope = 0, droppedUnknownScope = 0, scopeKey = null }) {
-  const body = entries.map((e) => renderEntryLine(e, clip));
+function renderSection({ entries, beyond, droppedProvenance, limit, budgetTokens, clip, withMarkers = true, droppedCrossScope = 0, droppedUnknownScope = 0, scopeKey = null, view = 'claim' }) {
+  // T48 · V3「同源 claim 包」：把**同一 episode 的连续条目**折成一块（头行给 episode + 条数），
+  // 减少"同局多 claim 重复占位"（MemCompile 实测同源吃 27% 预算）。V1 走原路径（逐字节不变）。
+  const body = view === 'claim-pack'
+    ? (() => {
+      const out = [];
+      for (let i = 0; i < entries.length;) {
+        const ep = entries[i].source.episode;
+        let j = i + 1;
+        while (j < entries.length && entries[j].source.episode === ep) j += 1;
+        const group = entries.slice(i, j);
+        if (group.length >= 2) {
+          // 头行给一次 episode + 日期 + 条数；组内行只留 `seq`（真正省掉重复占位）。
+          out.push(`- [同源] ${ep} · ${group[0].date} · ${group.length} 条`);
+          for (const e of group) {
+            const bodyLine = clipLine(e.rawText, clip);
+            const flag = e.crossScope ? ' [跨项目]' : '';
+            const f3 = e.f3?.when ? ` · ${e.f3.when}${e.f3.rule ? ` [${e.f3.rule}]` : ''}` : '';
+            const recovery = recoverySuffix(e.recovery, e.recoveryClass);
+            out.push(`  - [${e.marker}] ${bodyLine}${flag} · seq ${e.source.seq}${f3}${recovery}`);
+          }
+        } else {
+          out.push(renderEntryLine(group[0], clip, 'claim'));
+        }
+        i = j;
+      }
+      return out;
+    })()
+    : entries.map((e) => renderEntryLine(e, clip, view));
   const total = beyond + droppedProvenance + droppedCrossScope + droppedUnknownScope;
   if (total > 0) {
     const parts = [];
@@ -1483,6 +1517,9 @@ export function buildMemoryCard({
   recoveryOnCard = true,
   // T35：`file-exists` 相对路径解析根（默认 process.cwd()；测试/离线脚本可传）
   preconditionBaseDir = null,
+  // T48：读侧视图（`claim` 现状 / `claim+source` 附未裁剪原文 / `claim-pack` 同源折叠）。
+  // 默认 `claim` ⇒ 卡片与本改动前**逐字节一致**（tombstone）。
+  cardView = 'claim',
 } = {}) {
   const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
   const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
@@ -1570,6 +1607,7 @@ export function buildMemoryCard({
     for (const clip of CLIP_STEPS) {
       for (const withMarkers of [true, false]) {
         const candidate = renderSection({
+          view: cardView,
           entries: sel,
           beyond: rest,
           droppedProvenance,
