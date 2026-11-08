@@ -39,6 +39,10 @@ import {
   sameMemoryContent,
   PersistError,
   AUTHORITATIVE_KINDS,
+  // T30：恢复索引 sidecar（归档层预先算好恢复事实，读时直接查）
+  readRecoveryIndex,
+  mergeRecoveryIndex,
+  writeRecoveryIndex,
 } from '../src/rooms/persist.mjs';
 import { listSessionLogs, listGraphs, readSession } from '../src/rooms/cli.mjs';
 
@@ -54,6 +58,7 @@ export const USAGE = `棋院 archive（R15 入档管线）
   --json              输出 JSON 摘要
   --include-subagents 子代理会话独立成谱（默认归并进父局，标 folded-into）
   --session <prefix>  只入档 sessionId 以该前缀开头的会话（调试用）
+  --recovery-index    只补建/刷新恢复索引（T30；不跑入档，用于存量回填）
   -h, --help          本帮助
 
 示例：
@@ -63,6 +68,8 @@ export const USAGE = `棋院 archive（R15 入档管线）
 
 // 单个 (棋谱, 主题) 入档时保留的证据条数上限（再多也是重复证据，白占空间）
 export const MAX_STORED_OCCURRENCES = 6;
+/** T30：claim.support.seq（边的 evidence.start）与失败事件 seq 的最大允许距离；超过 ⇒ 不挂索引（防串用）。 */
+export const RECOVERY_SUPPORT_MAX_DISTANCE = 100;
 
 export function parseArgs(argv = []) {
   const args = [...argv];
@@ -147,6 +154,72 @@ function toolNames(signals) {
 }
 
 /** 一处 dry-run 预估：读现有条目（只读）→ 新增/变更/未变条数。 */
+/**
+ * T30：失败原文 → 匹配前缀（与 `extract.recoveryMatchPrefix` 同口径；用于把 claim.support.quote
+ * 与归档层算出的恢复事实对齐）。
+ */
+function recoveryPrefixOf(quote) {
+  const s = String(quote ?? '').replace(/…$/, '').replace(/\s+/g, ' ').trim();
+  if (s.length < 8) return null;
+  return s.slice(0, 60);
+}
+
+/** 两个前缀是否指同一段失败原文（互相包含；两边都截到 60 字，短的包含于长的即可）。 */
+function recoveryPrefixCompatible(a, b) {
+  if (!a || !b) return false;
+  return a.startsWith(b) || b.startsWith(a);
+}
+
+/**
+ * T30：把「claim 的 support 引文」对到「归档层算出的恢复事实」。
+ * 同一个 claim 只取**第一条命中**（按 support 顺序）——卡行只会渲染一个出处，索引也只挂一条。
+ * @param {object[]} claims 权威 claim 列表
+ * @param {Map<string, object[]>} factsByEpisode  episodeId → `collectRecoveryFacts` 产出
+ * @returns {Array<{claimId:string, episode:string, kind:string, seq:number, at:number, failureSeq:number, prefix:string}>}
+ */
+export function recoveryIndexFactsForClaims(claims, factsByEpisode) {
+  const out = [];
+  for (const claim of Array.isArray(claims) ? claims : []) {
+    if (!claim || claim.kind !== 'antipattern' || typeof claim.id !== 'string') continue;
+    const supports = Array.isArray(claim.support) ? claim.support : [];
+    // 每个 support 各算一条（卡按信号挑 support 渲染；只记第一条会让另外几条 support 读不到索引）
+    for (const sup of supports) {
+      const episode = typeof sup?.episode === 'string' ? sup.episode : '';
+      const facts = factsByEpisode instanceof Map ? factsByEpisode.get(episode) : null;
+      if (!facts || !facts.length) continue;
+      const quote = recoveryPrefixOf(sup?.quote ?? claim.text);
+      if (!quote) continue;
+      // 同一段错误在一局里可能出现多次 ⇒ 取**失败事件离 support.seq 最近**的那条
+      // （support.seq = 该边的 evidence.start，失败结果通常就在它后 0–3 条；用 100 条做硬上限防串用）。
+      const supportSeq = Number.isFinite(Number(sup?.seq)) ? Number(sup.seq) : null;
+      const candidates = facts.filter((f) => recoveryPrefixCompatible(f.prefix, quote));
+      if (!candidates.length) continue;
+      let hit = null;
+      if (supportSeq === null) {
+        hit = candidates[0];
+      } else {
+        const near = candidates
+          .map((f) => ({ f, d: Math.abs(Number(f.failureSeq) - supportSeq) }))
+          .filter((x) => Number.isFinite(x.d) && x.d <= RECOVERY_SUPPORT_MAX_DISTANCE)
+          .sort((a, b) => a.d - b.d)[0];
+        hit = near ? near.f : null;
+      }
+      if (!hit) continue;
+      out.push({
+        claimId: claim.id,
+        episode,
+        supportSeq: Number.isFinite(Number(sup?.seq)) ? Number(sup.seq) : null,
+        kind: hit.kind,
+        seq: hit.seq,
+        at: hit.at,
+        failureSeq: hit.failureSeq,
+        prefix: hit.prefix ?? quote,
+      });
+    }
+  }
+  return out;
+}
+
 function plannedDiff(store, kind, records) {
   const existing = new Map();
   for (const entry of store.list(kind)) if (entry.record) existing.set(entry.id, entry.record);
@@ -229,6 +302,84 @@ function refreshSourceStatus(store, dataRoot, writtenIds) {
  *          includeSubagents?:boolean, sessionPrefix?:string|null, limits?:object}} opts
  * @returns {Promise<object>} summary（含真实计数、耗时、verify 结果、skipped 房间）
  */
+/**
+ * T30：为**存量 claim** 补建恢复索引（一次性/按需；归档增量已覆盖新局）。
+ *
+ * 只读上游会话日志（仅 claim 引用到的局），写 `<storeRoot>/recovery-index.json`。
+ * 幂等：同一 store+日志 ⇒ 同一索引字节（`stableText` 深排序、无时钟）；已有条目**只增不改**。
+ * @returns {{claims:number, episodes:number, logs:number, facts:number, entries:number, added:number, kept:number, conflicts:number, ...}}
+ */
+export async function buildRecoveryIndex(opts = {}) {
+  const dataRoot = path.resolve(opts.dataRoot ?? process.env.DSH_HOME ?? '');
+  if (!dataRoot) throw new PersistError('recovery-index: 需要 --root 或 $DSH_HOME', 'archive/missing-root');
+  const storeRoot = path.resolve(opts.storeRoot ?? path.join(dataRoot, 'memory-context'));
+  const dryRun = Boolean(opts.dryRun);
+  const rooms = opts.rooms ?? (await loadRooms());
+  const store = createStore({ root: storeRoot });
+  const claims = store
+    .list('claims')
+    .map((x) => x.record)
+    .filter((r) => r && r.kind === 'antipattern' && Array.isArray(r.support) && r.support.length);
+  const episodes = new Map(store.list('episodes').map((x) => [x.record?.id, x.record]).filter(([id]) => id));
+  const factsByEpisode = new Map();
+  let logs = 0;
+  let skippedLogs = 0;
+  let bytes = 0;
+  const t0 = Date.now();
+  for (const claim of claims) {
+    for (const sup of claim.support) {
+      const epId = typeof sup?.episode === 'string' ? sup.episode : '';
+      if (!epId || factsByEpisode.has(epId)) continue;
+      const ep = episodes.get(epId);
+      const rel = ep?.closure?.logPath ?? null;
+      if (!rel) { factsByEpisode.set(epId, []); continue; }
+      const abs = path.isAbsolute(rel) ? rel : path.join(dataRoot, rel);
+      let events = [];
+      try {
+        const read = await readSession(abs);
+        events = Array.isArray(read?.events) ? read.events : [];
+        logs += 1;
+        try { bytes += fs.statSync(abs).size; } catch { /* 已经读过了，stat 失败不影响 */ }
+      } catch {
+        skippedLogs += 1;
+        factsByEpisode.set(epId, []);
+        continue;
+      }
+      factsByEpisode.set(epId, rooms.extract?.collectRecoveryFacts ? rooms.extract.collectRecoveryFacts({ events, episode: epId }) : []);
+    }
+  }
+  const facts = recoveryIndexFactsForClaims(claims, factsByEpisode);
+  const prev = readRecoveryIndex(storeRoot);
+  const merged = mergeRecoveryIndex(prev, facts);
+  if (!dryRun) writeRecoveryIndex(storeRoot, merged.index);
+  return {
+    dryRun,
+    dataRoot,
+    storeRoot,
+    claims: claims.length,
+    episodes: factsByEpisode.size,
+    logs,
+    skippedLogs,
+    mb: Number((bytes / 1e6).toFixed(1)),
+    facts: facts.length,
+    entries: merged.index.counts.entries,
+    added: merged.added,
+    kept: merged.kept,
+    conflicts: merged.conflicts,
+    ms: Date.now() - t0,
+  };
+}
+
+/** 恢复索引摘要（人可读；`--json` 走 JSON）。 */
+export function formatRecoveryIndexSummary(summary) {
+  const lines = [];
+  lines.push('棋院恢复索引（T30 · 归档层预计算 · 只增不改）');
+  lines.push(`claim（antipattern）${summary.claims} 条 · 涉及局 ${summary.episodes} 个 · 读日志 ${summary.logs} 个（${summary.mb} MB，跳过 ${summary.skippedLogs}）`);
+  lines.push(`匹配到恢复事实 ${summary.facts} 条 · 索引条目 ${summary.entries}（新增 ${summary.added} / 已存在 ${summary.kept} / 冲突 ${summary.conflicts}）· 耗时 ${summary.ms} ms`);
+  lines.push(`写入：${summary.dryRun ? '（dry-run，未写）' : path.join(summary.storeRoot, 'recovery-index.json')}`);
+  return lines.join(String.fromCharCode(10));
+}
+
 export async function runArchive(opts = {}) {
   const t0 = Date.now();
   const now = Number.isFinite(opts.now) ? opts.now : Date.now();
@@ -361,6 +512,17 @@ export async function runArchive(opts = {}) {
       skipped.push('signals: R03 extract 缺失（signals 全 0）');
     }
 
+    // T30：恢复事实（同一主体后来成功）在**归档层**预计算；读时直接查索引，不用再解日志。
+    // 判据由 R03 `collectRecoveryFacts` 提供（与 T28 读时派生同一套机械判据）。
+    let recoveryFacts = [];
+    if (rooms.extract?.collectRecoveryFacts && events.length > 0) {
+      try {
+        recoveryFacts = rooms.extract.collectRecoveryFacts({ events, episode: episode.id });
+      } catch (err) {
+        warnings.push(`${pair.sessionId}: 恢复事实抽取失败（${String(err?.message ?? err)}）`);
+      }
+    }
+
     let topics = [];
     if (rooms.topic?.extractTopics) {
       const workspace = String(episode.scopeKey ?? '').replace(/^w:/, '');
@@ -399,7 +561,7 @@ export async function runArchive(opts = {}) {
       signals: { failures, successes, unsettled, constraints, tools },
       signalsSource: 'R03 extract',
     };
-    built.push({ record, signals, graph, sessionId: pair.sessionId, hadLog: Boolean(pair.logPath) });
+    built.push({ record, signals, graph, sessionId: pair.sessionId, hadLog: Boolean(pair.logPath), recoveryFacts });
   }
 
   // ---- 3. 子代理归并：depth>0 且父局在语料里 ⇒ folded-into:<父局 id> ----
@@ -530,6 +692,10 @@ export async function runArchive(opts = {}) {
     skipped.push(`adjudications: 回填失败（${String(err?.message ?? err)}）`);
   }
 
+  // ---- 4b. T30：恢复索引（归档层预计算；`claimId` 为键；只增不改、重放幂等） ----
+  const recoveryFactsByEpisode = new Map(built.map((b) => [b.record.id, b.recoveryFacts ?? []]));
+  const recoveryIndexFacts = recoveryIndexFactsForClaims(authoritative.claims, recoveryFactsByEpisode);
+
   // ---- 5. 派生（R04/R05/R07/R06 重算；与 rebuild 共用同一函数 ⇒ 产物一致） ----
   const derived = await deriveStore({ episodes, derive: opts.derive ?? null, at: now });
   for (const note of derived.skipped) skipped.push(note);
@@ -589,6 +755,7 @@ export async function runArchive(opts = {}) {
     }
     summary.plan = plan;
     summary.wouldWrite = Object.values(plan).reduce((n, p) => n + p.added + p.changed, 0);
+    summary.recoveryIndex = { computed: recoveryIndexFacts.length, dryRun: true };
     summary.elapsedMs = Date.now() - t0;
     return summary;
   }
@@ -644,6 +811,27 @@ export async function runArchive(opts = {}) {
   summary.verify = { ok: verify.ok, errors: verify.errors, warnings: verify.warnings.length, checked: verify.checked };
   summary.counts = verify.counts;
   summary.journal = store.readJournal().parsed;
+  // T30：恢复索引（sidecar；派生数据，不进 manifest checksums —— 重算不改变"记忆内容"）
+  try {
+    const prev = readRecoveryIndex(storeRoot);
+    // 没有新事实且原本没有索引 ⇒ 不创建空文件（夹具/无失败语料零副作用）
+    if (recoveryIndexFacts.length > 0 || prev) {
+      const merged = mergeRecoveryIndex(prev, recoveryIndexFacts);
+      writeRecoveryIndex(storeRoot, merged.index);
+      summary.recoveryIndex = {
+      computed: recoveryIndexFacts.length,
+        entries: merged.index.counts.entries,
+        added: merged.added,
+        kept: merged.kept,
+        conflicts: merged.conflicts,
+      };
+    } else {
+      summary.recoveryIndex = { computed: 0, entries: 0, added: 0, kept: 0, conflicts: 0, skipped: true };
+    }
+  } catch (err) {
+    skipped.push(`recovery-index: 写入失败（${String(err?.message ?? err)}）`);
+    summary.recoveryIndex = { computed: recoveryIndexFacts.length, error: String(err?.message ?? err) };
+  }
   summary.elapsedMs = Date.now() - t0;
   return summary;
 }
@@ -703,6 +891,16 @@ export async function runCli(argv = []) {
   const dataRoot = path.resolve(flags.root ?? process.env.DSH_HOME ?? '');
   if (!dataRoot) return { code: 2, stdout: '', stderr: `需要 --root <dataRoot> 或 $DSH_HOME\n\n${USAGE}` };
   try {
+    // T30：`--recovery-index` ⇒ 只补建/刷新恢复索引（不跑入档），用于存量 claim 的一次性回填。
+    if (flags['recovery-index']) {
+      const summary = await buildRecoveryIndex({
+        dataRoot,
+        storeRoot: flags.store ? path.resolve(flags.store) : path.join(dataRoot, 'memory-context'),
+        dryRun: Boolean(flags.dryRun),
+      });
+      const stdout = flags.json ? JSON.stringify(summary, null, 2) : formatRecoveryIndexSummary(summary);
+      return { code: 0, stdout, stderr: '' };
+    }
     const summary = await runArchive({
       dataRoot,
       storeRoot: flags.store ? path.resolve(flags.store) : path.join(dataRoot, 'memory-context'),
@@ -728,7 +926,7 @@ export async function main(argv = [], io = {}) {
   return res.code;
 }
 
-export default { runArchive, runCli, main, parseArgs, formatSummary };
+export default { runArchive, buildRecoveryIndex, runCli, main, parseArgs, formatSummary, formatRecoveryIndexSummary };
 
 const invokedDirectly = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 if (invokedDirectly) {

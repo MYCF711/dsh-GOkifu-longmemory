@@ -444,6 +444,32 @@ export function recoveryMatchPrefix(quote, { minLength = 8, maxLength = 60 } = {
 }
 
 /**
+ * T30：一局事件 → **所有**可落索引的恢复事实（归档层用；纯函数）。
+ * 每条 = `{episode, failureSeq, kind, seq, at, prefix}`；`prefix` 是失败原文的匹配前缀（读时用它对齐卡上的引文）。
+ * 同一段错误出现多次时，逐条按自己的 seq 就近匹配（`nearSeq`），不会互相串。
+ * @returns {Array<{episode:string|null, failureSeq:number, kind:string, seq:number, at:number, prefix:string}>}
+ */
+export function collectRecoveryFacts({ events = [], episode = null } = {}) {
+  const index = buildRecoveryIndex(events);
+  const out = [];
+  for (const failure of index.failures) {
+    const fact = findRecoveryFact(index, failure.line, { nearSeq: failure.seq });
+    if (!fact) continue;
+    const prefix = recoveryMatchPrefix(failure.line);
+    if (!prefix) continue;
+    out.push({
+      episode: typeof episode === 'string' && episode ? episode : null,
+      failureSeq: failure.seq,
+      kind: fact.kind,
+      seq: fact.seq,
+      at: fact.at,
+      prefix,
+    });
+  }
+  return out;
+}
+
+/**
  * 在索引里给一条失败原文找「后来同一主体成功」的事实。
  * @param {{runs:object[], failures:object[]}} index `buildRecoveryIndex` 的产出
  * @param {string} quote 失败原文（claim 的 support.quote / 卡行正文）

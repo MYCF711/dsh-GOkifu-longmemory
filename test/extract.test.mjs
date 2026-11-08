@@ -20,6 +20,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   extractSignals,
+  collectRecoveryFacts,
   extractConstraints,
   matchedConstraintWords,
   messageText,
@@ -493,4 +494,48 @@ test('T274 occurredAt：前后都没有 time ⇒ null（缺时间 = 假记忆，
   const r = extractSignals({ graph, events: [{ seq: 10, data: {} }] });
   assert.equal(r.failures[0].occurredAt, null);
   assert.equal(r.failures[0].timeSource, null);
+});
+
+// ---------------------------------------------------------------------------
+// T30 · 归档层恢复事实（`collectRecoveryFacts`）：把「同一主体后来成功」批量产出，
+// 供 `scripts/archive.mjs` 落 sidecar 索引。判据与 T28 读时派生同一套（`findRecoveryFact`）。
+// ---------------------------------------------------------------------------
+const t30Events = () => {
+  const ev = (seq, type, data) => ({ type, seq, time: 1_790_000_000_000 + seq * 1000, data });
+  // 多段文本在 `recoveryEventText` 里按行拼接 —— 不用源码里的转义换行
+  const msg = (a, b) => ({ content: [{ type: 'text', text: a }, ...(b ? [{ type: 'text', text: b }] : [])] });
+  return [
+    ev(1, 'tool/call', { callId: 'c1', name: 'bash', arguments: JSON.stringify({ command: 'node a.mjs' }) }),
+    ev(2, 'tool/result', { toolCallId: 'c1', message: msg('Error: boom', '[exit code: 1]') }),
+    ev(3, 'tool/call', { callId: 'c2', name: 'bash', arguments: JSON.stringify({ command: 'node a.mjs' }) }),
+    ev(4, 'tool/result', { toolCallId: 'c2', message: msg('ok', '[exit code: 0]') }),
+    ev(5, 'tool/result', { toolCallId: 'nope', message: msg('Error: never fixed') }),
+  ];
+};
+
+test('T30 ①: collectRecoveryFacts 为有恢复的失败产出事实（episode/failureSeq/kind/seq/at/prefix）', () => {
+  const facts = collectRecoveryFacts({ events: t30Events(), episode: 'ep-demo' });
+  assert.equal(facts.length, 1, '只有 seq 2 的那条失败有恢复');
+  const f = facts[0];
+  assert.equal(f.episode, 'ep-demo');
+  assert.equal(f.failureSeq, 2);
+  assert.equal(f.kind, 'same-command-exit-0');
+  assert.equal(f.seq, 4);
+  assert.ok(Number.isFinite(f.at), '必须带时间（无时不入）');
+  assert.ok(f.prefix.startsWith('Error: boom'), 'prefix 是失败原文，读时用它对齐卡上引文');
+});
+
+test('T30 ②: 没有恢复 ⇒ 空数组（不编）', () => {
+  const facts = collectRecoveryFacts({ events: [
+    { type: 'tool/result', seq: 1, time: 1, data: { content: [{ type: 'text', text: 'Error: alone' }] } },
+  ] });
+  assert.deepEqual(facts, []);
+});
+
+test('T30 ③: 纯函数（同输入两次 deepEqual；缺 episode 也能算）', () => {
+  const a = collectRecoveryFacts({ events: t30Events(), episode: 'ep-demo' });
+  const b = collectRecoveryFacts({ events: t30Events(), episode: 'ep-demo' });
+  assert.deepEqual(a, b);
+  const c = collectRecoveryFacts({ events: t30Events() });
+  assert.equal(c[0].episode, null, '不给 episode 就不编');
 });
