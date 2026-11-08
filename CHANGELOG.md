@@ -17,6 +17,15 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.85（2026-11-09）
+
+### T42 · 一键重启验证脚本（post-restart-verify.mjs）
+
+**版本说明**：新增脚本 + 测试 ⇒ patch。
+
+一条命令，七项检查各出 PASS/FAIL/NO-SAMPLE + 证据；退出码 0/1/2。
+判「在跑哪份代码」看宿主进程启动时间 vs 发版时点，不只看版本号。
+test 12/12；check PASS。
 ## 0.8.84（2026-11-09）
 
 ### T48 · A2b 三视图 A/B：**尺子测不到呈现**（A2b 认顶，四次全 0）
