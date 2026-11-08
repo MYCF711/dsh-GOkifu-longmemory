@@ -183,3 +183,29 @@ test('T23 判分：read 到源码里的错误串（exit 0）不算踩坑，必�
   const failEv = { type: 'tool/result', data: { output: 'Error: T23_PIT: T23_TOKEN is not set\n[exit code: 1]' } };
   assert.equal(syntheticHit({ task: { signature: 'Error: T23_PIT: T23_TOKEN is not set' }, events: [failEv] }), true);
 });
+
+// ---------------------------------------------------------------------------
+// T26 · 事实型卡（只写事实、无祈使句）
+// ---------------------------------------------------------------------------
+import { factualCardFor } from '../scripts/ablation-sandbox.mjs';
+
+test('T26 事实型卡：含失败事实与日期，但不含祈使/行动指令', () => {
+  for (const pit of SYNTHETIC_PITS) {
+    const c = factualCardFor(pit);
+    assert.ok(c.includes(pit.signature), '必须写当时报了什么错');
+    assert.ok(/2026-11-08/.test(c), '必须带 occurredAt 日期');
+    assert.ok(/ep-synthetic-/.test(c), '必须带来源局');
+    assert.ok(!/不要|应该|先跑|直接执行|请|务必|推荐/.test(c), `事实型卡不许出现祈使句：${c}`);
+  }
+});
+
+test('T26 事实型 vs 指令式：同一题集、同一题面，只换卡文字', () => {
+  const directive = syntheticTasks({ rounds: 2 });
+  for (const pit of SYNTHETIC_PITS) {
+    for (let r = 1; r <= 2; r += 1) {
+      const id = `T23-${pit.key}-r${r}`;
+      assert.equal(directive.tasks.find((t) => t.taskId === id).taskPrompt, pit.prompt);
+      assert.notEqual(directive.cards[id].text, factualCardFor(pit), '两种卡必须不同');
+    }
+  }
+});

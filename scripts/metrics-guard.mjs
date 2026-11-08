@@ -9,11 +9,15 @@
 //   约束条件 = A1 负迁移 / A5 越界 / A6 溯源 / A4 p50 —— 任一越界即红。
 //   下游参考 = **repeatFailureRate（V1）** —— 仍打印，**不参与 exit code**。
 //
-// **T7：A1 有两条并列的轴（stale | opposite），不是替换**：
+// **T7/T27：A1 有三条并列的轴（stale | opposite | redundant），不是替换**：
 //   · `A1`（staleTransferRate）—— 原判据，口径与门槛（≤5%）一字不动；
-//   · `A1.opposite`（反向记忆率）—— 新增，同样 ≤5%；**只有"通电"（可判率 ≥30% 且线上有正样本）
+//   · `A1.opposite`（反向记忆率）—— T7 新增，同样 ≤5%；**只有"通电"（可判率 ≥30% 且线上有正样本）
 //     才参与 exit code**。线上 0 次触发时它是 0/0（精确率无样本），拿它当通过就是假绿 —— 打印"未通电"。
-//   · 缺轴 ⇒ 红（tombstone：把 `A1.opposite` 那条统计删掉，本闸必须红）。
+//   · `A1.redundant`（**会话级**冗余注入）—— T27 新增，两个子指标 `redundantWaste`（两次注入间无压缩 =
+//     确定浪费）/ `redundantNecessary`（压缩后必要重注）。**只有 `redundantWaste > 1%` 且"通电"才红** ——
+//     它的消费者是 `oncePerSession` 的 `session.id` 判据：waste > 1% ⇒ 查是不是 WeakSet 对象身份那类回归。
+//     样本不足（窗口内注入数/token 不到通电下限）⇒ **不参与 exit code**，不硬造数。`scope 级重复`不计入。
+//   · 缺轴 ⇒ 红（tombstone：把 `A1.opposite` / `A1.redundant` 的统计删掉，本闸必须红）。
 //   `--workspace <dir>`：m5-report 的 workspace scope（worktree 并行时用主工作区，避免 scope 不匹配
 //   把 A5/A6 判成 not-consumed）。默认仍是当前目录（行为不变）。
 //
@@ -25,7 +29,7 @@
 // 门槛（2026-11-02 基线，改动需在 PR 里说明并更新本文件）：
 //   A2b 严格  ≥ 0.55（样本仅 18 条，1 条 = 5.6pp；2026-11-02 观察到同 store 下 0.611–0.667 的跳动）
 //   A2b 覆盖  = 1.00（上限参考）
-//   A1 负迁移 ≤ 5%（硬上限）
+//   A1 负迁移 ≤ 5%（硬上限）· A1.redundant 的浪费 ≤ 1%（只在通电时卡）
 //   A5 越界   = 0
 //   A6 溯源   = 100%
 //   A4 p50    ≤ 50ms
@@ -71,6 +75,9 @@ const LIMITS = {
   // 但只有"通电"（`detail.usableForDecision` = 可判率 ≥30% 且线上有正样本）才参与 exit code ——
   // 线上 0 次触发时它是 0/0，不能当通过（见文件头）。
   a1OppositeMax: 0.05,
+  // T27：A1 的第三条轴（**会话级**冗余注入）。只有 `redundantWaste` 参与 exit code（necessary 是压缩后
+  // 必要重注，不卡）；只有"通电"（窗口样本够）才卡 —— 样本不足时不硬造数（与 opposite 同形状）。
+  a1RedundantWasteMax: 0.01,
   a5Max: 0,
   a6Min: 1,
   a4p50MaxMs: 50,
@@ -116,6 +123,19 @@ export function judge(report, limits = LIMITS, a2bOverride = null) {
   const a1OppositeDecidability = Number.isFinite(a1OppositeDetail?.decidability) ? a1OppositeDetail.decidability : null;
   // "通电" = 可判率达标**且**线上有正样本（`polarityReport` 三件套之外的额外一条，见文件头）
   const a1OppositeDecisionGrade = Boolean(a1OppositeDetail?.usableForDecision);
+  // T27：A1 的第三条轴（**会话级**冗余注入）。两个子指标分开读：卡口只看 `redundantWaste`。
+  const a1RedundantAxis = axes['A1.redundant'] ?? null;
+  // 只有**带 T27 契约标记**（`a1Axes` 里列出）的报告才强制要求这条轴：旧快照/单测夹具没有该标记，
+  // 拿新契约去卡旧报告会造成假红（m5-report 的 `runM5Body` 写死 `a1Axes: [...A1_AXIS_IDS]`）。
+  const a1RedundantRequired = Array.isArray(report?.a1Axes) && report.a1Axes.includes('A1.redundant');
+  const a1RedundantDetail = a1RedundantAxis?.detail ?? null;
+  const a1RedundantWaste = a1RedundantAxis?.value;
+  const a1RedundantNecessary = Number.isFinite(a1RedundantDetail?.redundantNecessary) ? a1RedundantDetail.redundantNecessary : null;
+  // "通电" = 窗口内注入数 / token 数都够（m5-report 的 `detail.powered`）—— 样本不足就不卡，不硬造数。
+  const a1RedundantPowered = Boolean(a1RedundantDetail?.powered);
+  const a1RedundantN = Number.isFinite(a1RedundantDetail?.injections)
+    ? a1RedundantDetail.injections
+    : (Number.isFinite(a1RedundantAxis?.n) ? a1RedundantAxis.n : null);
   const recall = axes.A2?.detail?.injectionRecall ?? {};
   // T242：默认来源仍是 m5（旧口径）；调用方给了考卷结果就以考卷为准。
   const strict = a2bOverride && Number.isFinite(a2bOverride.strict) ? a2bOverride.strict : recall.recallSpecific;
@@ -147,6 +167,16 @@ export function judge(report, limits = LIMITS, a2bOverride = null) {
       constraints.push(`A1.opposite 反向记忆率 ${a1Opposite} > ${limits.a1OppositeMax}（可判率 ${a1OppositeDecidability}）`);
     }
   }
+  // T27：A1.redundant —— 与 stale / opposite 并列的第三条轴。
+  // ① 缺轴 ⇒ 红（tombstone：删掉这条统计，本闸必须红）；
+  // ② 只有"通电"（窗口样本够）才拿 `redundantWaste > 1%` 卡它 —— 样本不足**不参与 exit code**（不硬造数）；
+  // ③ `redundantNecessary` **不卡**：压缩后必要重注是设计行为（上界），不是回归。
+  if (a1RedundantRequired) {
+    if (!a1RedundantAxis) constraints.push('A1.redundant 冗余注入轴缺失（tombstone：轴统计被删）');
+    else if (a1RedundantPowered && Number.isFinite(a1RedundantWaste) && a1RedundantWaste > limits.a1RedundantWasteMax) {
+      constraints.push(`A1.redundant 冗余浪费 ${a1RedundantWaste} > ${limits.a1RedundantWasteMax}（会话级同卡再投、期间无压缩；窗口 ${a1RedundantN ?? '?'} 次注入）⇒ 查 oncePerSession 的 session.id 判据是否回归`);
+    }
+  }
   // A1=0 但覆盖率 0 ⇒ 空转：不判失败，但必须显式标注（2026-11-02 审计 P1-5）
   if (!Number.isFinite(a5) || a5 > limits.a5Max) constraints.push(`A5 越界 ${a5} != 0`);
   if (!Number.isFinite(a6) || a6 < limits.a6Min) constraints.push(`A6 溯源 ${a6} < ${limits.a6Min}`);
@@ -171,6 +201,11 @@ export function judge(report, limits = LIMITS, a2bOverride = null) {
       a1OppositeN,
       a1OppositeDecidability,
       a1OppositeDecisionGrade,
+      // T27：A1 的第三条并列轴（会话级冗余；waste 与 necessary 分开报）
+      a1Redundant: a1RedundantWaste,
+      a1RedundantNecessary,
+      a1RedundantPowered,
+      a1RedundantN,
       a5,
       a6,
       p50,
@@ -308,7 +343,9 @@ if (invokedDirectly) {
     console.log(`  主判据 · A2b 召回相关度（sampleSource=${out.values.sampleSource}，n=${out.values.a2bN}）：严格=${pct(out.values.a2bStrict)} 覆盖=${pct(out.values.a2bCover)}`);
     console.log(`  约束条件 · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A4.p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
     // T7：A1 的两条并列轴（stale 在上面那一行，opposite 在这里）。"未通电"必须显式打出来 —— 别把 0/0 当通过。
-    console.log(`  A1 两轴 · A1.stale=${pct(out.values.a1)} A1.opposite=${pct(out.values.a1Opposite)}（可判率 ${pct(out.values.a1OppositeDecidability)}，n=${out.values.a1OppositeN ?? 'null'}，${out.values.a1OppositeDecisionGrade ? '已通电·参与 exit code' : '未通电·不参与 exit code（0 次触发 ≠ 无反向记忆）'}）`);
+    console.log(`  A1 三轴 · A1.stale=${pct(out.values.a1)} A1.opposite=${pct(out.values.a1Opposite)}（可判率 ${pct(out.values.a1OppositeDecidability)}，n=${out.values.a1OppositeN ?? 'null'}，${out.values.a1OppositeDecisionGrade ? '已通电·参与 exit code' : '未通电·不参与 exit code（0 次触发 ≠ 无反向记忆）'}）`);
+    // T27：A1.redundant（会话级冗余）。两个子指标分开打印；"未通电"必须显式打出来，别把 0/0 当通过。
+    console.log(`    A1.redundant=浪费 ${pct(out.values.a1Redundant)} · 必要重注 ${pct(out.values.a1RedundantNecessary)}（会话级同卡再投；n=${out.values.a1RedundantN ?? 'null'}，${out.values.a1RedundantPowered ? '已通电·参与 exit code（浪费 > 1% 才红）' : '未通电·不参与 exit code（窗口样本不足）'}）`);
     console.log(`  下游参考 · repeatFailureRate=${pct(out.values.repeatFailureRate)}（V1 · 不参与 exit code）`);
     for (const f of verdict.fails) console.error(`ERR ${f}`);
   }
