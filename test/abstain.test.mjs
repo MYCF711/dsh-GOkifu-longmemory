@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hasRelevantClaim, abstainEntities } from '../src/rooms/abstain.mjs';
+import { hasRelevantClaim, abstainEntities, hasExactAnchor, repoKeysOf, taskChainsOf } from '../src/rooms/abstain.mjs';
 
 test('T366 相关性判据：共享硬实体（ENOENT）⇒ 相关', () => {
   const card = { claims: [{ text: 'Error: ENOENT: no such file or directory: assets/cover-1.png' }] };
@@ -513,4 +513,55 @@ test('T12 tombstone ② `buildMemoryCard` 的 claims 投影带 decay ⇒ `stale`
   } finally {
     try { rmSync(root, { recursive: true, force: true }); } catch { /* 清理失败不影响结论 */ }
   }
+});
+
+// ---------------------------------------------------------------------------
+// T44 · 精确身份锚定（同一 repo / 同一错误签名 / 同一任务链；只增相关不增拒绝）
+// ---------------------------------------------------------------------------
+test('T44 ①: 同一 repo/remote ⇒ 相关（不同 repo 不算）', () => {
+  const claim = { text: "fatal: failed to push some refs to 'https://github.com/MYCF711/dsh-GOkifu-longmemory.git'" };
+  assert.deepEqual([...repoKeysOf(claim.text)], ['mycf711/dsh-gokifu-longmemory']);
+  assert.equal(hasExactAnchor([claim], '把 github.com/MYCF711/dsh-GOkifu-longmemory 的 tag 推上去'), true);
+  assert.equal(hasExactAnchor([claim], '把 github.com/MYCF711/other-repo 的 tag 推上去'), false);
+});
+
+test('T44 ②: 同一错误签名（去路径/数字/引号后逐字相同）⇒ 相关', () => {
+  const claim = { text: 'Error: URL hostname "raw.githubusercontent.com" resolves to a non-public IP address' };
+  const same = 'Error: URL hostname "raw.githubusercontent.com" resolves to a non-public IP address';
+  const other = 'Error: EACCES: permission denied, open <path>';
+  assert.equal(hasExactAnchor([claim], `这次又撞了：
+${same}`), true);
+  assert.equal(hasExactAnchor([claim], `这次又撞了：
+${other}`), false);
+});
+
+test('T44 ③: 同一任务链（动作 + 对象）⇒ 相关；对象不同不算', () => {
+  assert.ok([...taskChainsOf('gh release create v0.2.41')].includes('gh release create v0.2.41'));
+  assert.ok([...taskChainsOf('git worktree add ../t44 -b task/t44')].includes('git worktree add ../t44'));
+  const claim = { text: 'error: pull request create failed: GraphQL: could not resolve to a repository' };
+  assert.equal(hasExactAnchor([claim], '我要 gh release create v0.2.41 发布'), false, 'claim 没有 release 链');
+  const releaseClaim = { text: 'error: gh release create v0.2.41 failed: remote: Permission to MYCF711 denied' };
+  assert.equal(hasExactAnchor([releaseClaim], '再跑一次 gh release create v0.2.41'), true);
+  assert.equal(hasExactAnchor([releaseClaim], '再跑一次 gh release create v0.2.42'), false, '对象（tag）不同 ⇒ 不算同一件事');
+});
+
+test('T44 ④: **只增相关不增拒绝**（默认开 ≥ 关掉的判定；锚定不命中时逐字节一致）', () => {
+  const inputs = [
+    [{ claims: [{ text: 'Error: ENOENT: no such file or directory: assets/cover-1.png' }] }, '帮我查一下明天的天气预报和气温变化情况'],
+    [{ claims: [{ text: 'error: failed to push some refs to https://github.com/MYCF711/x.git' }] }, '把 github.com/MYCF711/x 推上去'],
+    [{ claims: [{ text: 'class:fs-read-before-write · Error: file changed since it was read' }] }, '修改这个文件并提交'],
+    [{ claims: [{ text: 'Error: boom boom boom unrelated' }] }, '完全无关的一段中文说明文字，用于验证兜底'],
+  ];
+  for (const [card, sig] of inputs) {
+    const on = hasRelevantClaim(card, sig);
+    const off = hasRelevantClaim(card, sig, { exactAnchor: false });
+    assert.ok(!(off && !on), '关掉锚定不可能比开着更相关（只增不减）');
+    if (!hasExactAnchor(card.claims, sig)) assert.equal(on, off, '锚定不命中 ⇒ 与现状逐字节一致');
+  }
+});
+
+test('T44 ⑤: 没有身份锚点（无关文本）⇒ 不命中（不拿"像"当"同一件事"）', () => {
+  assert.equal(hasExactAnchor([{ text: 'Error: something bad happened in the build' }], '今天天气不错，出去走走'), false);
+  assert.equal(hasExactAnchor([], 'github.com/a/b'), false);
+  assert.equal(hasExactAnchor([{ text: 'Error: boom' }], ''), false);
 });
