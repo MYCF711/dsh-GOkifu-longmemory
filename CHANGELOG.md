@@ -19,25 +19,65 @@
 
 ## 0.8.50（2026-11-08）
 
-### T9 安全闸：ablation 沙箱不许真发出去、不许写真仓
+### 第二阶段首批：T9 安全与有效性 / T10 / T11 / T13 / T14
 
-**版本说明**：`scripts/ablation-sandbox.mjs` 行为修正（安全）⇒ patch。
+**版本说明**：`src/plugin.mjs`、`scripts/ablation-sandbox.mjs`、`scripts/ablation-live.mjs`、`scripts/release.mjs` 行为变更 ⇒ 按规则应升 minor；`v0.9.0` 被旧版本线占用（同 0.8.6/0.8.47 处置）⇒ 落 **patch 0.8.50**。
 
-**事故**：T9 批次里有题是 `gh repo edit … --enable-issues && gh issue create …`，
-旧 DANGER 只挡 `gh pr|release|api`，**漏了 `gh repo edit` / `gh issue create`**；
-本机 gh 已登录且带 repo scope ⇒ 那题会**真在 GitHub 上建 issue**。成员在跑批途中发现上报，
-立即 kill 批次；`gh issue list` 核实**没有任何 issue 被发出**。
+#### T9 沙箱：安全闸 + A 臂手喂真卡
 
-**修两处**：
+**事故与处置**：批次里有 `gh repo edit` / `gh issue create`，旧 DANGER 只挡 `gh pr|release|api`，
+本机 gh 已登录带 repo scope ⇒ 会真建 issue。成员跑批途中上报，kill 后 `gh issue list` 核实**未发出**。
+现 DANGER 挡 gh 全部**写子命令**，只读 `pr checks`/`issue list`/`repo view` 不误伤；
+新增 `writesOutsideSandbox`：带写盘且引用副本外绝对路径的题剔除。
 
-1. DANGER 改为「gh 的**写子命令**全挡」（create/edit/merge/close/delete/comment/review/run/enable/disable 等），
-   只读的 `pr checks` / `issue list` / `repo view` **不误伤**；
-2. 新增 `writesOutsideSandbox`：带写盘动作且引用**副本外**绝对路径的题剔除 ——
-   prepare 只把 ROOT 改写成副本，其它仓（`/d/主工作区/…`）没有副本，写过去就是真写。
+**有效性（比安全更致命）**：成员实测发现**沙箱里根本没装记忆插件 ⇒ A≡B**，跑完只能测噪声。
+现改为 **A 臂卡由主库实算后拼进 prompt**（手喂卡），整组绕开「插件缺失 / 库未复制 / scope 不匹配」三连坑；
+**A/B 两臂只差这一张卡**。判分改 `onlyToolResults: true`，卡正文不再被算成复发。
 
-**测试**：新增 `test/ablation-sandbox.test.mjs` 三条（含 tombstone），全绿。
-**已知代价**：本批 prepare 用的中间版正则偏宽，`gh pr checks` 类只读题被多剔几条（损失样本量，不影响安全），下轮恢复。
+**新发现的混淆面（未收口，记入有效性闸）**：沙箱 cwd 的父目录里有 `tasks.json`（含答案签名）与 `runs/`，
+模型能翻到 ⇒ 有「没做动作直接编答案」的风险。分析侧已加 `attemptTool/attemptArg/readKey/readRuns` 四个机械闸，报告单列。
 
+#### T10 · signalPreview 存完整信号
+
+`cardSampleSignal` 唯一产出点，上限 4096 并带 `signalPreviewTruncated` 标记。
+真实语料 495 条：**>160 的比例 0% → 70.7%**，p50 1106 / p90 2843。append-only 不变，旧样本逐字不受影响。
+**已知遗留**：8MB 留样上限会约 2 倍速撞到（约 4000–5000 条后静默停止），另开一刀处理。
+
+#### T11 · abstain 重启后误杀复测（只读证据）
+
+重启后 abstain **确实生效**（5 次 / 3 张卡，首条 07:09:53）。但生产同源重放 79 判定点 / 33 条会拒，
+**可核 22 条里误杀 17 = 77.3%**；正确拒绝 5 条。
+两个结构性 bug 已交 T12：`crossScopeWalk` 恒真让四类 reason 全塌成 cross-scope；`stale` 读的 `c.decay` 不在 card.claims 投影里 = 死码。
+**误杀主因**：相关性发生在「坑类/工具族」层面，判据只看字面。
+
+#### T13 · T1 标注复核
+
+20 条分层复核：**维持 19 / 改判 1（5.0%）** ⇒ T1 不整集返工，定点修 `#4`（relevant→irrelevant+hard）、`#14`（stratum→rel）。
+135/135 字段与真库/考卷逐字一致，数据本身干净。
+
+#### T14 · release 重试幂等
+
+`tag_name already exists` ⇒ 视为已发布；**根因是 `execSync(stdio:inherit)` 吞了 stderr**，判据看不到错误原文，改为捕获后分类。
+真故障仍按旧口径 `release-failed-but-tagged`（未改退出语义）。
+
+#### T12 · abstain 误杀修复（PR 同批）
+
+T11 实测的 **77.3% 误杀率 → 0.0%**（17 条误杀全救回），**5 条正确拒绝一条没丢**。
+修法是三条**只增相关不增拒绝**的机械桥（同名文件 / 工具族（信号侧宽·claim 侧窄）/ 坑类+文件工作意图），
+只在字面全不命中后兜底。
+
+两个结构性 bug 一并修：`classifyAbstainReason` 不再计入 `crossScopeWalk`（原恒真 ⇒ 四类 reason 全塌成 cross-scope）；
+`card.claims` 投影补 `decay` ⇒ `stale` 由死码变活。
+
+**未验**：线上生效需宿主重启后看 live-stats；本刀只到冻结重放集。
+
+#### 验收
+
+- `node --test "test/*.test.mjs"` → **1106 条 / 1100 pass / 0 fail / 6 skip**
+- `node scripts/check.mjs` → **PASS**（`.gitignore` 补 `.agent-teams/`，其 team.json 含 session-uuid 会触脱敏闸）
+- 版本 0.8.49 → **0.8.50**
+
+---
 ## 0.8.49（2026-11-07）
 
 ### T7 · A1.opposite 轴（PR #489）
