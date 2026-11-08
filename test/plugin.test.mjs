@@ -348,6 +348,81 @@ test('T25 ⑤: sessionIdOf 只认非空字符串 id（其它一律 null，走旧
 });
 
 // ---------------------------------------------------------------------------
+// T49 · 卡已在上下文里就别再投（**无状态**去重）
+//
+// 背景（2026-11-09 线上实测）：`oncePerSession` 是 `apply()` 内的内存 `Set`，宿主**重新 apply**
+// （新 agent 作用域 / 插件重载 / 会话再 seed）后就是空的 —— 本机 `tools-registered.json`（只由
+// `apply` 写）在宿主启动 1.5 小时后又被重写，证明同一进程里 apply 跑了不止一次。于是同一张卡在
+// **每个 turn/start** 又投一遍：`A1.redundant` 浪费 36 对 / 291 次注入 = **10.5%**（闸 1%）。
+//
+// 判据改成**上下文事实**：卡正文逐字出现在 `payload.messages` 里 ⇒ 再投必然是浪费；
+// 压缩把它压掉之后正文不在 ⇒ 自然恢复注入（"必要重注"那一档）。
+//
+// tombstone：把去重改回只靠内存 Set ⇒ T49 ① 红（新 apply 实例会再投一次）。
+// ---------------------------------------------------------------------------
+
+import { cardAlreadyInContext } from '../src/plugin.mjs';
+
+test('T49 ①: 宿主重新 apply（内存状态清空）后，同一张卡不会在同一会话再投一次', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    // 线上形状：信号每轮都会**再出现一次**（agent-teams 每轮重投任务书），所以同一张卡会被重建。
+    const signal = () => userMessage('yaml 装不上');
+    const first = makeCtx();
+    apply(first.ctx, baseConfig({ storeRoot }));
+    const s1 = makeSession(workspace, 'session-t49-aaaa').session;
+    const turn1 = [signal()];
+    const a = await runHook({ hooks: first.hooks, payload: { agent: { session: s1 }, messages: turn1 }, decision: enterDecision(turn1) });
+    assert.equal(a.messages.length, 2, '第一次应当注入');
+
+    // 第二个 turn：宿主**重新 apply**（新实例 ⇒ 内存 Set 是空的），卡还在上下文里，信号又来了
+    const second = makeCtx();
+    apply(second.ctx, baseConfig({ storeRoot }));
+    const s2 = makeSession(workspace, 'session-t49-aaaa').session;
+    const turn2 = [...a.messages, signal()];
+    const b = await runHook({ hooks: second.hooks, payload: { agent: { session: s2 }, messages: turn2 }, decision: enterDecision(turn2) });
+    assert.equal(b.messages.length, 3, '卡已在上下文里 ⇒ 不许再投一次（T49 前这里是 4）');
+    assert.equal(b.messages, turn2, '必须原样返回同一个 messages 引用（不复制、不原地改）');
+  } finally {
+    cleanup();
+  }
+});
+
+test('T49 ②: 卡被压缩掉（正文不在 messages 里）⇒ 恢复注入（"必要重注"那一档）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const signal = () => userMessage('yaml 装不上');
+    const first = makeCtx();
+    apply(first.ctx, baseConfig({ storeRoot }));
+    const s1 = makeSession(workspace, 'session-t49-bbbb').session;
+    const turn1 = [signal()];
+    const a = await runHook({ hooks: first.hooks, payload: { agent: { session: s1 }, messages: turn1 }, decision: enterDecision(turn1) });
+    assert.equal(a.messages.length, 2);
+
+    // 压缩后：那条卡消息没了（只剩用户原话 + 新信号）
+    const second = makeCtx();
+    apply(second.ctx, baseConfig({ storeRoot }));
+    const s2 = makeSession(workspace, 'session-t49-bbbb').session;
+    const compacted = [signal(), userMessage('还是 yaml 装不上')];
+    const b = await runHook({ hooks: second.hooks, payload: { agent: { session: s2 }, messages: compacted }, decision: enterDecision(compacted) });
+    assert.equal(b.messages.length, 3, '卡不在上下文里 ⇒ 该重投（否则压缩后模型再也看不到它）');
+  } finally {
+    cleanup();
+  }
+});
+
+test('T49 ③: cardAlreadyInContext 的边界（空卡 / 非数组 / 普通消息不算）', () => {
+  const card = { indexLine: 'INDEX', section: 'SECTION' };
+  assert.equal(cardAlreadyInContext([{ role: 'user', content: [{ type: 'text', text: 'INDEX\nSECTION' }] }], card), true);
+  assert.equal(cardAlreadyInContext([{ role: 'user', content: [{ type: 'text', text: 'INDEX' }] }], card), false, '只对上 indexLine 不算（正文必须逐字相同）');
+  assert.equal(cardAlreadyInContext([userMessage('随便聊聊')], card), false);
+  assert.equal(cardAlreadyInContext(null, card), false);
+  assert.equal(cardAlreadyInContext([], card), false);
+  assert.equal(cardAlreadyInContext([userMessage('x')], { indexLine: '', section: '' }), false, '空卡不去重（没有正文可比）');
+  assert.equal(cardAlreadyInContext([userMessage('x')], null), false);
+});
+
+// ---------------------------------------------------------------------------
 // 4. 构建抛错 ⇒ 原 decision + warn
 // ---------------------------------------------------------------------------
 
