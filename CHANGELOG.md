@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.73（2026-11-08）
+
+### T38 · 扩坑类分类器 8→19 类：洞见层覆盖率 5.26% → 60.53%
+
+**版本说明**：`src/rooms/claim.mjs`/`inject.mjs` 行为新增 ⇒ patch。
+
+**扩类前**：真库 1560 条 antipattern 未归类 **98.21%**（原 8 类合计 28）。
+**新增 11 类**（全部机械正则 + 真库命中）：agent-not-found 154 · file-not-found 124 · syntax-error 120 ·
+type-error 41 · search-io-error 39 · python-exception 29 · network 18 · git-not-repo 14 · regex-error 11 · arg-out-of-range 9 · path-not-directory 8
+⇒ 未归类 **98.21% → 61.86%**。
+
+**洞见层覆盖率 5.26% → 60.53%**（有恢复事实的 114 条里 6 → 69 能标坑类）。
+
+**关键设计：扩类默认关闭**（`classifyErrorClass(text,{extended:false})`），只给洞见层标注用。
+理由：扩类若进默认路径会改 errorKeyOf（合并键）/ensureClassClaims（类级章节）/errorClassKeyOf（信号实体），
+破坏 R09「ENOENT 保留具体原文」与 D2「语法错误保留具体原文」两条契约——首跑确实红了，已收口。
+**合并/晋升/信号口径逐字不变。**
+
+**未为凑覆盖率硬塞类**：最大宗 `total … drwxr-xr-x`（20 条）是 `ls -l` 正常输出不是错误，不归类。
+
+**验收**：claim/inject 129/128；全量 1190/1184/0 fail（含 R09/D2 回归）；check PASS。
+
 ## 0.8.72（2026-11-08）
 
 ### T37 · 恢复事实加洞见层（坑类陈述，raw→insight）

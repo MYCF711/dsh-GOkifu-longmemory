@@ -16,6 +16,8 @@ import assert from 'node:assert/strict';
 import {
   promoteClaim,
   errorKeyOf,
+  classifyErrorClass,
+  ERROR_CLASS_NAMES,
   extractPaths,
   extractVersionLiterals,
   ClaimError,
@@ -369,3 +371,60 @@ test('ensureClassClaims: 补出缺失的类级章节，且重复调用不再加'
   assert.equal(second.added.length, 0, '已有类级章节 ⇒ 幂等，不再加');
 });
 
+
+// ---------------------------------------------------------------------------
+// T38 · 坑类扩类（来自真库实际分布；每类都有机械判据）
+// ---------------------------------------------------------------------------
+test('T38 ①: 11 个新类各有机械判据（真库样本逐类命中）', () => {
+  const cases = [
+    ['agent-not-found', 'Error: active teammate "build-bot" not found'],
+    ['agent-not-found', 'Error: task space not found: 42 at resolveTaskSpace'],
+    ['file-not-found', 'FileNotFoundError: [Errno 2] No such file or directory: /tmp/x'],
+    ['file-not-found', 'Error: ENOENT: no such file or directory, open a.txt'],
+    ['syntax-error', 'SyntaxError: Unexpected token }'],
+    ['syntax-error', 'bash: -c: line 1: syntax error near unexpected token'],
+    ['search-io-error', 'Error: grep search failed (exit 2): rg: /repo: io error for operation'],
+    ['search-io-error', 'Error: glob search failed (exit 2): io error for operation on /repo'],
+    ['network', "fatal: unable to access 'https://github.com/x': failed to connect to github.com:443"],
+    ['network', 'Error: url hostname "example.invalid" resolves to a non-public ip address'],
+    ['type-error', "TypeError: Cannot read properties of undefined (reading 'x')"],
+    ['arg-out-of-range', 'Error: offset 840 is out of range for "/tmp/a.mjs" (748 lines)'],
+    ['git-not-repo', 'fatal: not a git repository (or any of the parent directories): .git'],
+    ['path-not-directory', 'cd: /a/b: not a directory'],
+    ['regex-error', 're.PatternError: unterminated character set at position 3'],
+    ['regex-error', 'rg: regex parse error: (?:x'],
+    ['python-exception', "AttributeError: 'NoneType' object has no attribute 'x'"],
+    ['python-exception', "KeyError: 'items'"],
+    ['python-exception', "UnicodeEncodeError: 'gbk' codec can't encode character"],
+  ];
+  for (const [expected, text] of cases) assert.equal(classifyErrorClass(text, { extended: true }), expected, text);
+});
+
+test('T38 ②: 旧 8 类优先（扩类不抢旧类的命中）', () => {
+  assert.equal(classifyErrorClass('Error: Cannot find module yaml'), 'module-missing');
+  assert.equal(classifyErrorClass('Error: file changed since it was read'), 'fs-read-before-write');
+  assert.equal(classifyErrorClass('Error: permission denied'), 'permission-denied');
+  assert.equal(classifyErrorClass('Error: timed out after 30s'), 'sandbox-limit');
+});
+
+test('T38 ③: tombstone —— 默认（不开扩类）与扩类前逐字节一致（新类样本 ⇒ null，旧类照旧）', () => {
+  const newSamples = [
+    'Error: active teammate "x" not found',
+    'Error: ENOENT: no such file or directory',
+    'SyntaxError: Unexpected token',
+    'TypeError: x is not a function',
+  ];
+  for (const text of newSamples) assert.equal(classifyErrorClass(text), null, text);
+  assert.equal(classifyErrorClass('Error: Cannot find module y'), 'module-missing');
+  assert.equal(classifyErrorClass('Error: file changed since it was read'), 'fs-read-before-write');
+  // 合并路径（errorKeyOf）也不受扩类影响
+  assert.ok(!errorKeyOf('Error: ENOENT: no such file or directory, open x').startsWith('class:'), '合并路径不参与扩类');
+});
+
+test('T38 ④: 名单是单一来源（19 类 = 原 8 + 扩 11，无重名）', () => {
+  assert.equal(ERROR_CLASS_NAMES.length, 19);
+  assert.equal(new Set(ERROR_CLASS_NAMES).size, 19);
+  assert.ok(ERROR_CLASS_NAMES.includes('fs-read-before-write'));
+  assert.ok(ERROR_CLASS_NAMES.includes('syntax-error'));
+  assert.ok(!classifyErrorClass('完全无关的一段话'));
+});
