@@ -30,6 +30,8 @@ import { readFrames, parseEvents } from './logread.mjs';
 import { markerWithPolarity, detectPolarity, isCold, decayWeight } from './abstain.mjs';
 // T30：归档层落好的恢复索引（sidecar，只读）；索引缺失/坏 ⇒ 回退到读时派生（T28）。
 import { readRecoveryIndex, readTrials, appendTrials } from './persist.mjs';
+// T37：恢复事实的「洞见层」用仓库既有的**机械**坑类分类器（claim.mjs 零项目依赖，不会成环）。
+import { classifyErrorClass } from './claim.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -557,7 +559,7 @@ function stateTokenOf(claim) {
   return state;
 }
 
-function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null, falsifiableWhen = null, recovery = null, decay = 1,
+function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null, falsifiableWhen = null, recovery = null, recoveryClass = null, decay = 1,
   // T3：`delivery === 'pointer'` ⇒ 这一行只给指针（正文是计数，不是断言）。
   // `claimText` 只在这时出现：它是**那条记忆的正文**，留在结构化字段里（相关性判定要用），
   // **不进 `rawText`** —— 渲染只认 `rawText`，所以卡上不会出现没把握的断言。
@@ -589,6 +591,8 @@ function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text
     recovery: recovery && RECOVERY_FACT_KINDS.includes(recovery.kind) && Number.isFinite(recovery.seq) && Number.isFinite(recovery.at)
       ? { kind: recovery.kind, seq: recovery.seq, at: recovery.at }
       : null,
+    // T37：洞见层（坑类）。只有**已有恢复事实**时才加注；没有恢复事实 ⇒ 该字段不参与渲染。
+    recoveryClass: recovery && typeof recoveryClass === 'string' && /^class:[a-z0-9][a-z0-9-]*$/.test(recoveryClass) ? recoveryClass : null,
     state: state ?? marker,
     occurredAt,
     date,
@@ -725,6 +729,34 @@ export function recordInjectionTrials({ storeRoot, claims = [], at = null } = {}
   return { ...appendTrials(storeRoot, rows), records: rows.length };
 }
 
+/**
+ * T37 · 恢复事实的「洞见层」：这条恢复事实属于**哪一类坑**。
+ *
+ * 机械来源（按优先级，全都不成 ⇒ `null`，**不编**）：
+ *  ① `claim.class` / `claim.errorClass` 字段（数据里若将来带就直接用）；
+ *  ② claim 文本的 `class:<slug>` 前缀（类级章节 claim 的既有形态）；
+ *  ③ 仓库既有分类器 `classifyErrorClass`（`claim.mjs`，闭集 8 类）对 claim 原文的机械判定。
+ * 返回值统一成 `class:<slug>`；没有类 ⇒ null（卡行与不加洞见层时**逐字节一致**）。
+ * @param {object} claim
+ * @returns {string|null}
+ */
+export function recoveryInsightClass(claim) {
+  const explicit = claim?.class ?? claim?.errorClass ?? null;
+  const norm = (v) => {
+    const t = String(v ?? '').trim().toLowerCase();
+    if (!t) return null;
+    if (/^class:[a-z0-9][a-z0-9-]*$/.test(t)) return t;
+    if (/^[a-z0-9][a-z0-9-]*$/.test(t)) return `class:${t}`;
+    return null;
+  };
+  const fromField = norm(explicit);
+  if (fromField) return fromField;
+  const m = /^class:([a-z0-9][a-z0-9-]*)/i.exec(String(claim?.text ?? '').trim());
+  if (m) return `class:${m[1].toLowerCase()}`;
+  const derived = classifyErrorClass(claim?.text);
+  return derived ? `class:${derived}` : null;
+}
+
 /** T28：恢复事实的缓存（按日志文件 size+mtime 失效；只存**派生索引**，不存事件原文）。 */
 const RECOVERY_INDEX_CACHE = new Map();
 const RECOVERY_INDEX_CACHE_MAX = 24;
@@ -834,16 +866,20 @@ function recoveryFactOf({ claim, src, options, logFallback = true }) {
 }
 
 /** T28：恢复事实的尾注文案（**只写事实，不写「你该这么做」**；AGENTS §2.1）。 */
-function recoverySuffix(recovery) {
+function recoverySuffix(recovery, recoveryClass = null) {
   if (!recovery || !RECOVERY_FACT_KINDS.includes(recovery.kind)) return '';
   if (!Number.isFinite(recovery.seq) || !Number.isFinite(recovery.at)) return '';
   const date = formatCardDate(recovery.at);
   if (!date || date.startsWith('????')) return '';
-  if (recovery.kind === 'same-file-write-ok') return ` · 恢复：后于 ${date} 同一文件写入成功（seq ${recovery.seq}）`;
-  // T34：**同工具族**是最弱档 —— 文案必须写清"同工具族"，不许写成"同一命令"（否则是编）。
-  if (recovery.kind === 'same-tool') return ` · 恢复（同工具族）：后于 ${date} 同工具族后来成功（seq ${recovery.seq}）`;
+  // T37：洞见层 —— 有坑类就把它标在「恢复」后面的括号里（事实形式，不是祈使句）。
+  const cls = typeof recoveryClass === 'string' && /^class:[a-z0-9][a-z0-9-]*$/.test(recoveryClass) ? `（${recoveryClass}）` : '';
+  if (recovery.kind === 'same-file-write-ok') return ` · 恢复${cls}：后于 ${date} 同一文件写入成功（seq ${recovery.seq}）`;
+  // T34：**同工具族**是最弱档 —— 文案必须写清"同工具族"，不许写成"同一命令"（否则是编）；
+  // T37：坑类与档位一起标（`（同工具族 · class:x）`），两者不混。
+  const tierTag = recovery.kind === 'same-tool' ? `同工具族${cls ? ` · ${recoveryClass}` : ''}` : null;
+  if (recovery.kind === 'same-tool') return ` · 恢复（${tierTag}）：后于 ${date} 同工具族后来成功（seq ${recovery.seq}）`;
   const label = recovery.kind === 'same-command-exit-0' ? '同一命令成功（exit 0' : '同一命令重跑（无失败输出';
-  return ` · 恢复：后于 ${date} ${label}, seq ${recovery.seq}）`;
+  return ` · 恢复${cls}：后于 ${date} ${label}, seq ${recovery.seq}）`;
 }
 
 /** T35：`file-exists` 核验结果缓存（同一进程内按绝对路径复用；上限 512 条后整体清空）。 */
@@ -977,12 +1013,15 @@ function entryFromClaim(hit, claim, options = {}) {
   // T31：**有恢复事实的 antipattern 豁免指针档** —— 恢复事实只在正文行渲染，降级会把它藏掉；
   //   所以指针候选也要先查一次（索引很便宜；读时派生只给正文行，避免为指针行解日志）。
   const recovery = recoveryFactOf({ claim, src, options, logFallback: !basePointer });
+  // T37：洞见层只**加注**已有恢复事实的坑类（不把没有恢复事实的 claim 算成有）。
+  const recoveryClass = recovery ? recoveryInsightClass(claim) : null;
   const pointer = basePointer && !recovery;
   return buildEntry({
     episode,
     seq,
     occurredAt,
     recovery,
+    recoveryClass,
     // 知识库 84：传了 `options.signalText` 时，**与信号方向相反**的 claim 标 `[disputed]`（不以"建议"出现）。
     // **不传 ⇒ 保持 `stateTokenOf(claim)`（行为不变，向后兼容）**。
     // T3：指针行也保留这个标记 —— 它是**那条记忆的状态事实**，与"给不给正文"是两件事。
@@ -1371,7 +1410,7 @@ function renderEntryLine(entry, clip) {
   // 无 F3 的条目输出与旧版逐字节一致。
   const f3 = entry.f3?.when ? ` · ${entry.f3.when}${entry.f3.rule ? ` [${entry.f3.rule}]` : ''}` : '';
   // T28：恢复事实尾注（只写事实，不写「你该这么做」）。无恢复证据 ⇒ 空串 ⇒ 该行逐字节不变。
-  const recovery = recoverySuffix(entry.recovery);
+  const recovery = recoverySuffix(entry.recovery, entry.recoveryClass);
   return `- [${entry.marker}] ${body}${flag} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})${f3}${recovery}`;
 }
 
