@@ -198,8 +198,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='De
 git log -1 --format='%ci %s' e977859        # T12 合入 2026-11-08 08:21:27
 
 # 2) 线上分布（见 §二 表）
-node -e "const fs=require('fs');const r=fs.readFileSync('D:/DeepSeek Harness/home/memory-context/live-stats.jsonl','utf8').split(/?
-/).filter(Boolean).map(JSON.parse);const c={};for(const x of r){const k=x.action+'/'+x.reason;c[k]=(c[k]||0)+1}console.log(r.length,JSON.stringify(c))"
+node -e "const fs=require('fs');const r=fs.readFileSync('D:/DeepSeek Harness/home/memory-context/live-stats.jsonl','utf8').split(String.fromCharCode(10)).filter(Boolean).map(JSON.parse);const c={};for(const x of r){const k=x.action+'/'+x.reason;c[k]=(c[k]||0)+1}console.log(r.length,JSON.stringify(c))"
 ```
 
 **关键数（复核请对这四个数）**：
