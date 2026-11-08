@@ -23,7 +23,10 @@ import fs from 'node:fs';
 import { extractErrorKey } from './topic.mjs';
 import { loadSignatureIndex, lookupSignature } from './sigindex.mjs';
 // T347：F3 是 claim 文本的**纯函数** ⇒ 读时派生兜底，历史 claim（无该字段）也能上卡，且不动数据。
-import { deriveFalsifiableWhen } from './extract.mjs';
+import { deriveFalsifiableWhen, buildRecoveryIndex, findRecoveryFact, RECOVERY_FACT_KINDS } from './extract.mjs';
+// T28：恢复事实要读「该局后来同一主体成功」的事件 —— 数据只存在于会话日志里（store 只存计数）。
+// 这是 inject 的第一条 R01 依赖：**读时派生**，只读、不写库；读不到/解析失败 ⇒ 零输出（卡行不变）。
+import { readFrames, parseEvents } from './logread.mjs';
 import { markerWithPolarity, detectPolarity, isCold, decayWeight } from './abstain.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -547,7 +550,7 @@ function stateTokenOf(claim) {
   return state;
 }
 
-function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null, falsifiableWhen = null, decay = 1,
+function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text, kind, claimId = null, edgeId = null, cost = null, falsifiableWhen = null, recovery = null, decay = 1,
   // T3：`delivery === 'pointer'` ⇒ 这一行只给指针（正文是计数，不是断言）。
   // `claimText` 只在这时出现：它是**那条记忆的正文**，留在结构化字段里（相关性判定要用），
   // **不进 `rawText`** —— 渲染只认 `rawText`，所以卡上不会出现没把握的断言。
@@ -573,6 +576,11 @@ function buildEntry({ prefix = '', episode, seq, occurredAt, marker, state, text
     // T345：F3 失效条件是**派生内容**（非逐字），只作坐标后的尾注，绝不混进 rawText（否则 A6 文字层报 missing）。
     f3: falsifiableWhen && falsifiableWhen.when
       ? { rule: String(falsifiableWhen.rule ?? ''), when: String(falsifiableWhen.when).slice(0, F3_MAX_CHARS) }
+      : null,
+    // T28：恢复事实（**同一主体后来成功**）。只存机械字段；渲染在 `renderEntryLine`（尾注）。
+    // 没有恢复证据 ⇒ null ⇒ 该行输出与旧版逐字节一致。
+    recovery: recovery && RECOVERY_FACT_KINDS.includes(recovery.kind) && Number.isFinite(recovery.seq) && Number.isFinite(recovery.at)
+      ? { kind: recovery.kind, seq: recovery.seq, at: recovery.at }
       : null,
     state: state ?? marker,
     occurredAt,
@@ -620,6 +628,71 @@ function pickSourceBySignal(support, { signalTokens = [], currentSeq = null, fal
     else if (score === bestScore && Number.isFinite(currentSeq) && Number(sup?.seq) === Number(currentSeq)) { best = sup; }
   }
   return bestScore >= 2 ? best : fallback;
+}
+
+/** T28：恢复事实的缓存（按日志文件 size+mtime 失效；只存**派生索引**，不存事件原文）。 */
+const RECOVERY_INDEX_CACHE = new Map();
+const RECOVERY_INDEX_CACHE_MAX = 24;
+/**
+ * 读时派生的**成本上限**：>8 MB 的会话日志不在注入热路径上解析（大日志解一局要 1–2 s，20 张卡就能把
+ * 报告工具拖慢一倍；不确定性来源也更大）。这是**确定性规则**（只看文件大小），不随缓存状态漂移。
+ * 代价：这类长会话里的恢复事实读不到（实测全量 38 条里少 19 条，见 evidence/T28 §4）。
+ * 正解是归档时落恢复索引（本刀可写路径不含），届时这条上限可以删掉。
+ */
+const RECOVERY_MAX_LOG_BYTES = 8 * 1024 * 1024;
+
+/** 读一局的会话日志 → 恢复索引（只读；读不到/解析失败 ⇒ null，绝不抛）。 */
+function recoveryIndexForLog(logPath) {
+  let st;
+  try { st = fs.statSync(logPath); } catch { return null; }
+  if (st.size > RECOVERY_MAX_LOG_BYTES) return null;
+  const key = `${st.size}:${st.mtimeMs}`;
+  const hit = RECOVERY_INDEX_CACHE.get(logPath);
+  if (hit && hit.key === key) return hit.index;
+  try {
+    const parsed = parseEvents(readFrames(fs.readFileSync(logPath)));
+    const index = buildRecoveryIndex(Array.isArray(parsed?.events) ? parsed.events : []);
+    if (RECOVERY_INDEX_CACHE.size >= RECOVERY_INDEX_CACHE_MAX) {
+      const oldest = RECOVERY_INDEX_CACHE.keys().next().value;
+      RECOVERY_INDEX_CACHE.delete(oldest);
+    }
+    RECOVERY_INDEX_CACHE.set(logPath, { key, index });
+    return index;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * T28：给一条**失败 claim**找「同一主体后来成功」的事实（读时派生，不回填）。
+ * 只对 `kind === 'antipattern'` 生效；没有日志/没有证据 ⇒ null（卡行逐字节不变）。
+ */
+function recoveryFactOf({ claim, src, options }) {
+  if (!claim || claim.kind !== 'antipattern') return null;
+  if (options?.recoveryOnCard === false) return null;
+  const base = typeof options?.recoveryBaseDir === 'string' ? options.recoveryBaseDir : null;
+  if (!base) return null;
+  const ep = options?.episodesById?.get?.(String(src?.episode ?? '')) ?? null;
+  const rel = typeof ep?.closure?.logPath === 'string' ? ep.closure.logPath : null;
+  if (!rel) return null;
+  const logPath = path.isAbsolute(rel) ? rel : path.join(base, rel);
+  const index = recoveryIndexForLog(logPath);
+  if (!index) return null;
+  const quote = typeof src?.quote === 'string' && src.quote ? src.quote : String(claim?.text ?? '');
+  // 卡上出处 seq = 该 support 的事件序号（同一段错误在一局里重复出现时用它挑最近的一条）。
+  const nearSeq = Number.isFinite(Number(src?.seq)) ? Number(src.seq) : null;
+  return findRecoveryFact(index, quote, { nearSeq });
+}
+
+/** T28：恢复事实的尾注文案（**只写事实，不写「你该这么做」**；AGENTS §2.1）。 */
+function recoverySuffix(recovery) {
+  if (!recovery || !RECOVERY_FACT_KINDS.includes(recovery.kind)) return '';
+  if (!Number.isFinite(recovery.seq) || !Number.isFinite(recovery.at)) return '';
+  const date = formatCardDate(recovery.at);
+  if (!date || date.startsWith('????')) return '';
+  if (recovery.kind === 'same-file-write-ok') return ` · 恢复：后于 ${date} 同一文件写入成功（seq ${recovery.seq}）`;
+  const label = recovery.kind === 'same-command-exit-0' ? '同一命令成功（exit 0' : '同一命令重跑（无失败输出';
+  return ` · 恢复：后于 ${date} ${label}, seq ${recovery.seq}）`;
 }
 
 function entryFromClaim(hit, claim, options = {}) {
@@ -688,10 +761,13 @@ function entryFromClaim(hit, claim, options = {}) {
   // 关掉时卡片与 0.8.46 逐字节一致（前后对照见 `evidence/T3-pointer-tier.md`）。
   const pointer = options?.pointerTier === true && isPointerCandidate(claim);
 
+  // T28：恢复事实（同一主体后来成功）。只写事实；没有证据 ⇒ null（该行逐字节不变）。
+  const recovery = pointer ? null : recoveryFactOf({ claim, src, options });
   return buildEntry({
     episode,
     seq,
     occurredAt,
+    recovery,
     // 知识库 84：传了 `options.signalText` 时，**与信号方向相反**的 claim 标 `[disputed]`（不以"建议"出现）。
     // **不传 ⇒ 保持 `stateTokenOf(claim)`（行为不变，向后兼容）**。
     // T3：指针行也保留这个标记 —— 它是**那条记忆的状态事实**，与"给不给正文"是两件事。
@@ -784,6 +860,9 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
   costIndex = null,
   // T347：F3 上卡开关（默认开；关掉只用于 A/B 对照或紧急回退）
   f3OnCard = true,
+  // T28：恢复事实（同一主体后来成功）上卡开关 + 日志根目录（默认开；关掉 ⇒ 与旧版逐字节一致）。
+  recoveryOnCard = true,
+  recoveryBaseDir = null,
   // 知识库 90：**冷却**（主人纠正："不被调用就冷却，等于没写"）。
   // **默认关**（`null` ⇒ 不过滤）：因为"冷却"依赖"注入记录"，
   // 而当前宿主只有 CLI 进程、没有真实流量，注入记录不可靠 ⇒ 默认关，不误杀。
@@ -825,7 +904,7 @@ function collectEntries({ hits, view, scope = null, preferenceHardOnly = false, 
       continue;
     }
     const entry = claim
-      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard, pointerTier,
+      ? entryFromClaim(hit, claim, { scope, episodesById: view.episodesById, allowCrossScopeClass: allowCrossScopeClass === true, signalTokens: signalTokensOf(signal), now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryBaseDir,
         // 知识库 84：把**信号原文**也传下去 —— 与信号**方向相反**的 claim 标 `[disputed]`（不以"建议"出现）。
         // 取不到原文 ⇒ 空串 ⇒ `hasAnySignalHandle` 为 false ⇒ **不拒绝、不改标记**（保守，向后兼容）。
         signalText: signal?.text ?? signal?.quote ?? (Array.isArray(signal?.terms) ? signal.terms.join(' ') : '') })
@@ -1073,7 +1152,9 @@ function renderEntryLine(entry, clip) {
   // T345：F3 尾注放在**坐标之后**（正文仍是逐字原文，A6 文字层只核正文）。
   // 无 F3 的条目输出与旧版逐字节一致。
   const f3 = entry.f3?.when ? ` · ${entry.f3.when}${entry.f3.rule ? ` [${entry.f3.rule}]` : ''}` : '';
-  return `- [${entry.marker}] ${body}${flag} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})${f3}`;
+  // T28：恢复事实尾注（只写事实，不写「你该这么做」）。无恢复证据 ⇒ 空串 ⇒ 该行逐字节不变。
+  const recovery = recoverySuffix(entry.recovery);
+  return `- [${entry.marker}] ${body}${flag} (${entry.source.episode}, ${entry.date}, seq ${entry.source.seq})${f3}${recovery}`;
 }
 
 function renderSection({ entries, beyond, droppedProvenance, limit, budgetTokens, clip, withMarkers = true, droppedCrossScope = 0, droppedUnknownScope = 0, scopeKey = null }) {
@@ -1141,6 +1222,8 @@ export function buildMemoryCard({
   // `true` ⇒ 没把握的条目只给指针（正文不渲染）；`false` ⇒ 输出与 0.8.46 逐字节一致
   // —— 这是"旧消费方不会炸"的唯一保证（A/B 对照走它）。
   pointerTier = POINTER_TIER_DEFAULT,
+  // T28：恢复事实上卡开关（默认开）。关掉 ⇒ 卡片与本次改动前逐字节一致（A/B 对照 / 紧急回退）。
+  recoveryOnCard = true,
 } = {}) {
   const crossScope = Number.isFinite(droppedCrossScope) && droppedCrossScope > 0 ? droppedCrossScope : 0;
   const unknownScope = Number.isFinite(droppedUnknownScope) && droppedUnknownScope > 0 ? droppedUnknownScope : 0;
@@ -1194,7 +1277,8 @@ export function buildMemoryCard({
     };
   }
 
-  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex, f3OnCard, pointerTier });
+  const recoveryBaseDir = store && typeof store.root === 'string' ? path.dirname(path.resolve(store.root)) : null;
+  const { entries: collectedEntries, dropped } = collectEntries({ hits, view, scope: scopeKey, preferenceHardOnly, signal, sigIndex, now, preconditionOk, costIndex, f3OnCard, pointerTier, recoveryOnCard, recoveryBaseDir });
   // T162a：认「合并节点」。合流（consolidate）会把多条近似 claim 压成一个带 `merge.members` 的节点；
   // 消费侧不认它，合并节点与它的成员就会在同一张卡里重复出现。规则见 collapseMergeNodes 的注释。
   const { entries, stats: collapseStats } = collapseMergeNodes({

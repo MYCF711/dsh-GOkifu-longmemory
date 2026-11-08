@@ -14,7 +14,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, existsSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { zstdCompressSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -51,6 +52,8 @@ import {
   InjectError,
 } from '../src/rooms/inject.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
+// T28：恢复事实的纯函数判据（读时派生在 inject 里；这里只测判据本身）。
+import { buildRecoveryIndex, findRecoveryFact } from '../src/rooms/extract.mjs';
 import { runGates } from '../src/rooms/gates.mjs';
 // T3 ⑩：A6 文字层（`scripts/audit-card-samples.mjs`）的指针豁免判据 —— 与注入同一条链，测试也同一份口径。
 import { auditRows } from '../scripts/audit-card-samples.mjs';
@@ -2129,3 +2132,188 @@ test('T3 ⑫ 默认开: 不传任何配置 ⇒ observed 且 support ≤ 1 降为
   // ③ 插件侧同一份默认值（不各写一份字面量）
   assert.equal(DEFAULT_CONFIG.pointerTier, POINTER_TIER_DEFAULT, 'DEFAULT_CONFIG 必须读同一个常量');
 }));
+
+// ---------------------------------------------------------------------------
+// T28 · 卡行补「恢复事实」（同一主体后来成功；只写事实，不写「你该这么做」）
+//
+// 判据（`src/rooms/extract.mjs` 的 `buildRecoveryIndex` / `findRecoveryFact`）：
+//   ① 同一条 bash 命令后来 exit 0；② 同一条命令后来重跑、无失败输出；
+//   ③ 同一个 file_path 后来被 write/edit 写成功。
+// 没有恢复证据 ⇒ 卡行**逐字节不变**（tombstone）；`recoveryOnCard:false` ⇒ 整卡无恢复尾注。
+// ---------------------------------------------------------------------------
+
+const T28 = (h, m = 0) => Date.UTC(2026, 9, 20, h, m, 0);
+
+const T28_REL_LOG = 'logs/demo/x/session.v4.jsonl.zstd';
+
+/** 造一局的会话日志（多帧 zstd：首帧 header，其余一帧一事件，与 DSH 同形）。 */
+function writeT28Log(absLog, events) {
+  const frame = (obj) => zstdCompressSync(Buffer.from(`${JSON.stringify(obj)}\n`));
+  const header = { type: 'session', version: 4, id: 's-demo', createdAt: T28(12), cwd: 'D:/work/demo' };
+  mkdirSync(path.dirname(absLog), { recursive: true });
+  writeFileSync(absLog, Buffer.concat([frame(header), ...events.map(frame)]));
+}
+
+const t28Events = () => {
+  const ev = (seq, type, data, m) => ({ type, seq, time: T28(12) + m * 60_000, data });
+  const msg = (text) => ({ content: [{ type: 'text', text }] });
+  return [
+    ev(1, 'tool/call', { callId: 'call-1', name: 'bash', arguments: JSON.stringify({ command: 'node scripts/check.mjs' }) }, 0),
+    ev(2, 'tool/result', { toolCallId: 'call-1', message: msg('Error: boom\n[exit code: 1]') }, 1),
+    ev(3, 'tool/call', { callId: 'call-2', name: 'bash', arguments: JSON.stringify({ command: 'node scripts/check.mjs' }) }, 2),
+    ev(4, 'tool/result', { toolCallId: 'call-2', message: msg('ok\n[exit code: 0]') }, 3),
+    ev(5, 'tool/call', { callId: 'call-3', name: 'edit', arguments: JSON.stringify({ file_path: 'D:/work/demo/a.mjs' }) }, 4),
+    ev(6, 'tool/result', { toolCallId: 'call-3', message: msg('Error: old_string matched 2 times in "D:/work/demo/a.mjs"') }, 5),
+    ev(7, 'tool/call', { callId: 'call-4', name: 'edit', arguments: JSON.stringify({ file_path: 'D:/work/demo/a.mjs' }) }, 6),
+    ev(8, 'tool/result', { toolCallId: 'call-4', message: msg('The file D:/work/demo/a.mjs has been updated successfully.') }, 7),
+  ];
+};
+
+function makeT28Fixture() {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-t28-'));
+  const storeRoot = path.join(root, 'memory-context');
+  writeT28Log(path.join(root, T28_REL_LOG), t28Events());
+  const store = createStore({ root: storeRoot, now: T28(12) });
+  store.ensureDirs();
+  store.putMany('episodes', [{
+    ...episode('ep-aaaaaaa1', 20, 1),
+    closure: { logPath: T28_REL_LOG, graphPath: 'graphs/x/graph.json', seqFrom: 1, seqTo: 8 },
+  }]);
+  const mk = (id, kind, text, seq) => claim({ id, kind, text, day: 20, state: 'observed', support: [{ episode: 'ep-aaaaaaa1', seq }] });
+  store.putMany('claims', [
+    mk('c-0000aa01', 'antipattern', 'Error: boom', 2),
+    mk('c-0000aa02', 'antipattern', 'Error: old_string matched 2 times in "D:/work/demo/a.mjs"', 6),
+    mk('c-0000aa03', 'antipattern', 'Error: never recovered this one', 2),
+    mk('c-0000aa04', 'preference', '不要新增依赖', 2),
+  ]);
+  return { root, store };
+}
+
+const t28Hits = () => ([
+  { episode: 'ep-aaaaaaa1', nodeId: null, link: null, why: [], weight: 1, occurredAt: T28(12), kind: 'failure', seq: 2, depth: 1, claimId: 'c-0000aa01' },
+  { episode: 'ep-aaaaaaa1', nodeId: null, link: null, why: [], weight: 1, occurredAt: T28(12), kind: 'failure', seq: 6, depth: 1, claimId: 'c-0000aa02' },
+  { episode: 'ep-aaaaaaa1', nodeId: null, link: null, why: [], weight: 1, occurredAt: T28(12), kind: 'failure', seq: 2, depth: 1, claimId: 'c-0000aa03' },
+  { episode: 'ep-aaaaaaa1', nodeId: null, link: null, why: [], weight: 1, occurredAt: T28(12), kind: 'failure', seq: 2, depth: 1, claimId: 'c-0000aa04' },
+]);
+
+/** 内容档（pointerTier:false）——恢复事实只挂在**正文行**上，指针行没有正文。 */
+const t28Card = (store, extra = {}) => buildMemoryCard({
+  walkResult: walkOf(t28Hits()), store, scope: SCOPE, now: T28(12), pointerTier: false, ...extra,
+});
+
+test('T28 ①: 「同一命令后来 exit 0」⇒ 卡行多出恢复事实（带 seq + 日期）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    const card = t28Card(store);
+    const line = cardLines(card).find((l) => l.includes('Error: boom'));
+    assert.ok(line, '该行必须渲染');
+    assert.match(line, / · 恢复：后于 2026-10-20 同一命令成功（exit 0, seq 4）$/);
+    // 尾注不破坏 provenance 行格式：正文仍是逐字原文（A6 文字层只核正文）
+    const m = PROVENANCE_LINE_RE.exec(line);
+    assert.ok(m, '恢复尾注之后仍必须被 PROVENANCE_LINE_RE 解析');
+    assert.ok(!m[2].includes('恢复：'), '恢复事实只作尾注，不进正文');
+    // 只写事实：没有祈使句（AGENTS §2.1）
+    assert.deepEqual(auditImperatives(line), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T28 ②: 「同一文件后来写成功」⇒ 卡行多出恢复事实（带 seq + 日期）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    const card = t28Card(store);
+    const line = cardLines(card).find((l) => l.includes('old_string matched 2 times'));
+    assert.ok(line, '该行必须渲染');
+    assert.match(line, / · 恢复：后于 2026-10-20 同一文件写入成功（seq 8）$/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T28 ③: 没有恢复证据 ⇒ 卡行逐字节不变（tombstone）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    const on = t28Card(store);
+    const off = t28Card(store, { recoveryOnCard: false });
+    const onLines = cardLines(on);
+    const offLines = cardLines(off);
+    assert.equal(onLines.length, 4);
+    const idxBoom = offLines.findIndex((l) => l.includes('Error: boom'));
+    const idxNone = offLines.findIndex((l) => l.includes('never recovered'));
+    const idxPref = offLines.findIndex((l) => l.includes('不要新增依赖'));
+    assert.notEqual(onLines[idxBoom], offLines[idxBoom], '有恢复证据 ⇒ 多出尾注');
+    assert.equal(onLines[idxNone], offLines[idxNone], '没有恢复证据 ⇒ 逐字节不变');
+    assert.equal(onLines[idxPref], offLines[idxPref], '非 antipattern ⇒ 逐字节不变');
+    assert.ok(!onLines[idxNone].includes('恢复：'), '无证据不许编');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T28 ④: recoveryOnCard:false ⇒ 整卡与本改动前逐字节一致（无任何恢复尾注）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    const off = t28Card(store, { recoveryOnCard: false });
+    assert.ok(!String(off.section).includes('恢复：'), '关掉 ⇒ 卡片里不该出现恢复尾注');
+    const plain = t28Card(store, { recoveryOnCard: false });
+    assert.equal(off.section, plain.section, '同输入同输出（无时钟）');
+    assert.equal(off.tokens, plain.tokens);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T28 ⑤: 日志缺失/损坏 ⇒ 不抛、卡行逐字节不变', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    // 把日志换成坏字节：读日志失败 ⇒ 无恢复事实（卡片照常渲染）
+    writeFileSync(path.join(root, T28_REL_LOG), Buffer.from('not-a-zstd-log'));
+    const card = t28Card(store);
+    assert.ok(card.section, '卡片仍然渲染');
+    assert.equal(cardLines(card).length, 4);
+    assert.ok(!String(card.section).includes('恢复：'), '读不到证据 ⇒ 不写恢复事实');
+
+    // 完全缺失的日志路径：另建一局，closure.logPath 指向不存在的文件
+    store.putMany('episodes', [{
+      ...episode('ep-aaaaaaa9', 20, 1),
+      closure: { logPath: 'logs/demo/missing/session.v4.jsonl.zstd', graphPath: 'g/x/graph.json', seqFrom: 1, seqTo: 8 },
+    }]);
+    const card2 = buildMemoryCard({
+      walkResult: walkOf([{ episode: 'ep-aaaaaaa9', nodeId: null, link: null, why: [], weight: 1, occurredAt: T28(12), kind: 'failure', seq: 2, depth: 1, claimId: 'c-0000aa01' }]),
+      store, scope: SCOPE, now: T28(12), pointerTier: false,
+    });
+    assert.ok(!String(card2.section ?? '').includes('恢复：'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T28 ⑥: 纯函数判据（同命令才算；不同命令/再次失败都不算；重跑无失败输出单列）', () => {
+  const ev = (seq, type, data) => ({ type, seq, time: T28(12) + seq * 60_000, data });
+  const msg = (text) => ({ content: [{ type: 'text', text }] });
+  const call = (seq, callId, command) => ev(seq, 'tool/call', { callId, name: 'bash', arguments: JSON.stringify({ command }) });
+  const result = (seq, callId, text) => ev(seq, 'tool/result', { toolCallId: callId, message: msg(text) });
+
+  // ① 不同命令成功 ⇒ 不算恢复
+  const a = buildRecoveryIndex([
+    call(1, 'c1', 'node a.mjs'), result(2, 'c1', 'Error: boom\n[exit code: 1]'),
+    call(3, 'c2', 'node b.mjs'), result(4, 'c2', 'ok\n[exit code: 0]'),
+  ]);
+  assert.equal(findRecoveryFact(a, 'Error: boom'), null, '不同命令的成功不许凑数');
+
+  // ② 同命令重跑、无失败行（没有 exit 0）⇒ same-command-no-failure（空白归一后同一条命令）
+  const b = buildRecoveryIndex([
+    call(1, 'c1', 'node a.mjs'), result(2, 'c1', 'Error: boom\n[exit code: 1]'),
+    call(3, 'c2', 'node   a.mjs'), result(4, 'c2', 'done without failure'),
+  ]);
+  const fb = findRecoveryFact(b, 'Error: boom');
+  assert.equal(fb?.kind, 'same-command-no-failure');
+  assert.equal(fb?.seq, 4);
+
+  // ③ 同命令再次失败 ⇒ 仍无恢复
+  const c = buildRecoveryIndex([
+    call(1, 'c1', 'node a.mjs'), result(2, 'c1', 'Error: boom\n[exit code: 1]'),
+    call(3, 'c2', 'node a.mjs'), result(4, 'c2', 'Error: boom again\n[exit code: 1]'),
+  ]);
+  assert.equal(findRecoveryFact(c, 'Error: boom'), null, '再次失败不是恢复');
+
+  // ④ 同一段错误在局里出现多次 ⇒ 取离出处 seq 最近的那条
+  const d = buildRecoveryIndex([
+    call(1, 'c1', 'node a.mjs'), result(2, 'c1', 'Error: boom\n[exit code: 1]'),
+    call(10, 'c9', 'node a.mjs'), result(11, 'c9', 'Error: boom\n[exit code: 1]'),
+    call(20, 'c8', 'node a.mjs'), result(21, 'c8', 'ok\n[exit code: 0]'),
+  ]);
+  assert.equal(findRecoveryFact(d, 'Error: boom', { nearSeq: 11 })?.failureSeq, 11);
+  assert.equal(findRecoveryFact(d, 'Error: boom', { nearSeq: 2 })?.failureSeq, 2);
+});

@@ -320,6 +320,164 @@ export function deriveFalsifiableWhen(text, { maxQuote = MAX_QUOTE } = {}) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// T28 · 「恢复事实」——失败之后，**同一个主体后来成功**的事件（只写事实，不写建议）
+//
+// 背景（T26）：事实型卡只写「哪一局、跑了什么、报了什么错」，方向对但弱于指令式（25% vs 58.3%，p=0.125）。
+// 卡形态要补的是「当时怎么修好的」——以**事实**形式，不是祈使句（AGENTS §2.1）。
+//
+// 判据（沿用 T311/T339 的机械路线，**只认显式成功**，宁缺勿编）：
+//   · `same-command-exit-0`：同一条 bash 命令（tool/call 的 `command` 原文）后来**再次执行**，
+//     结果里有 `[exit code: 0]`；
+//   · `same-command-no-failure`：同一条命令后来再次执行、**没有失败行**（是"重跑没报错"，不是 exit 0）；
+//   · `same-file-write-ok`：同一个 `file_path` 后来被 `write`/`edit` **写成功**（成功标记见 `WRITE_OK_RE`）。
+// 全部带 `seq` + 事件 `time`；取不到时间/序号的一律不产出（无源不入、无时不入）。
+//
+// 与 `scripts/extract-recovery.mjs`（T311/T339）的关系：判据同源，但本函数**读时**在卡行上派生，
+// 且只认显式成功标记（脚本那边还接受 tests-pass/build-success 等信号，T338 实测它们在同主体约束下新增 0）。
+// ---------------------------------------------------------------------------
+
+/** 恢复事实的种类（渲染文案在 `inject.mjs`；这里只给机械判据）。 */
+export const RECOVERY_FACT_KINDS = Object.freeze([
+  'same-command-exit-0',
+  'same-command-no-failure',
+  'same-file-write-ok',
+]);
+
+/** write/edit 工具结果的**成功**标记（DSH 实际文案；没有它就不算"写成功"）。 */
+const WRITE_OK_RE = /has been (?:updated|created|written)(?: successfully)?|Created file|successfully (?:wrote|written|updated|created|replaced)/i;
+
+/** 事件 → 文本（多段用换行拼接；不用 JSON.stringify，避免转义造成假阴）。 */
+function recoveryEventText(ev) {
+  const out = [];
+  const push = (v) => {
+    if (v == null) return;
+    if (typeof v === 'string') { out.push(v); return; }
+    if (Array.isArray(v)) { for (const x of v) push(x); return; }
+    if (typeof v === 'object') { for (const x of Object.values(v)) push(x); }
+  };
+  push(ev?.data ?? ev ?? {});
+  return out.join('\n').trim();
+}
+
+/**
+ * **行级**失败定位（与 `scripts/extract-recovery.mjs` 的 `failureLineOf` 同判据）：
+ * ① 行首错误原文 `Error:` / `XxxError:` / `Exception:`；② 独占一行的非零 `[exit code: N]`。
+ * 行中间出现 Error 字样不算（系统提示词/日志正文里到处都有）。
+ */
+export function failureLineOfText(text) {
+  for (const raw of String(text ?? '').split('\n')) {
+    const t = raw.trim();
+    if (!t) continue;
+    const m = /^\[?exit code:?\s*(-?\d+)\]?$/i.exec(t);
+    if (m && Number(m[1]) !== 0) return t;
+    if (/^(?:[A-Za-z_]*Error|Exception)\s*:/.test(t) && t.length <= 400) return t;
+  }
+  return null;
+}
+
+/** 路径规范化（只做机械归整：反斜杠→正斜杠、小写；不做"补全/猜测"）。 */
+function recoveryNormPath(p) {
+  return String(p ?? '').replace(/\\/g, '/').toLowerCase();
+}
+
+/** tool/call → {name, cmd, fp}；解析不出参数时返回 null（不猜）。 */
+function recoveryCallInfo(call) {
+  const name = call?.data?.name;
+  if (typeof name !== 'string' || !name) return null;
+  let args = {};
+  try { args = JSON.parse(call?.data?.arguments ?? '{}'); } catch { args = {}; }
+  const fp = args.file_path ?? args.path ?? null;
+  const cmd = typeof args.command === 'string' ? args.command.replace(/\s+/g, ' ').trim() : null;
+  return { name, cmd, fp: fp ? recoveryNormPath(fp) : null };
+}
+
+/** 从失败原文里取"像路径"的主体（没有 ⇒ null；不拿前 N 字兜底，T338）。 */
+export function recoverySubjectOfText(text) {
+  const m = /(?:[A-Za-z]:)?[/\\][\w./\\-]{3,}\.\w{1,6}|[\w.-]+\.(?:m?js|cjs|ts|tsx|json|md|ya?ml|go|py)/.exec(String(text ?? ''));
+  return m ? recoveryNormPath(m[0]) : null;
+}
+
+/**
+ * 一局事件 → 可查询的恢复索引（纯函数；`inject` 读时调用）。
+ * @returns {{runs: object[], failures: object[]}}
+ *   run = {name, cmd, fp, seq, at, text, failed, exit0, ok}
+ *   failure = run 中 `failed` 的子集（带行级失败原文 `line`）
+ */
+export function buildRecoveryIndex(events = []) {
+  const list = normalizeEvents(events);
+  const calls = new Map();
+  const timeBySeq = new Map();
+  for (const ev of list) {
+    if (Number.isFinite(ev?.seq) && Number.isFinite(ev?.time)) timeBySeq.set(Number(ev.seq), Number(ev.time));
+    if (ev?.type === 'tool/call' && typeof ev?.data?.callId === 'string') calls.set(ev.data.callId, ev);
+  }
+  const runs = [];
+  for (const ev of list) {
+    if (ev?.type !== 'tool/result') continue;
+    const callId = ev?.data?.message?.toolCallId ?? ev?.data?.toolCallId ?? null;
+    const info = recoveryCallInfo(callId ? calls.get(callId) : null);
+    if (!info) continue;
+    const seq = Number(ev.seq);
+    if (!Number.isFinite(seq) || seq < 1) continue;
+    const text = recoveryEventText(ev);
+    const line = failureLineOfText(text);
+    runs.push({
+      ...info,
+      seq,
+      at: timeBySeq.has(seq) ? timeBySeq.get(seq) : null,
+      text,
+      line,
+      failed: line !== null,
+      exit0: /\[exit code: 0\]/.test(text),
+      ok: line === null && WRITE_OK_RE.test(text),
+    });
+  }
+  return { runs, failures: runs.filter((r) => r.failed) };
+}
+
+/** 失败原文 → 匹配前缀（去掉截断省略号、压空白；太短 ⇒ null，避免"Error:"这种到处都有的前缀）。 */
+export function recoveryMatchPrefix(quote, { minLength = 8, maxLength = 60 } = {}) {
+  const s = String(quote ?? '').replace(/…$/, '').replace(/\s+/g, ' ').trim();
+  if (s.length < minLength) return null;
+  return s.slice(0, maxLength);
+}
+
+/**
+ * 在索引里给一条失败原文找「后来同一主体成功」的事实。
+ * @param {{runs:object[], failures:object[]}} index `buildRecoveryIndex` 的产出
+ * @param {string} quote 失败原文（claim 的 support.quote / 卡行正文）
+ * @returns {{kind:string, seq:number, at:number, failureSeq:number, subject:string|null}|null}
+ */
+export function findRecoveryFact(index, quote, { nearSeq = null } = {}) {
+  const prefix = recoveryMatchPrefix(quote);
+  if (!prefix) return null;
+  const failures = Array.isArray(index?.failures) ? index.failures : [];
+  const runs = Array.isArray(index?.runs) ? index.runs : [];
+  const candidates = failures.filter((r) => typeof r.text === 'string' && r.text.includes(prefix));
+  if (!candidates.length) return null;
+  // 同一段错误原文在一局里可能出现多次（别的工具结果里也贴过它）⇒ 取**离卡上出处 seq 最近**的那条；
+  // 没有 seq 线索时取最早一条（T311：同主体约束不变，仍不凑数）。
+  const cur = Number.isFinite(nearSeq)
+    ? candidates.reduce((best, r) => (Math.abs(r.seq - nearSeq) < Math.abs(best.seq - nearSeq) ? r : best), candidates[0])
+    : candidates[0];
+  const withTime = (fact) => (fact && Number.isFinite(fact.seq) && Number.isFinite(fact.at) ? fact : null);
+  // ① 命令级：同一条 bash 命令后来 exit 0；没有 exit 0 再退到"重跑无失败输出"
+  if (cur.name === 'bash' && cur.cmd) {
+    const later = runs.find((r) => r.seq > cur.seq && r.name === 'bash' && r.cmd === cur.cmd && r.exit0);
+    if (later) return withTime({ kind: 'same-command-exit-0', seq: later.seq, at: later.at, failureSeq: cur.seq, subject: cur.cmd });
+    const again = runs.find((r) => r.seq > cur.seq && r.name === 'bash' && r.cmd === cur.cmd && !r.failed);
+    if (again) return withTime({ kind: 'same-command-no-failure', seq: again.seq, at: again.at, failureSeq: cur.seq, subject: cur.cmd });
+  }
+  // ② 文件级：同一个 file_path 后来被 write/edit 写成功
+  const subjectPath = cur.fp ?? recoverySubjectOfText(prefix);
+  if (subjectPath) {
+    const later = runs.find((r) => r.seq > cur.seq && (r.name === 'write' || r.name === 'edit') && r.fp === subjectPath && r.ok);
+    if (later) return withTime({ kind: 'same-file-write-ok', seq: later.seq, at: later.at, failureSeq: cur.seq, subject: subjectPath });
+  }
+  return null;
+}
+
 /**
  * 机械抽取。
  *
