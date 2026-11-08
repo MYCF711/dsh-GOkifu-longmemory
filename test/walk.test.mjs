@@ -1209,3 +1209,52 @@ test('T317 稳定排序：主排序键不变（tokOverlap 仍是第一键，clai
   assert.ok(compareHits(a, b) < 0, '同分时 c-aaa 在 c-bbb 前');
   assert.ok(compareHits(b, a) > 0, '反序对称（总序，无 0 依赖插入序）');
 });
+
+// ---------------------------------------------------------------------------
+// T45 · walk 排序用精确锚定（同一 repo / 同一错误签名 / 同一任务链 ⇒ 排前面）
+// ---------------------------------------------------------------------------
+test('T45 ①: compareHits —— 锚定行（_anchorRank=0）即使 tokOverlap 更低也排前面', async () => {
+  const { compareHits } = await import('../src/rooms/walk.mjs');
+  const anchored = { episode: 'ep-a', kind: 'failure', depth: 1, weight: 1, occurredAt: T0, _tokOverlap: 1, _anchorRank: 0 };
+  const plain = { episode: 'ep-b', kind: 'failure', depth: 1, weight: 5, occurredAt: T0 + 9, _tokOverlap: 9, _anchorRank: 1 };
+  assert.ok(compareHits(anchored, plain) < 0, '锚定行排前');
+  // tombstone：没有 `_anchorRank` 时行为与改动前一致（都按缺省 1 处理 ⇒ 仍是 tokOverlap 优先）
+  const a2 = { ...anchored, _anchorRank: undefined };
+  const b2 = { ...plain, _anchorRank: undefined };
+  assert.ok(compareHits(a2, b2) > 0, '无锚定 ⇒ 回到 tokOverlap 口径（高的在前）');
+}, );
+
+test('T45 ②: walk 集成 —— 关掉锚定与现状逐字节一致；锚定只改顺序、不增删 hit', async () => {
+  const { walkFromSignals } = await import('../src/rooms/walk.mjs');
+  const { createStore } = await import('../src/rooms/persist.mjs');
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const root = mkdtempSync(path.join(os.tmpdir(), 'kifu-t45-'));
+  try {
+    const store = createStore({ root, now: T0 });
+    store.ensureDirs();
+    store.putMany('episodes', [
+      { id: 'ep-a', scopeKey: SCOPE, sessionId: 's1', startedAt: T0, endedAt: T0 + 10, firstEventAt: T0, lastEventAt: T0 + 10, recordedAt: T0, l1: 'anchor-mark 的失败记录' },
+    ], { at: T0 });
+    store.putMany('topics', [{ id: 't:term:anchor', kind: 'term', key: 'anchor-mark', df: 1, firstSeenAt: T0, lastSeenAt: T0 }], { at: T0 });
+    const signal = { kind: 'root-message', terms: ['anchor-mark'], entities: [], at: T0 + 40 };
+
+    const base = walkFromSignals({ signal, store, scope: SCOPE, limit: 5, budgetTokens: 500 });
+    const again = walkFromSignals({ signal, store, scope: SCOPE, limit: 5, budgetTokens: 500, anchorRanking: false });
+    // tombstone：关掉锚定 ⇒ 结果与不传任何锚定参数**逐字节一致**（JSON 全等）
+    assert.equal(JSON.stringify(again), JSON.stringify(base), '关掉锚定 ⇒ 与现状逐字节一致');
+
+    // 锚定只改顺序、不改命中集（即使一条命中，也必须原样保留、不抛）
+    const on = walkFromSignals({
+      signal, store, scope: SCOPE, limit: 5, budgetTokens: 500,
+      signalText: '要找的是 anchor-mark 那次',
+      anchorRankOf: (claimText) => String(claimText).includes('anchor-mark'),
+    });
+    assert.deepEqual(on.hits.map((h) => h.episode), base.hits.map((h) => h.episode), '命中集与基线一致');
+    const noHit = walkFromSignals({ signal, store, scope: SCOPE, limit: 5, budgetTokens: 500, signalText: '无关文本', anchorRankOf: () => false });
+    assert.deepEqual(noHit.hits.map((h) => h.episode), base.hits.map((h) => h.episode), '锚定不命中 ⇒ 排序不变');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
