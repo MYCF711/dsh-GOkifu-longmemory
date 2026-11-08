@@ -1076,15 +1076,64 @@ export function resolveSessionScope({ session = null, store = null, storeRoot = 
   return { scope: direct, from: 'session-cwd' };
 }
 
-export function appendLiveStats(storeRoot, row) {
+/**
+ * T18（T16 遗留）：心跳台账 `live-stats.jsonl` 的**字节上限** —— 无上限 → **64 MB**。
+ *
+ * 为什么选「抬上限」而不是「按月分段」：`live-stats.jsonl` 有 **6 个整文件读者**
+ * （`scripts/live-stats.mjs`、`arena-report.mjs`、`audit-card-samples.mjs --current`、`m5-report.mjs`、
+ * `watch-first-inject.mjs`，以及经 `live-stats.mjs` 的 `patrol.mjs` / `status-digest.mjs`），
+ * 另有 `ledger-check.mjs`（只 stat 判新鲜）与 `kifu-profile-doctor.mjs`（只读 tail）。
+ * 按月分段会让这些读者的「规范路径」静默只剩最新一段 —— 与 T16 同一条硬约束：
+ * **任何让读者静默少读的方案都不行**。抬上限 = 零读者改动、旧行一字不改。
+ * 64MB 按当前 228 B/行、~1,920 行/天估算 ≈ 29 万行 ≈ 5 个月（见 evidence/T18-live-stats-cap.md）。
+ *
+ * 撞线不静默：`appendLiveStats` 返回 `capped`，`apply` 里一次性 warn + 写一条 `kind:'live-stats-cap'` 的墓碑行。
+ * 墓碑行是**唯一**允许越界（`allowOverCap`）的一行，而且**就写在 live-stats 里** ——
+ * 这样 6 个整文件读者都能看见它；写在没人读的新文件里等于没留痕。
+ */
+export const LIVE_STATS_CAP_BYTES = 64 * 1024 * 1024;
+
+export function appendLiveStats(storeRoot, row, { capBytes = LIVE_STATS_CAP_BYTES, allowOverCap = false } = {}) {
   try {
-    if (!storeRoot) return;
+    if (!storeRoot) return { status: 'absent', fileBytes: 0 };
     // 不创建目录：库还不存在时（首次用之前）不写心跳，避免把"无库"变成"有库"。
-    if (!fs.existsSync(storeRoot)) return;
+    if (!fs.existsSync(storeRoot)) return { status: 'absent', fileBytes: 0 };
+    const file = path.join(storeRoot, 'live-stats.jsonl');
+    const stat = fs.existsSync(file) ? fs.statSync(file) : null;
+    const fileBytes = stat ? stat.size : 0;
+    const cap = Number.isFinite(capBytes) && capBytes > 0 ? capBytes : LIVE_STATS_CAP_BYTES;
+    if (!allowOverCap && stat && stat.size >= cap) return { status: 'capped', fileBytes }; // 到上限就停写
     const src = (process.argv[1] ? path.basename(process.argv[1]) : 'host').slice(0, 40);
-    fs.appendFileSync(path.join(storeRoot, 'live-stats.jsonl'), `${JSON.stringify({ at: Date.now(), src, pid: process.pid, ...row })}
+    fs.appendFileSync(file, `${JSON.stringify({ at: Date.now(), src, pid: process.pid, ...row })}
 `);
+    return { status: 'written', fileBytes };
   } catch { /* 心跳失败不影响决策 */ }
+  return { status: 'failed', fileBytes: 0 };
+}
+
+/**
+ * T18：心跳撞上限时留**可发现**的痕迹（一次性 warn + 一条 `kind:'live-stats-cap'` 墓碑行）。
+ *
+ * `notified` 由 `apply()` 的闭包持有（每个插件实例、每个 store 只报一次）——
+ * 撞线后每一步都会走到 `appendLiveStats`，不设闸就会每步刷一行。
+ * 墓碑行走 `allowOverCap`（唯一允许越界的一行），这样 `scripts/live-stats.mjs` 的 `reason` 聚合里会看到
+ * `live-stats-cap=1` —— 台账满了这件事本身仍然可被现有读者发现。
+ */
+export function traceLiveStatsCap({ ctx = null, storeRoot = null, result = null, notified = null } = {}) {
+  if (!result || result.status !== 'capped' || !storeRoot) return false;
+  const seen = notified instanceof Set ? notified : new Set();
+  if (seen.has(storeRoot)) return false;
+  seen.add(storeRoot);
+  const file = path.join(storeRoot, 'live-stats.jsonl');
+  warn(ctx, `live-stats 已到上限 ${LIVE_STATS_CAP_BYTES} 字节（${file}，当前 ${result.fileBytes}）：后续心跳不再记录，归档或抬高上限后恢复；本提示每个进程只发一次。`);
+  appendLiveStats(storeRoot, {
+    kind: 'live-stats-cap',
+    action: 'skip',
+    reason: 'live-stats-cap',
+    capBytes: LIVE_STATS_CAP_BYTES,
+    fileBytes: Number.isFinite(result.fileBytes) ? result.fileBytes : null,
+  }, { allowOverCap: true });
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,7 +1225,7 @@ export function traceCardSampleCap({ ctx = null, storeRoot = null, sample = null
     reason: 'card-samples-cap',
     capBytes: CARD_SAMPLE_CAP_BYTES,
     fileBytes: Number.isFinite(sample.fileBytes) ? sample.fileBytes : null,
-  });
+  }, { allowOverCap: true }); // T18：live-stats 自己也满时，这条"卡样本已满"的痕迹仍要落得下（每进程一次）
   return true;
 }
 
@@ -1293,6 +1342,7 @@ export function apply(ctx, rawConfig = {}) {
   const injected = new WeakSet(); // 每会话只注入一次（对象身份；WeakSet 不留引用）
   const repeatStates = new Map(); // D5：每个会话的「同类失败计数」
   const cardSampleCapNotified = new Set(); // T16：撞卡样本上限只报一次（按 storeRoot）
+  const liveStatsCapNotified = new Set(); // T18：撞心跳上限只报一次（按 storeRoot）
   const disposers = [];
   let disposed = false;
 
@@ -1308,6 +1358,7 @@ export function apply(ctx, rawConfig = {}) {
       disposePromise = (async () => {
         repeatStates.clear();
         cardSampleCapNotified.clear();
+        liveStatsCapNotified.clear();
         const pending = [];
         for (const off of disposers.splice(0).reverse()) {
           const result = off();
@@ -1508,7 +1559,7 @@ export function apply(ctx, rawConfig = {}) {
           // T16：撞上限不许静默 —— 一次性 warn（宿主日志）+ 一条 live-stats（kind=card-samples-cap）。
           traceCardSampleCap({ ctx, storeRoot: storeRootForStats, sample: cardSample, notified: cardSampleCapNotified });
         }
-        appendLiveStats(storeRootForStats, {
+        const liveStatsWrite = appendLiveStats(storeRootForStats, {
           kind: 'pre-step',
           scope: lastResolvedScope(session?.id)?.scope ?? null,
           scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
@@ -1529,6 +1580,9 @@ export function apply(ctx, rawConfig = {}) {
             }
             : {}),
         });
+        // T18：心跳撞上限不许静默 —— 一次性 warn（宿主日志）+ 一条 kind=live-stats-cap 的墓碑行（就写在 live-stats 里，
+        // 所有整文件读者都能看见；不写新文件，免得"留了痕但没人读"）。
+        traceLiveStatsCap({ ctx, storeRoot: storeRootForStats, result: liveStatsWrite, notified: liveStatsCapNotified });
       }
       // 真注入成功 / 影子记录写成 ⇒ 这个会话就别再来一遍
       if (result.action === 'inject' || result.action === 'shadow') {
@@ -1587,6 +1641,9 @@ export default {
   CARD_SAMPLE_CAP_BYTES,
   appendCardSample,
   traceCardSampleCap,
+  LIVE_STATS_CAP_BYTES,
+  appendLiveStats,
+  traceLiveStatsCap,
   digestOf,
   insertAfterClaimed,
   cardText,

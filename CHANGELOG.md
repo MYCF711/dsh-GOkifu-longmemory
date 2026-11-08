@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.53（2026-11-08）
+
+### T18 · live-stats.jsonl 上限 64MB + 撞线留痕
+
+**版本说明**：`src/plugin.mjs` 行为变更 ⇒ patch。
+
+**先查读者（8 个）再定方案**：live-stats.mjs / arena-report / audit-card-samples --current / m5-report /
+watch-first-inject / patrol / status-digest 都**整文件**读；kifu-profile-doctor 读 tail；ledger-check 只 stat。
+按月分段要同时改 8 处、漏一处就是静默少读 ⇒ 与 T16 同结论：**抬上限，读侧零改动**。
+
+**撞线留痕写进台账自己**（不是另开文件——写在没人读的新文件里等于没留痕）：
+`{kind:"live-stats-cap"}` 一行（`allowOverCap`，**唯一允许越界的一行**），6 个整文件读者都能看见。
+T16 的 card-samples-cap 同步改 allowOverCap。
+
+**估算**：228B/行 · 1919 行/天 ⇒ 64MB ≈ **153 天**（速率波动 9 倍已如实标注）。
+
+**验收**：plugin.test **67/67**；实库 live-stats.mjs / audit-card-samples --current / status-digest 均 exit 0；
+tombstone 双向（删判定/删 trace 各红）。
+
 ## 0.8.52（2026-11-08）
 
 ### T9 · ablation 首批 20 对：判别力不足（如实，不当结论）

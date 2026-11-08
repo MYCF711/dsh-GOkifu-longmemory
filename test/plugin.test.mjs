@@ -19,6 +19,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, truncateSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import {
   CARD_SOURCE_FORM,
@@ -1505,6 +1506,123 @@ test('T16 ③ 接线: 真注入撞上限 ⇒ live-stats 出现 card-samples-cap�
     assert.equal(warns.filter((w) => w.includes('卡样本已到上限')).length, 1);
   } finally {
     cleanup();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// T18 · 心跳台账 live-stats.jsonl：无上限 → 64MB，且**撞上限不许静默**
+//
+// 背景（T16 遗留）：live-stats 每步一行（19,904 行 / 4.5MB，≈1,920 行/天），行数比卡样本多 6 倍。
+// 这里**不能轮转/按月分段**：6 个整文件读者（live-stats.mjs / arena-report.mjs / audit-card-samples --current /
+// m5-report.mjs / watch-first-inject.mjs，以及经 live-stats.mjs 的 patrol.mjs·status-digest.mjs）
+// 都会静默只读最新一段 —— 与 T16 同一条硬约束。
+//
+// tombstone：① 删掉 `stat.size >= cap` 判定 ⇒ T18 ① 红、T18 ③ 红（不会出现 live-stats-cap 行）；
+//            ② 删掉 apply 里的 `traceLiveStatsCap(...)` ⇒ T18 ③ 红。
+// ---------------------------------------------------------------------------
+import { LIVE_STATS_CAP_BYTES, appendLiveStats, traceLiveStatsCap } from '../src/plugin.mjs';
+
+test('T18 ①: 到上限就停写、返回 capped；墓碑行是唯一允许越界的一行（旧行不动）', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-t18-cap-'));
+  try {
+    const file = path.join(dir, 'live-stats.jsonl');
+    writeFileSync(file, '{"at":1,"src":"index.js","pid":1,"kind":"pre-step","action":"skip"}\n');
+    const before = readFileSync(file, 'utf8');
+    const capped = appendLiveStats(dir, { kind: 'pre-step', action: 'skip' }, { capBytes: 1 });
+    assert.equal(capped.status, 'capped', '到上限必须说 capped（旧实现会一直写）');
+    assert.equal(capped.fileBytes, before.length, '要如实报当前字节数（墓碑行要用）');
+    assert.equal(readFileSync(file, 'utf8'), before, '撞上限后旧行必须一字不动');
+    // 墓碑行：唯一允许越界的一行（否则"台账满了"这件事没有任何读者看得见）
+    const tomb = appendLiveStats(dir, { kind: 'live-stats-cap', action: 'skip', reason: 'live-stats-cap' }, { capBytes: 1, allowOverCap: true });
+    assert.equal(tomb.status, 'written');
+    const rows = readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.equal(rows.length, 2);
+    assert.equal(rows.at(-1).kind, 'live-stats-cap');
+    // 没到上限照常写
+    const written = appendLiveStats(dir, { kind: 'pre-step', action: 'skip' }, { capBytes: 1024 * 1024 });
+    assert.equal(written.status, 'written');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T18 ②: traceLiveStatsCap —— warn 一次 + 一条 live-stats-cap，同一 store 只报一次', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-t18-trace-'));
+  try {
+    const { ctx, warns } = makeCtx();
+    const notified = new Set();
+    const result = { status: 'capped', fileBytes: LIVE_STATS_CAP_BYTES };
+    assert.equal(traceLiveStatsCap({ ctx, storeRoot: dir, result, notified }), true);
+    assert.ok(warns.some((w) => w.includes('live-stats 已到上限')), `要给 warn，实际：${warns.join(' | ')}`);
+    const liveFile = path.join(dir, 'live-stats.jsonl');
+    const readLive = () => readFileSync(liveFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const rows = readLive();
+    assert.equal(rows.length, 1, '撞线痕迹就一行（不是每步一行）');
+    assert.equal(rows[0].kind, 'live-stats-cap');
+    assert.equal(rows[0].reason, 'live-stats-cap');
+    assert.equal(rows[0].capBytes, LIVE_STATS_CAP_BYTES);
+    assert.equal(rows[0].fileBytes, LIVE_STATS_CAP_BYTES);
+    assert.equal(rows[0].pid, process.pid);
+    assert.equal(traceLiveStatsCap({ ctx, storeRoot: dir, result, notified }), false);
+    assert.equal(readLive().length, 1, '第二次不许再写');
+    assert.equal(traceLiveStatsCap({ ctx, storeRoot: dir, result: { status: 'written' }, notified }), false);
+    assert.equal(readLive().length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('T18 ③ 接线: 真 pre-step 撞上限 ⇒ live-stats 末尾出现 live-stats-cap（不是静默停写）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    const file = path.join(storeRoot, 'live-stats.jsonl');
+    writeFileSync(file, '');
+    truncateSync(file, LIVE_STATS_CAP_BYTES - 1); // 设成"只剩 1 字节"（稀疏文件，不用真写 64MB）
+    writeFileSync(file, '\n', { flag: 'a' }); // 让最后一个是换行 ⇒ 墓碑行能落在干净的行首
+    assert.equal(statSync(file).size, LIVE_STATS_CAP_BYTES);
+
+    const { ctx, hooks, warns } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot, liveStats: true, probeValidity: false }));
+    const step = async () => {
+      const { session } = makeSession(workspace);
+      const claimed = [userMessage('今天天气不错，随便聊聊')];
+      await runHook({ hooks, payload: { agent: { session }, messages: claimed }, decision: enterDecision([...claimed]) });
+    };
+    await step();
+    const sizeAfterFirst = statSync(file).size;
+    assert.ok(sizeAfterFirst > LIVE_STATS_CAP_BYTES, '墓碑行必须真的写进去（它是"台账满了"唯一可见的痕迹）');
+    await step();
+    assert.equal(statSync(file).size, sizeAfterFirst, '第二次 step 不许再写（一次性告警，不刷屏）');
+
+    const lines = readFileSync(file, 'utf8').trim().split('\n');
+    const last = JSON.parse(lines.at(-1));
+    assert.equal(last.kind, 'live-stats-cap');
+    assert.equal(last.capBytes, LIVE_STATS_CAP_BYTES);
+    const capRows = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((r) => r && r.kind === 'live-stats-cap');
+    assert.equal(capRows.length, 1);
+    assert.equal(warns.filter((w) => w.includes('live-stats 已到上限')).length, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test('T18 ④ 读者: scripts/live-stats.mjs 照常读（含墓碑行）—— 台账满了仍可被发现', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'kifu-t18-reader-'));
+  try {
+    const rows = [
+      { at: 1, src: 'index.js', pid: 1, kind: 'pre-step', action: 'skip', reason: 'no-signal' },
+      { at: 2, src: 'index.js', pid: 1, kind: 'pre-step', action: 'inject', tokens: 120 },
+      { at: 3, src: 'index.js', pid: 1, kind: 'live-stats-cap', action: 'skip', reason: 'live-stats-cap', capBytes: LIVE_STATS_CAP_BYTES, fileBytes: LIVE_STATS_CAP_BYTES },
+    ];
+    writeFileSync(path.join(dir, 'live-stats.jsonl'), `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
+    const out = execFileSync(process.execPath, [path.resolve('scripts', 'live-stats.mjs'), '--store', dir, '--json'], { encoding: 'utf8', cwd: process.cwd() });
+    const summary = JSON.parse(out);
+    assert.equal(summary.lines, 3, '读者必须能看到全部行（包括墓碑行）');
+    assert.equal(summary.hostLines, 3);
+    assert.equal(summary.reasons['live-stats-cap'], 1, 'reason 聚合里要能看到 live-stats-cap');
+    assert.equal(summary.actions.skip, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
