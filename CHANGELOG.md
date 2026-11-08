@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.54（2026-11-08）
+
+### T20 corpus 上限 + T19 abstain 线上复验（重要：T12 尚未上线）
+
+**版本说明**：`src/plugin.mjs` 行为变更（T20）⇒ patch。
+
+#### T20 · corpus/messages.jsonl 上限 64MB
+
+全仓只有 1 个读者（`t267-replay` 整文件读）⇒ 抬上限不iw分段。
+撞线写 `{kind:"messages-corpus-cap"}`（allowOverCap）进 live-stats。估算 64MB ≈ **95 天**。
+
+#### T19 · abstain 线上复验：**线上仍是 pre-T12 旧代码**
+
+**线上 25 次 abstain 全部 `cross-scope`**；12 条可逐字节重建的拒绝，旧判据重放 12/12 = cross-scope（与线上一致），
+T12 判据重放 **0/12**（其中 4/12 根本不再拒）⇒ **行为对不上 T12**。
+
+四条独立证据：宿主 pid 25256 启动 **06:47:34** < T12 合入 **08:21:27**（#492）。
+**线上误杀率 33.3%（4/12）是 pre-T12 的对照值，不是 T12 的。**
+
+**⇒ T12 的修复要生效，需要用户重启 DSH。** 重启后再测一次才有「T12 后的线上误杀率」。
+
 ## 0.8.53（2026-11-08）
 
 ### T18 · live-stats.jsonl 上限 64MB + 撞线留痕

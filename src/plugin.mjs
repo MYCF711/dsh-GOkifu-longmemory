@@ -370,18 +370,56 @@ export function redactForCorpus(text) {
     .replace(/(?:api[_-]?key|token|secret|password)\s*[:=]\s*\S+/gi, '[REDACTED]');
 }
 
-/** 追加一行语料；**绝不抛**（写失败只 warn）。 */
-export function appendMessageCorpus(rootDir, row, { fsImpl = fs } = {}) {
+/**
+ * T20（T18 遗留）：消息语料 `corpus/messages.jsonl` 的**字节上限** —— 无上限 → **64 MB**。
+ *
+ * 读者清单（先查后定）：全仓只有 **1 个读者** —— `scripts/t267-replay.mjs` 的 `CORPUS`
+ * （`readFileSync` 整文件、逐行重放）。它不在本任务的可写范围 ⇒ 与 T16/T18 同一条硬约束：
+ * **任何让读者静默少读的方案（分段/轮转）都不行**；抬上限 = 零读者改动、旧行一字不改。
+ * 64MB 按当前 ~357 行/天 × 1,985 B/行 ≈ 709 KB/天估算 ≈ 95 天（见 evidence/T20-corpus-cap.md）。
+ *
+ * 撞线不静默：`appendMessageCorpus` 返回 `capped`，`traceMessageCorpusCap` 一次性 warn +
+ * 往 live-stats 写一条 `kind:'messages-corpus-cap'`（`allowOverCap` —— 台账自己也满时仍落得下）。
+ */
+export const MESSAGE_CORPUS_CAP_BYTES = 64 * 1024 * 1024;
+
+/** 追加一行语料；**绝不抛**（写失败只 warn）。T20：返回值从 `boolean` 改成 `{ status, fileBytes }`（written|capped|failed）。 */
+export function appendMessageCorpus(rootDir, row, { fsImpl = fs, capBytes = MESSAGE_CORPUS_CAP_BYTES } = {}) {
   try {
-    const dir = path.dirname(messageCorpusPath(rootDir));
-    fsImpl.mkdirSync(dir, { recursive: true });
+    const file = messageCorpusPath(rootDir);
+    const stat = typeof fsImpl.existsSync === 'function' && fsImpl.existsSync(file) ? fsImpl.statSync(file) : null;
+    const fileBytes = stat ? stat.size : 0;
+    const cap = Number.isFinite(capBytes) && capBytes > 0 ? capBytes : MESSAGE_CORPUS_CAP_BYTES;
+    if (stat && stat.size >= cap) return { status: 'capped', fileBytes }; // 到上限就停写（旧行一字不动）
+    fsImpl.mkdirSync(path.dirname(file), { recursive: true });
     const safe = { ...row, messages: (row.messages ?? []).map((m) => ({ ...m, text: redactForCorpus(m.text) })) };
-    fsImpl.appendFileSync(messageCorpusPath(rootDir), `${JSON.stringify(safe)}
+    fsImpl.appendFileSync(file, `${JSON.stringify(safe)}
 `);
-    return true;
+    return { status: 'written', fileBytes };
   } catch {
-    return false;
+    return { status: 'failed', fileBytes: 0 };
   }
+}
+
+/**
+ * T20：消息语料撞上限时留**可发现**的痕迹（一次性 warn + live-stats 一条 `messages-corpus-cap`）。
+ * `notified` 由 `apply()` 的 lifecycle 持有（每插件实例、每 store 只报一次）—— 撞线后每一步都会尝试采集，
+ * 不设闸就会每步刷一条。痕迹写进 live-stats（现有 8 个读者都能看见），不写没人读的新文件。
+ */
+export function traceMessageCorpusCap({ ctx = null, storeRoot = null, result = null, notified = null } = {}) {
+  if (!result || result.status !== 'capped' || !storeRoot) return false;
+  const seen = notified instanceof Set ? notified : new Set();
+  if (seen.has(storeRoot)) return false;
+  seen.add(storeRoot);
+  warn(ctx, `消息语料已到上限 ${MESSAGE_CORPUS_CAP_BYTES} 字节（${messageCorpusPath(storeRoot)}，当前 ${result.fileBytes}）：后续语料不再采集，归档或抬高上限后恢复；本提示每个进程只发一次。`);
+  appendLiveStats(storeRoot, {
+    kind: 'messages-corpus-cap',
+    action: 'skip',
+    reason: 'messages-corpus-cap',
+    capBytes: MESSAGE_CORPUS_CAP_BYTES,
+    fileBytes: Number.isFinite(result.fileBytes) ? result.fileBytes : null,
+  }, { allowOverCap: true }); // T18：live-stats 自己也满时，这条语料已满的痕迹仍要落得下（每进程一次）
+  return true;
 }
 
 function warn(ctx, line) {
@@ -664,7 +702,12 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
         messages: payload?.messages ?? [],
         at,
       });
-      if (row.messages.length && !appendMessageCorpus(storeRoot, row)) warn(ctx, '语料采集写盘失败（已忽略）');
+      if (row.messages.length) {
+        const corpusWrite = appendMessageCorpus(storeRoot, row);
+        if (corpusWrite.status === 'failed') warn(ctx, '语料采集写盘失败（已忽略）');
+        // T20：语料撞上限不许静默 —— 一次性 warn + live-stats 一条 kind=messages-corpus-cap。
+        traceMessageCorpusCap({ ctx, storeRoot, result: corpusWrite, notified: lifecycle?.corpusCapNotified ?? null });
+      }
     } catch (error) {
       warn(ctx, `语料采集失败（已忽略）：${String(error?.message ?? error)}`);
     }
@@ -1359,6 +1402,7 @@ export function apply(ctx, rawConfig = {}) {
         repeatStates.clear();
         cardSampleCapNotified.clear();
         liveStatsCapNotified.clear();
+        lifecycle.corpusCapNotified.clear();
         const pending = [];
         for (const off of disposers.splice(0).reverse()) {
           const result = off();
@@ -1376,7 +1420,7 @@ export function apply(ctx, rawConfig = {}) {
     });
     return dispose;
   };
-  const lifecycle = { ctx, builds: new Set(), isDisposed: () => disposed };
+  const lifecycle = { ctx, builds: new Set(), isDisposed: () => disposed, corpusCapNotified: new Set() };
   disposers.push(() => {
     const pending = [];
     for (const record of [...lifecycle.builds]) {
@@ -1644,6 +1688,9 @@ export default {
   LIVE_STATS_CAP_BYTES,
   appendLiveStats,
   traceLiveStatsCap,
+  MESSAGE_CORPUS_CAP_BYTES,
+  appendMessageCorpus,
+  traceMessageCorpusCap,
   digestOf,
   insertAfterClaimed,
   cardText,
