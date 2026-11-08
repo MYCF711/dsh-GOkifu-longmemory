@@ -2401,3 +2401,82 @@ test('T30 ⑧: 索引只增不改（同键冲突只计数不覆盖；同一 clai
   assert.equal(merged.index.entries['c-x'].kind, 'same-command-exit-0', 'claimId 兜底也保留原值');
   assert.ok(merged.index.supports['ep-a:6'], '同一 claim 的多 support 正常加入');
 });
+
+// ---------------------------------------------------------------------------
+// T31 · 有恢复事实的 antipattern **不降级为指针行**（恢复事实只在正文行渲染）
+// ---------------------------------------------------------------------------
+
+/** 指针档默认开（不传 pointerTier）——T31 要测的就是默认链路。 */
+const t31Card = (store, extra = {}) => buildMemoryCard({
+  walkResult: walkOf(t28Hits()), store, scope: SCOPE, now: T28(12), ...extra,
+});
+
+test('T31 ①: 有恢复事实的 observed+1 局支撑 antipattern ⇒ 正文行 + 恢复尾注（不降级）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry() } });
+    const card = t31Card(store);
+    const line = cardLines(card).find((l) => l.includes('Error: boom'));
+    assert.ok(line, '该行必须渲染');
+    assert.ok(!line.includes('原文未给'), '不许降级为指针行');
+    assert.match(line, /Error: boom \(ep-aaaaaaa1/, '正文在');
+    assert.match(line, / · 恢复：后于 2026-10-20 同一命令成功（exit 0, seq 4）$/, '恢复尾注在');
+    assert.equal(card.tier, 'content');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T31 ②: 没有恢复事实的 observed+1 局支撑 antipattern ⇒ 仍是指针行（T3 不动）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    const card = t31Card(store);
+    const line = cardLines(card).find((l) => l.includes('原文未给') || l.includes('never recovered'));
+    assert.ok(line, '该 claim 仍进卡');
+    assert.match(line, /1 局支撑 · 原文未给 \(ep-aaaaaaa1/, '仍是指针行');
+    assert.ok(!String(card.section).includes('恢复：'), '没有索引 ⇒ 没有恢复事实');
+    assert.equal(card.tier, 'pointers');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T31 ③: 开关关掉（recoveryOnCard:false）⇒ 回到原行为（指针行）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry() } });
+    const card = t31Card(store, { recoveryOnCard: false });
+    assert.ok(!String(card.section).includes('恢复：'));
+    assert.equal(card.tier, 'pointers', '关掉恢复事实 ⇒ 有索引也不豁免');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T31 ④: pointerTier:false ⇒ 行为不变（全员正文行，T3 关档口径）', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry() } });
+    const card = t31Card(store, { pointerTier: false });
+    const lines = cardLines(card);
+    assert.equal(lines.filter((l) => l.includes('原文未给')).length, 0, '关档 ⇒ 没有指针行');
+    const boom = lines.find((l) => l.includes('Error: boom'));
+    assert.match(boom, / · 恢复：/, '正文行照常带恢复尾注');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('T31 ⑤: token 成本 —— 只有被豁免的那一行变厚，其它行逐字节不变', () => {
+  const { root, store } = makeT28Fixture();
+  try {
+    unlinkSync(path.join(root, T28_REL_LOG));
+    writeRecoveryIndex(store.root, { version: 1, entries: { 'c-0000aa01': t30IndexEntry() } });
+    const exempt = t31Card(store);
+    const control = t31Card(store, { recoveryOnCard: false });
+    const a = cardLines(exempt);
+    const b = cardLines(control);
+    assert.equal(a.length, b.length, '行数不变（同一批命中）');
+    const diffIdx = a.map((l, i) => (l === b[i] ? -1 : i)).filter((i) => i >= 0);
+    assert.equal(diffIdx.length, 1, '只有"有恢复事实"那一行不同');
+    assert.match(b[diffIdx[0]], /原文未给/, '对照卡：该行是指针行');
+    assert.match(a[diffIdx[0]], / · 恢复：/, '豁免卡：该行是正文 + 恢复尾注');
+    assert.ok(exempt.tokens > control.tokens, '卡片 tokens 增加（成本可测）');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
