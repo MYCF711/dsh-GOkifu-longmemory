@@ -14,8 +14,10 @@
 //
 // 七项判据（全部机械，不编造；样本不足一律 NO-SAMPLE，不许硬算过）：
 //   ① 新代码已加载：instance-status 的包版本 ≥ 本仓 package.json，**且** 当前宿主 pid 的首条心跳
-//      晚于「最新发版时点」（package.json / CHANGELOG.md 的 mtime 取最大）。
-//      —— 只看版本号不够：宿主没重启时，包版本永远是新的（软链直读源码），但跑的还是旧进程。
+//      晚于「**最近一次改运行时代码**（`src/` 或 `packages/`）的提交时点」（T50）。
+//      —— 只看版本号不够：宿主没重启时，包版本永远是新的（软链直读源码），但跑的还是旧进程；
+//      —— 也**不能**用 package.json / CHANGELOG 的 mtime：docs-only 发版也会 bump 它们，
+//         那样每发一次文档版都判「需要重启」（0.8.86 / 0.8.87 连续两次假红）。
 //   ② T12：当前宿主 pid 的 `abstain` 行里，reason **不再全塌 `cross-scope`**（出现任何非 cross-scope 即过）。
 //   ③ T10：当前 pid 最近 30 条 `card-samples` 里 `signalPreview` 长度 >160 的比例 **> 30%**。
 //   ④ T25：当前 pid 的 `(scope,digest)` 注入重复率 **低于 T24 基线 36.23%**（T24 §二：471/1300）。
@@ -84,20 +86,58 @@ export function parseInstanceStatus(text) {
 
 /**
  * ① 新代码已加载。
- * @param {{instanceText?:string, localVersion?:string, hostFirstAt?:number|null, releaseAt?:number|null}} input
+ *
+ * **什么叫「新代码」**（T50，2026-11-09）：只有**运行时代码**（`src/`、`packages/`）变了才需要重启宿主；
+ * `package.json` / `CHANGELOG.md` 的 mtime 在 **docs-only 发版**时也会变 —— 用它们当判据，每发一次文档版
+ * 都会把「宿主首心跳早于发版」判成 FAIL（0.8.86 / 0.8.87 连续两次假红，用户被迫为纯文档改动重启）。
+ * 现在传入的是**最后一次改 `src/` 或 `packages/` 的提交时点**（`lastRuntimeCommitAt`）。
+ *
+ * @param {{instanceText?:string, localVersion?:string, hostFirstAt?:number|null, codeAt?:number|null}} input
  */
-export function judgeNewCode({ instanceText = '', localVersion = '', hostFirstAt = null, releaseAt = null } = {}) {
+export function judgeNewCode({ instanceText = '', localVersion = '', hostFirstAt = null, codeAt = null } = {}) {
   const parsed = parseInstanceStatus(instanceText);
   if (!Number.isFinite(hostFirstAt)) {
     return item('new-code', '新代码已加载（instance-status + 宿主启动时间）', STATUS.NO_SAMPLE,
       `没有宿主心跳（live-stats 无 src=index.js 行）⇒ 无法确认在跑哪份代码；instance-status: ${parsed.versionOk ? `包版本 ${parsed.version} ok` : '未读到 OK 的包版本'}`);
   }
-  const verOk = parsed.versionOk && compareVersions(parsed.version, localVersion) >= 0;
-  const fresh = Number.isFinite(releaseAt) && hostFirstAt > releaseAt;
   const fmt = (ms) => (Number.isFinite(ms) ? new Date(ms).toISOString() : 'n/a');
-  const evidence = `包版本 ${parsed.version ?? '?'} ${verOk ? '≥' : '<'} ${localVersion}；软链 ${parsed.linkOk ? 'OK' : 'FAIL'}；宿主首心跳 ${fmt(hostFirstAt)} ${fresh ? '晚于' : '早于'} 发版 ${fmt(releaseAt)} ⇒ ${fresh ? '已重启' : '仍是旧进程（需要重启宿主）'}`;
+  const verOk = parsed.versionOk && compareVersions(parsed.version, localVersion) >= 0;
+  // 判不了就 NO-SAMPLE，不许硬算过（与 ③④⑤ 同一条纪律）：读不到 git 历史时，"在跑哪份代码"没有证据。
+  if (!Number.isFinite(codeAt)) {
+    return item('new-code', '新代码已加载（instance-status + 宿主启动时间）', STATUS.NO_SAMPLE,
+      `包版本 ${parsed.version ?? '?'} ${verOk ? '≥' : '<'} ${localVersion}；软链 ${parsed.linkOk ? 'OK' : 'FAIL'}；宿主首心跳 ${fmt(hostFirstAt)}；**读不到最近一次运行时代码改动**（无 git 历史）⇒ 判不了是否已重启`);
+  }
+  const fresh = hostFirstAt > codeAt;
+  const evidence = `包版本 ${parsed.version ?? '?'} ${verOk ? '≥' : '<'} ${localVersion}；软链 ${parsed.linkOk ? 'OK' : 'FAIL'}；宿主首心跳 ${fmt(hostFirstAt)} ${fresh ? '晚于' : '早于'} 最近一次运行时代码改动 ${fmt(codeAt)} ⇒ ${fresh ? '已重启' : '仍是旧进程（需要重启宿主）'}`;
   if (verOk && parsed.linkOk && fresh) return item('new-code', '新代码已加载（instance-status + 宿主启动时间）', STATUS.PASS, evidence);
   return item('new-code', '新代码已加载（instance-status + 宿主启动时间）', STATUS.FAIL, evidence);
+}
+
+/** 载入宿主进程的路径（改了才需要重启）。docs/、CHANGELOG、package.json 的版本号都不在这里。 */
+export const RUNTIME_PATHS = Object.freeze(['src', 'packages']);
+
+/**
+ * 最后一次**改运行时代码**的提交时点（epoch ms）；读不到（无 git / 干净导出）⇒ null，交给 ① 判 NO-SAMPLE。
+ *
+ * 为什么用提交时点而不是文件 mtime：mtime 会被 `git checkout` / 拷贝 / 构建脚本随机刷新，而提交时点
+ * 是"这份代码是什么时候变成现在这样的"的机械答案。
+ *
+ * @param {{repo?:string, spawn?:Function}} [opts]
+ */
+export function lastRuntimeCommitAt({ repo = REPO, spawn = spawnSync } = {}) {
+  let res;
+  try {
+    res = spawn('git', ['log', '-1', '--format=%ct', '--', ...RUNTIME_PATHS], {
+      cwd: repo,
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+  } catch {
+    return null;
+  }
+  if (!res || res.status !== 0) return null;
+  const seconds = Number.parseInt(String(res.stdout ?? '').trim(), 10);
+  return Number.isFinite(seconds) ? seconds * 1000 : null;
 }
 
 /**
@@ -259,10 +299,6 @@ function runNode(args, { timeoutMs = 600000 } = {}) {
   };
 }
 
-const mtimeMs = (file) => {
-  try { return fs.statSync(file).mtimeMs; } catch { return null; }
-};
-
 /**
  * 跑全部七项。`opts.skipHeavy` 只用于**自测**（把 ⑦ 记成 NO-SAMPLE，绝不记成 PASS）。
  */
@@ -276,10 +312,11 @@ export function runChecks({ store = DEFAULT_STORE, repo = REPO, timeoutMs = 6000
 
   // ①
   const pkg = JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8'));
-  const releaseAt = Math.max(mtimeMs(path.join(repo, 'package.json')) ?? 0, mtimeMs(path.join(repo, 'CHANGELOG.md')) ?? 0) || null;
+  // T50：判「在跑哪份代码」只看**运行时代码**的最近改动（docs-only 发版不需要重启）
+  const codeAt = lastRuntimeCommitAt({ repo });
   const hostFirstAt = curRows.length ? Math.min(...curRows.map((r) => Number(r.at)).filter(Number.isFinite)) : null;
   const inst = runNode([path.join(repo, 'scripts', 'instance-status.mjs')], { timeoutMs });
-  items.push(judgeNewCode({ instanceText: inst.stdout, localVersion: pkg.version, hostFirstAt, releaseAt }));
+  items.push(judgeNewCode({ instanceText: inst.stdout, localVersion: pkg.version, hostFirstAt, codeAt }));
 
   // ②
   items.push(judgeAbstainReasons(curRows.filter((r) => r?.action === 'abstain')));

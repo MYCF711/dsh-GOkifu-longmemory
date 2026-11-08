@@ -4,12 +4,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import {
   compareVersions,
   parseInstanceStatus,
   judgeNewCode,
+  lastRuntimeCommitAt,
   judgeAbstainReasons,
   judgeSignalPreview,
   judgeDuplicateInjections,
@@ -47,19 +50,62 @@ test('T42 ①: parseInstanceStatus 读出包版本/软链状态', () => {
   assert.equal(out.linkOk, false);
 });
 
-test('T42 ①: 新代码已加载 = 版本到位 + 软链 OK + 宿主首心跳晚于发版时点（否则 FAIL）', () => {
+test('T42 ①: 新代码已加载 = 版本到位 + 软链 OK + 宿主首心跳晚于运行时代码改动（否则 FAIL）', () => {
   const inst = 'OK    包版本        x@0.8.76\nOK    软链         → 本工作区';
-  const fresh = judgeNewCode({ instanceText: inst, localVersion: '0.8.76', hostFirstAt: 2000, releaseAt: 1000 });
+  const fresh = judgeNewCode({ instanceText: inst, localVersion: '0.8.76', hostFirstAt: 2000, codeAt: 1000 });
   assert.equal(fresh.status, P);
-  const stale = judgeNewCode({ instanceText: inst, localVersion: '0.8.76', hostFirstAt: 1000, releaseAt: 2000 });
-  assert.equal(stale.status, F, '宿主启动早于发版 ⇒ 跑的还是旧进程');
+  const stale = judgeNewCode({ instanceText: inst, localVersion: '0.8.76', hostFirstAt: 1000, codeAt: 2000 });
+  assert.equal(stale.status, F, '宿主启动早于运行时代码改动 ⇒ 跑的还是旧进程');
   assert.match(stale.evidence, /仍是旧进程/);
-  const lower = judgeNewCode({ instanceText: 'OK    包版本        x@0.8.65\nOK    软链         → 本工作区', localVersion: '0.8.76', hostFirstAt: 2000, releaseAt: 1000 });
+  const lower = judgeNewCode({ instanceText: 'OK    包版本        x@0.8.65\nOK    软链         → 本工作区', localVersion: '0.8.76', hostFirstAt: 2000, codeAt: 1000 });
   assert.equal(lower.status, F);
-  const noLink = judgeNewCode({ instanceText: 'OK    包版本        x@0.8.76\nFAIL  软链         → 别处', localVersion: '0.8.76', hostFirstAt: 2000, releaseAt: 1000 });
+  const noLink = judgeNewCode({ instanceText: 'OK    包版本        x@0.8.76\nFAIL  软链         → 别处', localVersion: '0.8.76', hostFirstAt: 2000, codeAt: 1000 });
   assert.equal(noLink.status, F);
-  const noBeat = judgeNewCode({ instanceText: inst, localVersion: '0.8.76', hostFirstAt: null, releaseAt: 1000 });
+  const noBeat = judgeNewCode({ instanceText: inst, localVersion: '0.8.76', hostFirstAt: null, codeAt: 1000 });
   assert.equal(noBeat.status, N, '没有心跳就不能判「在跑新代码」');
+});
+
+// T50（2026-11-09）：① 的判据从「最新发版时点」改成「最近一次改运行时代码的提交时点」。
+// 为什么：package.json / CHANGELOG 的 mtime 在 **docs-only 发版**时也会变 ⇒ 每发一次文档版都假红
+// （0.8.86 / 0.8.87 连续两次），用户被迫为纯文档改动重启宿主。
+test('T50 ①: 读不到运行时代码改动 ⇒ NO-SAMPLE（不许硬算过）', () => {
+  const inst = 'OK    包版本        x@0.8.76\nOK    软链         → 本工作区';
+  const out = judgeNewCode({ instanceText: inst, localVersion: '0.8.76', hostFirstAt: 2000, codeAt: null });
+  assert.equal(out.status, N, '没有 git 历史就判不了「在跑哪份代码」');
+  assert.match(out.evidence, /读不到最近一次运行时代码改动/);
+});
+
+test('T50 ②: lastRuntimeCommitAt 只看 src/ 与 packages/（docs-only 提交不动它）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 't50-repo-'));
+  const commit = (msg, iso) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', msg], {
+    cwd: dir,
+    env: { ...process.env, GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso },
+  });
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'src', 'plugin.mjs'), 'export const a = 1;\n');
+    fs.writeFileSync(path.join(dir, 'docs', 'x.md'), 'doc\n');
+    execFileSync('git', ['add', '.'], { cwd: dir });
+    commit('code', '2026-01-01T00:00:00Z');
+    const before = lastRuntimeCommitAt({ repo: dir });
+    assert.equal(before, Date.parse('2026-01-01T00:00:00Z'), '取的是提交时间（秒级）');
+
+    // 只改文档：运行时代码没动 ⇒ 判据不许动（否则 docs-only 发版又假红）
+    fs.writeFileSync(path.join(dir, 'docs', 'x.md'), 'doc2\n');
+    execFileSync('git', ['add', '.'], { cwd: dir });
+    commit('docs', '2026-02-02T00:00:00Z');
+    assert.equal(lastRuntimeCommitAt({ repo: dir }), before, 'docs-only 提交不许移动判据');
+
+    // 真改 src/：判据跟着走
+    fs.writeFileSync(path.join(dir, 'src', 'plugin.mjs'), 'export const a = 2;\n');
+    execFileSync('git', ['add', '.'], { cwd: dir });
+    commit('code2', '2026-03-03T00:00:00Z');
+    assert.equal(lastRuntimeCommitAt({ repo: dir }), Date.parse('2026-03-03T00:00:00Z'));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('T42 ②: T12 —— abstain 全塌 cross-scope 才 FAIL；没样本 NO-SAMPLE', () => {
