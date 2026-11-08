@@ -5,11 +5,14 @@
 // 职责：把 M5 的六个对裁判据跑成**一份可复算的报告**：A1 负迁移 / A2 收益 / A3 可靠性 /
 //       A4 延迟与成本 / A5 作用域 / A6 可回溯。每轴输出
 //       `{value, unit, n, status: measured|not-live|not-consumed, caveat}`。
-//       **A1 有两条并列的轴**（T7）：`A1`（staleTransferRate，记忆过期了还在用）与
-//       `A1.opposite`（反向记忆率，记忆与当前信号方向相反）。两个轴都是 ≤5%，**不是替换**。
+//       **A1 有三条并列的轴**（T7 加 opposite，T27 加 redundant）：`A1`（staleTransferRate，记忆过期了还在用）、
+//       `A1.opposite`（反向记忆率，记忆与当前信号方向相反）、`A1.redundant`（**会话级**冗余注入率，
+//       同 session 同卡再投；两个子指标 waste/necessary 分开报）。三条互相并列，**不是替换**。
 // 复用（**不重写口径**）：
 //   A1 ← `scripts/eval.mjs` 的 `runH1`（staleTransferRate + validityCoverage）
 //   A1.opposite ← `src/rooms/abstain.mjs` 的 `detectPolarity` / `polarityReport`（三件套：率 / 可判率 / 是否可用于决策）
+//   A1.redundant ← 会话日志（`source.kind=dsh-gokifu-longmemory` 的注入消息：session.id + source.digest + compaction 事件）
+//                  口径来自 `evidence/T24-redundant-injection.md`；**scope 级重复不计入**（跨会话各拿一次是有益）
 //   A2 ← `scripts/eval.mjs` 的 `runEval`（LOO repeatFailureRate，both 口径；1σ = sqrt(p(1-p)/n)）
 //   A4/A5/A6 ← R11 walk → R12 buildMemoryCard → R13 runGates（与插件热路径同一条链）
 // 纪律：
@@ -30,7 +33,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { runH1, runEval } from './eval.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
-import { walkFromSignals, createWalkCache, isScopeVisible, normalizeScopeKey } from '../src/rooms/walk.mjs';
+import { walkFromSignals, createWalkCache, isScopeVisible, normalizeScopeKey, estimateTokens } from '../src/rooms/walk.mjs';
+import { readFrames, parseEvents } from '../src/rooms/logread.mjs';
 import { errorClassKeyOf } from '../src/rooms/topic.mjs';
 import { buildMemoryCard, signalFromText, scopeKeyFromPath, PROVENANCE_LINE_RE } from '../src/rooms/inject.mjs';
 import { runGates, workspaceOf } from '../src/rooms/gates.mjs';
@@ -49,17 +53,39 @@ export const AXIS_TITLES = Object.freeze({
 /** 每条轴允许的状态；`measured` 才有真实数字，`not-live` = 能力在但没上线，`not-consumed` = 没数据。 */
 export const AXIS_STATUSES = Object.freeze(['measured', 'not-live', 'not-consumed', 'live', 'live-idle']);
 
-// T7：A1 的**两条并列轴**。`A1`（stale）的口径与数值**一字不动**；`A1.opposite` 是新增的第二条。
+// T7/T27：A1 的**三条并列轴**。`A1`（stale）的口径与数值**一字不动**；`A1.opposite`（T7）、`A1.redundant`（T27）各挂一条。
 export const A1_STALE_AXIS_ID = 'A1';
 export const A1_OPPOSITE_AXIS_ID = 'A1.opposite';
-/** 两条轴并列时的固定顺序（渲染与 metrics-guard 都按它读）。 */
-export const A1_AXIS_IDS = Object.freeze([A1_STALE_AXIS_ID, A1_OPPOSITE_AXIS_ID]);
+export const A1_REDUNDANT_AXIS_ID = 'A1.redundant';
+/** 三条轴并列时的固定顺序（渲染与 metrics-guard 都按它读）。 */
+export const A1_AXIS_IDS = Object.freeze([A1_STALE_AXIS_ID, A1_OPPOSITE_AXIS_ID, A1_REDUNDANT_AXIS_ID]);
 /** 可判率下限（与 `polarityReport` 默认同源）：低于它 ⇒ **不可用于决策**。 */
 export const A1_OPPOSITE_DECIDABILITY_FLOOR = 0.30;
 /** `opposite` 精确率下限（与 `polarityReport` 默认同源）。 */
 export const A1_OPPOSITE_PRECISION_FLOOR = 0.80;
 /** 负迁移硬上限：与 `A1`（stale）**同一个 5%**，不是各算各的。 */
 export const A1_OPPOSITE_MAX = 0.05;
+
+// ── T27 · A1.redundant（**会话级**冗余注入）────────────────────────────────────
+// 口径来自 `evidence/T24-redundant-injection.md`：同 `session.id` 同 `source.digest` 被再投。
+// **scope 级重复（同 scope 不同会话各拿一次同一张卡）不算 redundant**：每个会话的上下文独立，
+// 第一次拿到那张卡是必要的（T24 实测 scope 级 36% 里 98% 是这一类；挂上它 = 恒亮红灯假指标）。
+/** 卡口：`redundantWaste > 1%` ⇒ 红（消费者：oncePerSession 的 `session.id` 判据是否回归）。 */
+export const A1_REDUNDANT_WASTE_MAX = 0.01;
+/** 观测窗口：滚动 24h（够响应一次回归；旧构建的样本最多留一天，不会长期污染卡口）。 */
+export const A1_REDUNDANT_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** 通电下限：窗口内注入数 / token 数都够，才拿 1% 卡它（否则"样本不足"不参与 exit code）。 */
+export const A1_REDUNDANT_MIN_INJECTIONS = 100;
+export const A1_REDUNDANT_MIN_TOKENS = 20_000;
+/**
+ * **窗口下界** = `max(本时点, now-24h)`。为什么要钉时点：T25 修掉的 oncePerSession（WeakSet→session.id）
+ * 在修复前制造的同会话重复是**已知已修 bug**，不能算进卡口（否则红线永远亮着，等于没有信号）。
+ * 取值：2026-11-08 13:25:37 +08:00（commit `f65aace`，T25 上线时点）。
+ * **更新约定**：以后每次修"重复注入源"（同类 oncePerSession 回归、D5 补卡撞车等），把这里推到新上线时点，
+ * 并在同一条 evidence/CHANGELOG 里写明 —— 否则窗口会把已修的旧行为重新算进来。
+ * 可用环境变量 `KIFU_A1_REDUNDANT_SINCE`（epoch ms）覆盖（运维/测试用）。
+ */
+export const A1_REDUNDANT_FIX_AT = 1_794_115_537_000;
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -397,6 +423,278 @@ export async function measureA1Opposite({ storeRoot, workspace, now, signals, ca
       samples,
       hardCap: A1_OPPOSITE_MAX,
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// A1c · 冗余注入（redundant）—— 与 A1.stale / A1.opposite **并列**的第三条轴（T27）
+//
+// 口径（`evidence/T24-redundant-injection.md`，**会话级**）：同一 `session.id` 内、同一 `source.digest` 被再次注入。
+//   · **不是 scope 级**：同 scope 不同会话各拿一次同一张卡，是"每个会话的独立上下文第一次拿到它"（有益）；
+//     T24 实测 scope 级 36% 里 98% 是这一类 ⇒ 挂上去只会变成恒亮红灯的假指标。
+//   · 两个子指标（分开报）：
+//       `redundantWaste`     —— 两次注入之间**没有** compaction ⇒ 卡必然还在上下文里 ⇒ 确定浪费（卡口用这个）
+//       `redundantNecessary` —— 期间**有** compaction ⇒ 压缩可能把卡压掉 ⇒ 必要重注（是**上界**，不卡）
+//   · `powered` = 24h 窗口内注入数 / token 数都够。样本不足 ⇒ **不参与 exit code**，不硬造数（与 A1.opposite 的"未通电"同形状）。
+// 数据源：会话日志 `<dataRoot>/sessions/**/session.v4.jsonl.zstd`（**唯一**带 session.id 的源；
+//   live-stats 没有 session id，只能做 token/pid 交叉核对，不能判同会话）。只读、零模型调用。
+// ---------------------------------------------------------------------------
+
+/** 从 content（字符串 / [{type:'text',text}] / 嵌套）里收集文本（注入消息的正文）。 */
+function collectMessageText(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((v) => collectMessageText(v)).filter(Boolean).join('');
+  if (typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text;
+    if (value.content !== undefined) return collectMessageText(value.content);
+  }
+  return '';
+}
+
+/**
+ * 递归列出会话日志；按 **mtime 预筛**（窗口开始前没写过的会话，不可能有窗口内事件 —— mtime 是最后写时刻）。
+ * `slackMs` 吸收文件系统时间戳粒度；被跳过的都是"窗口内不可能有事件"的文件，不影响分子/分母。
+ */
+export function listSessionLogFiles({ sessionsDir, sinceMs = 0, slackMs = 60 * 60 * 1000 } = {}) {
+  const out = [];
+  const floor = Number.isFinite(sinceMs) && sinceMs > 0 ? sinceMs - slackMs : -Infinity;
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(p); continue; }
+      if (e.name !== 'session.v4.jsonl.zstd') continue;
+      let st = null;
+      try { st = fs.statSync(p); } catch { continue; }
+      if (Number.isFinite(st.mtimeMs) && st.mtimeMs < floor) continue;
+      out.push(p);
+    }
+  };
+  if (sessionsDir) walk(sessionsDir);
+  return out;
+}
+
+/** 扫会话日志：抽插件注入（session.id + source.digest + at + tokens）与 compaction 时点。 */
+export function scanSessionInjections({ dataRoot = null, sinceMs = 0, files = null, readFile = fs.readFileSync } = {}) {
+  const sessionsDir = dataRoot ? path.join(dataRoot, 'sessions') : null;
+  const scanned = {
+    sessionsDir,
+    missingSessionsDir: !sessionsDir || !fs.existsSync(sessionsDir),
+    files: 0, parsed: 0, skipped: [], sessions: [],
+  };
+  if (scanned.missingSessionsDir) return scanned;
+  const list = Array.isArray(files) ? files : listSessionLogFiles({ sessionsDir, sinceMs });
+  scanned.files = list.length;
+  for (const file of list) {
+    let parsed;
+    try {
+      parsed = parseEvents(readFrames(readFile(file)));
+    } catch (err) {
+      // 坏会话/太大解不动：跳过并留痕（评测不该因为一个坏文件整片失败）
+      scanned.skipped.push({ session: path.basename(path.dirname(file)), why: String(err?.message ?? err).slice(0, 120) });
+      continue;
+    }
+    scanned.parsed += 1;
+    const events = Array.isArray(parsed?.events) ? parsed.events : (Array.isArray(parsed) ? parsed : []);
+    const sessionId = path.basename(path.dirname(file));
+    const injections = [];
+    const compactionAt = [];
+    for (const e of events) {
+      const type = e?.type;
+      const at = Number(e?.time);
+      if (type === 'compaction/start' || type === 'compaction/prune') {
+        if (Number.isFinite(at)) compactionAt.push(at);
+        continue;
+      }
+      if (type !== 'user/message') continue;
+      const data = e?.data ?? {};
+      const source = data?.source ?? e?.payload?.message?.source ?? null;
+      if (!source || source.kind !== 'dsh-gokifu-longmemory') continue;
+      if (!Number.isFinite(at) || at < sinceMs) continue;
+      const digest = typeof source.digest === 'string' && source.digest ? source.digest : null;
+      injections.push({
+        at,
+        digest,
+        seq: Number.isFinite(e?.seq) ? e.seq : null,
+        tokens: estimateTokens(collectMessageText(data?.content)),
+      });
+    }
+    if (injections.length) {
+      injections.sort((a, b) => a.at - b.at);
+      scanned.sessions.push({ sessionId, injections, compactionAt });
+    }
+  }
+  return scanned;
+}
+
+/**
+ * 纯函数：把逐会话注入折成冗余读数（可单测、无 IO）。
+ * 判据：同一 session 内同一 digest 的**相邻两次**注入；区间 `(lo, hi]` 里有 compaction ⇒ necessary，否则 waste。
+ */
+export function summarizeRedundant({ sessions = [], sinceMs = 0, now = Date.now(), minInjections = A1_REDUNDANT_MIN_INJECTIONS, minTokens = A1_REDUNDANT_MIN_TOKENS } = {}) {
+  let injections = 0;
+  let tokens = 0;
+  let distinctSessions = 0;
+  let sessionsWithDuplicates = 0;
+  let sessionsWithWaste = 0;
+  let wastePairs = 0;
+  let wasteTokens = 0;
+  let necessaryPairs = 0;
+  let necessaryTokens = 0;
+  for (const s of Array.isArray(sessions) ? sessions : []) {
+    const byDigest = new Map();
+    for (const inj of Array.isArray(s?.injections) ? s.injections : []) {
+      if (!Number.isFinite(inj?.at) || inj.at < sinceMs || inj.at > now) continue;
+      // 无 digest ⇒ 视为各自独立（`seq:` 键），绝不靠"没指纹"制造假重复
+      const key = inj.digest ?? `seq:${inj.seq ?? inj.at}`;
+      if (!byDigest.has(key)) byDigest.set(key, []);
+      byDigest.get(key).push(inj);
+    }
+    if (!byDigest.size) continue;
+    distinctSessions += 1;
+    let hasDup = false;
+    let hasWaste = false;
+    const compactionAt = Array.isArray(s?.compactionAt) ? s.compactionAt : [];
+    for (const [, arr] of byDigest) {
+      injections += arr.length;
+      for (const inj of arr) tokens += Number.isFinite(inj.tokens) ? inj.tokens : 0;
+      for (let i = 1; i < arr.length; i += 1) {
+        const lo = arr[i - 1].at;
+        const hi = arr[i].at;
+        const across = compactionAt.some((t) => Number.isFinite(t) && t > lo && t <= hi);
+        hasDup = true;
+        if (across) {
+          necessaryPairs += 1;
+          necessaryTokens += Number.isFinite(arr[i].tokens) ? arr[i].tokens : 0;
+        } else {
+          wastePairs += 1;
+          wasteTokens += Number.isFinite(arr[i].tokens) ? arr[i].tokens : 0;
+          hasWaste = true;
+        }
+      }
+    }
+    if (hasDup) sessionsWithDuplicates += 1;
+    if (hasWaste) sessionsWithWaste += 1;
+  }
+  const safe = (num, den) => (den > 0 ? num / den : null);
+  const redundantTokens = wasteTokens + necessaryTokens;
+  const redundantPairs = wastePairs + necessaryPairs;
+  return {
+    sinceMs,
+    now,
+    injections,
+    tokens,
+    distinctSessions,
+    sessionsWithDuplicates,
+    sessionsWithWaste,
+    wastePairs,
+    wasteTokens,
+    wasteRate: safe(wasteTokens, tokens),
+    necessaryPairs,
+    necessaryTokens,
+    necessaryRate: safe(necessaryTokens, tokens),
+    redundantPairs,
+    redundantTokens,
+    redundantRate: safe(redundantTokens, tokens),
+    dupRate: safe(redundantPairs, injections),
+    powered: injections >= minInjections && tokens >= minTokens,
+    floor: { minInjections, minTokens },
+  };
+}
+
+export function measureA1Redundant({ dataRoot = null, now = Date.now(), sinceAt = null, scan = null, env = process.env } = {}) {
+  const envSince = Number(env?.KIFU_A1_REDUNDANT_SINCE);
+  const fixAt = Number.isFinite(sinceAt) ? sinceAt
+    : (Number.isFinite(envSince) && envSince > 0 ? envSince : A1_REDUNDANT_FIX_AT);
+  const windowStart = Math.max(fixAt, now - A1_REDUNDANT_WINDOW_MS);
+  const floor = { minInjections: A1_REDUNDANT_MIN_INJECTIONS, minTokens: A1_REDUNDANT_MIN_TOKENS };
+  const baseDetail = {
+    axis: A1_REDUNDANT_AXIS_ID,
+    pairedWith: [A1_STALE_AXIS_ID, A1_OPPOSITE_AXIS_ID],
+    units: '会话级（同 session.id + 同 source.digest 再投）· 不是 scope 级',
+    fixAt,
+    windowStart,
+    windowDays: round((now - windowStart) / 86_400_000, 2),
+    floor,
+    hardCap: A1_REDUNDANT_WASTE_MAX,
+    historicalBaseline: 'T24 全窗口（修复前）：redundant 4.18% / waste 2.80% / necessary 1.38%',
+  };
+  if (!dataRoot) {
+    return axis({
+      value: null,
+      unit: 'rate',
+      n: 0,
+      status: 'not-consumed',
+      caveat: '没给数据根（dataRoot=null）⇒ 读不到会话日志；会话级冗余只能从会话日志的 session.id+source.digest 算（live-stats 没有 session id），不写 0',
+      detail: { ...baseDetail, powered: false, missingDataRoot: true },
+    });
+  }
+  let scanned;
+  try {
+    scanned = scan ?? scanSessionInjections({ dataRoot, sinceMs: windowStart });
+  } catch (err) {
+    return axis({
+      value: null,
+      unit: 'rate',
+      n: 0,
+      status: 'not-consumed',
+      caveat: `会话日志扫不了（${String(err?.message ?? err)}）⇒ 冗余轴无样本，不写 0`,
+      detail: { ...baseDetail, powered: false },
+    });
+  }
+  const sums = summarizeRedundant({ sessions: scanned.sessions, sinceMs: windowStart, now, ...floor });
+  const detail = {
+    ...baseDetail,
+    powered: sums.powered,
+    windowStartIso: new Date(windowStart).toISOString(),
+    windowEndIso: new Date(now).toISOString(),
+    injections: sums.injections,
+    tokens: sums.tokens,
+    distinctSessions: sums.distinctSessions,
+    sessionsWithDuplicates: sums.sessionsWithDuplicates,
+    sessionsWithWaste: sums.sessionsWithWaste,
+    redundantPairs: sums.redundantPairs,
+    redundantTokens: sums.redundantTokens,
+    redundantRate: sums.redundantRate,
+    redundantWaste: sums.wasteRate,
+    redundantWastePairs: sums.wastePairs,
+    redundantWasteTokens: sums.wasteTokens,
+    redundantNecessary: sums.necessaryRate,
+    redundantNecessaryPairs: sums.necessaryPairs,
+    redundantNecessaryTokens: sums.necessaryTokens,
+    dupRate: sums.dupRate,
+    scanned: {
+      sessionsDir: scanned.sessionsDir,
+      missingSessionsDir: scanned.missingSessionsDir,
+      files: scanned.files,
+      parsed: scanned.parsed,
+      skippedCount: scanned.skipped.length,
+      skipped: scanned.skipped.slice(0, 5),
+    },
+  };
+  const parts = [];
+  if (scanned.missingSessionsDir) parts.push('数据根里没有 sessions/ ⇒ 未通电（不写 0；会话级冗余只能从会话日志算）');
+  if (sums.tokens > 0) {
+    parts.push(`**redundantWaste**=${pct(sums.wasteRate)}（${sums.wastePairs} 对 / ${sums.wasteTokens} tokens：两次注入之间**无** compaction）`);
+    parts.push(`**redundantNecessary**=${pct(sums.necessaryRate)}（${sums.necessaryPairs} 对 / ${sums.necessaryTokens} tokens：压缩后必要重注，**上界**）`);
+    parts.push(`合计 redundant=${pct(sums.redundantRate)}（${sums.injections} 次注入 / ${sums.tokens} tokens / ${sums.sessionsWithDuplicates} 个会话有重复）`);
+  } else {
+    parts.push('窗口内没有注入 ⇒ 分母为 0，不写 0');
+  }
+  parts.push(sums.powered
+    ? `**已通电**（窗口 ${sums.injections} 次 ≥ ${floor.minInjections} · ${sums.tokens} tokens ≥ ${floor.minTokens}）⇒ redundantWaste > ${(A1_REDUNDANT_WASTE_MAX * 100).toFixed(0)}% 参与 exit code`
+    : `**未通电**（窗口 ${sums.injections} 次 / ${sums.tokens} tokens，不到 ${floor.minInjections} 次或 ${floor.minTokens} tokens）⇒ 不参与 exit code，不硬造数`);
+  parts.push(`窗口 = max(T25 修复上线时点, now−${Math.round(A1_REDUNDANT_WINDOW_MS / 86_400_000)}d)（${new Date(windowStart).toISOString()} 起）；scope 级重复（跨会话同卡各拿一次）**不计入**（有益）`);
+  parts.push('消费者：waste > 1% ⇒ 查 oncePerSession（`session.id` 判据）是否回归；口径与三者关系见 `evidence/T27-a1-redundant.md`');
+  return axis({
+    value: sums.tokens > 0 ? sums.wasteRate : null,
+    unit: 'rate',
+    n: sums.injections,
+    status: sums.tokens > 0 ? 'measured' : 'not-consumed',
+    caveat: parts.join('；'),
+    detail,
   });
 }
 
@@ -1041,6 +1339,9 @@ async function runM5Body(opts) {
       signals: h1Signals,
       hasStore,
     }),
+    // T27：A1 的第三条轴（**会话级**冗余注入）。同步读会话日志（只读、零模型调用）；
+    // 样本不足/没有 sessions/ ⇒ 自动 `未通电`（不参与 exit code），不写假 0。
+    [A1_REDUNDANT_AXIS_ID]: measureA1Redundant({ dataRoot, now }),
     A2: await measureA2({ dataRoot, storeRoot, now, holdoutExam: opts.holdoutExam ?? null }),
     A3: measureA3({ repoRoot: opts.repoRoot ?? REPO_ROOT, liveAttempts: opts.liveAttempts ?? 0, liveStats: readLiveStats(storeRoot) }),
     A4: measureA4({ pipeline }),
@@ -1071,8 +1372,8 @@ async function runM5Body(opts) {
     },
     axes,
     order: [...AXIS_IDS],
-    // T7：A1 的两条并列轴（stale / opposite）。`order` 仍是六轴（A1–A6），
-    // 这里单列是因为 A1 一个 id 下挂着两条口径不同的负迁移轴。
+    // T7/T27：A1 的三条并列轴（stale / opposite / redundant）。`order` 仍是六轴（A1–A6），
+    // 这里单列是因为 A1 一个 id 下挂着三条口径不同的负迁移轴。
     a1Axes: [...A1_AXIS_IDS],
     pipeline: {
       coldCacheMs: pipeline.coldCacheMs,
@@ -1112,13 +1413,17 @@ export function formatM5Report(report) {
     lines.push(`${id}  ${`${AXIS_TITLES[id]}`.padEnd(24)} ${String(shown).padEnd(9)} ${String(a.n).padStart(4)}   ${STATUS_LABEL[a.status]}`);
     lines.push(`    ${a.caveat}`);
   }
-  // T7：A1 的两条并列轴 —— 单独一块，A1 上面那行一字不动（逐字节保持）。
+  // T7/T27：A1 的三条并列轴 —— 单独一块，A1 上面那行一字不动（逐字节保持）。
   const a1o = report.axes[A1_OPPOSITE_AXIS_ID];
+  const a1r = report.axes[A1_REDUNDANT_AXIS_ID];
+  const a1rDetail = a1r?.detail ?? {};
   lines.push('');
-  lines.push(`A1 负迁移 · 两轴并列（stale | opposite，两个都是 ≤${(A1_OPPOSITE_MAX * 100).toFixed(0)}%，不是替换）：`);
+  lines.push(`A1 负迁移 · 三轴并列（stale | opposite | redundant，互相并列、不是替换）：`);
   lines.push(`  A1.stale    ${pct(report.axes[A1_STALE_AXIS_ID]?.value).padEnd(9)} ${String(report.axes[A1_STALE_AXIS_ID]?.n ?? 0).padStart(4)}   ${STATUS_LABEL[report.axes[A1_STALE_AXIS_ID]?.status] ?? ''}`);
   lines.push(`  A1.opposite ${pct(a1o?.value).padEnd(9)} ${String(a1o?.n ?? 0).padStart(4)}   可判率 ${pct(Number.isFinite(a1o?.detail?.decidability) ? a1o.detail.decidability : null)} · ${a1o?.detail?.usableForDecision ? '可用于决策' : '**不可用于决策**'}`);
   lines.push(`    ${a1o?.caveat ?? '（缺少 A1.opposite 轴）'}`);
+  lines.push(`  A1.redundant ${pct(a1r?.value).padEnd(8)} ${String(a1r?.n ?? 0).padStart(4)}   浪费 ${pct(Number.isFinite(a1rDetail.redundantWaste) ? a1rDetail.redundantWaste : null)} · 必要重注 ${pct(Number.isFinite(a1rDetail.redundantNecessary) ? a1rDetail.redundantNecessary : null)} · ${a1rDetail.powered ? '已通电·参与 exit code' : '**未通电·不参与 exit code**'}`);
+  lines.push(`    ${a1r?.caveat ?? '（缺少 A1.redundant 轴）'}`);
   lines.push('');
   lines.push(`耗时 ${report.elapsedMs} ms · 写入 0（只读；唯一写入口是 --evidence）`);
   return lines.join('\n');
@@ -1184,7 +1489,7 @@ export function renderM5Markdown(report) {
   // T7：A1 两轴并列的对照表（stale 的口径与数值一字不动；这里只做并排展示）。
   const a1oAxis = report.axes[A1_OPPOSITE_AXIS_ID] ?? null;
   const a1sAxis = report.axes[A1_STALE_AXIS_ID] ?? null;
-  lines.push('## 2b · A1 负迁移 · 两轴并列（stale | opposite）');
+  lines.push('## 2b · A1 负迁移 · 三轴并列（stale | opposite | redundant）');
   lines.push('');
   lines.push('| 轴 | 指标 | 值 | 分子 / 分母 | 可判率 | 可用于决策 | 状态 |');
   lines.push('|---|---|---|---|---|---|---|');
@@ -1193,6 +1498,12 @@ export function renderM5Markdown(report) {
   const a1sDen = Number.isFinite(a1sDetail.postGateInjected) ? a1sDetail.postGateInjected : null;
   lines.push(`| **A1.stale** | \`staleTransferRate\`（闸后） | **${pct(a1sAxis?.value)}** | ${a1sNum ?? '?'} / ${a1sDen ?? '?'} | 闸前 ${pct(a1sDetail.validityCoverage?.ratio ?? null)}（${a1sDetail.validityCoverage?.exercised ?? '?'} / ${a1sDetail.validityCoverage?.withValidity ?? '?'} 带 validity） | —（过期判定，不需要可判率） | \`${a1sAxis?.status ?? 'n/a'}\` |`);
   lines.push(`| **A1.opposite** | \`oppositeRate\` | **${pct(a1oAxis?.value)}** | ${a1oAxis?.detail?.opposite ?? '?'} / ${a1oAxis?.detail?.total ?? '?'} 对 | ${pct(a1oAxis?.detail?.decidability ?? null)}（${a1oAxis?.detail?.decidable ?? '?'} / ${a1oAxis?.detail?.total ?? '?'}） | ${a1oAxis?.detail?.usableForDecision ? '✅ 可用于决策' : '❌ 不可用于决策'} | \`${a1oAxis?.status ?? 'n/a'}\` |`);
+  const a1rAxisMd = report.axes[A1_REDUNDANT_AXIS_ID] ?? null;
+  const a1rMd = a1rAxisMd?.detail ?? {};
+  lines.push(`| **A1.redundant** | \`redundantWaste\`（会话级；necessary 单列） | **${pct(a1rAxisMd?.value)}** | ${a1rMd.redundantWastePairs ?? '?'} 对 / ${a1rMd.injections ?? '?'} 次注入（${a1rMd.tokens ?? '?'} tokens） | necessary ${pct(a1rMd.redundantNecessary ?? null)}（${a1rMd.redundantNecessaryPairs ?? '?'} 对）· 窗口 ${a1rMd.windowDays ?? '?'}d | ${a1rMd.powered ? '✅ 已通电（参与 exit code）' : '❌ 未通电（不参与 exit code）'} | \`${a1rAxisMd?.status ?? 'n/a'}\` |`);
+  lines.push('');
+  lines.push(`**为什么 redundant 按"会话级"而不按 scope 级**：同 scope 不同会话各拿一次同一张卡，是"每个会话的独立上下文第一次拿到它"（有益）；T24 实测 scope 级 36% 里 98% 是这一类 ⇒ 那不是 MemUse 的 \`redundant\`。本轴只算**同 \`session.id\` 内同 \`source.digest\` 再投**，窗口 = \`max(T25 修复上线时点, now−${Math.round(A1_REDUNDANT_WINDOW_MS / 86_400_000)}d)\`；窗口内注入数/token 不到通电下限时**不参与 exit code**（不硬造数）。`);
+  lines.push(`**这个轴的消费者**：\`redundantWaste > ${(A1_REDUNDANT_WASTE_MAX * 100).toFixed(0)}%\` ⇒ 查 \`oncePerSession\` 的 \`session.id\` 判据是否回归（T25 修的就是 WeakSet 对象身份失效）；修好后 waste 应趋 0。历史基线（T24 全窗口，修复前）redundant 4.18% / waste 2.80% / necessary 1.38%。`);
   lines.push('');
   lines.push(`**为什么线上 opposite 是 0**：T6 实测 1084 张真实卡 / 2354 行里 \`[semantic]\`/\`[disputed]\`/\`[stale]\` 各 **0** 次；本轴线上值 ${pct(a1oAxis?.value)}（${a1oAxis?.detail?.opposite ?? 0}/${a1oAxis?.detail?.total ?? 0}）是**同一个 0**。`);
   lines.push('**无触发 ≠ 无反向记忆**：0 次的含义是"判据一次都没判出 opposite"，不是"线上不存在反向记忆"；精确率在线上是 0/0（无正样本）⇒ **仪表未通电**，不参与 exit code。');
@@ -1341,6 +1652,9 @@ export default {
   runM5,
   measureA1,
   measureA1Opposite,
+  measureA1Redundant,
+  scanSessionInjections,
+  summarizeRedundant,
   measureA2,
   measureA3,
   measureA4,
@@ -1358,6 +1672,9 @@ export default {
   AXIS_STATUSES,
   A1_AXIS_IDS,
   A1_OPPOSITE_AXIS_ID,
+  A1_REDUNDANT_AXIS_ID,
+  A1_REDUNDANT_WASTE_MAX,
+  A1_REDUNDANT_FIX_AT,
   M5_VERSION,
 };
 

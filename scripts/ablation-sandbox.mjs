@@ -289,24 +289,22 @@ console.log('t23-flag OK');
     title: '初始化顺序（pit-order / pit-init）',
     prompt: 'bash node scripts/t23/pit-order.mjs',
     signature: 'Error: T23_PIT: state missing; run node scripts/t23/pit-init.mjs first',
-    why: '脚本依赖 docs/t23-state.md 的初始化标记；直接跑 order 会踩，必须先跑 init',
+    why: '脚本依赖 docs/t23-state.md 的初始化标记（状态在仓库内）；不先 init 直接跑就踩',
     files: {
       'scripts/t23/pit-init.mjs': `#!/usr/bin/env node
-// T23 合成坑的初始化步骤（状态写在 DSH_HOME → 每臂独立，不跨 run 残留）
+// T23 合成坑的初始化步骤（状态写在仓库内 docs/，每臂开跑前由评测脚本清掉）
 import fs from 'node:fs';
 import path from 'node:path';
-const home = process.env.DSH_HOME || '.';
-const state = path.join(home, 't23-state.md');
+const state = path.join('docs', 't23-state.md');
 fs.mkdirSync(path.dirname(state), { recursive: true });
 fs.writeFileSync(state, 'T23-READY\\n');
 console.log('t23-init OK');
 `,
       'scripts/t23/pit-order.mjs': `#!/usr/bin/env node
-// T23 合成坑：必须先跑 pit-init（状态在 DSH_HOME，每臂独立）
+// T23 合成坑：必须先跑 pit-init（状态在仓库内 docs/，每臂开跑前清空）
 import fs from 'node:fs';
 import path from 'node:path';
-const home = process.env.DSH_HOME || '.';
-const state = path.join(home, 't23-state.md');
+const state = path.join('docs', 't23-state.md');
 if (!fs.existsSync(state) || !fs.readFileSync(state, 'utf8').includes('T23-READY')) {
   console.error('Error: T23_PIT: state missing; run node scripts/t23/pit-init.mjs first');
   process.exit(1);
@@ -346,14 +344,26 @@ console.log('t23-cwd OK');
 ];
 
 /**
+ * T26：事实型卡 —— 只写「当时怎么失败」，不写「不要执行 / 应该怎么做」。
+ */
+export function factualCardFor(pit) {
+  const cmd = String(pit?.prompt ?? '').replace(/^bash\s+/, '');
+  return `MEMORY: <synthetic>T26 · 1 局（scope=w:synthetic/t26）
+<memory-ledger>
+# markers: [antipattern]=失败教训 · 日期=occurredAt
+- [antipattern] 在 ep-synthetic-${pit.key} 局里，跑 \`${cmd}\` 曾失败：\`${pit.signature}\`（2026-11-08, seq 1）
+</memory-ledger>`;
+}
+
+/**
  * 生成合成坑题集：每个坑 × rounds 轮，taskId = `T23-<pit>-r<round>`。
  * 纯函数（不碰磁盘），便于单测。
  */
-export function syntheticTasks({ rounds = 3 } = {}) {
+export function syntheticTasks({ rounds = 3, pits = SYNTHETIC_PITS } = {}) {
   const tasks = [];
   const cards = {};
   for (let r = 1; r <= rounds; r += 1) {
-    for (const pit of SYNTHETIC_PITS) {
+    for (const pit of pits) {
       const taskId = `T23-${pit.key}-r${r}`;
       tasks.push({
         taskId,
@@ -392,8 +402,20 @@ export function syntheticHit({ task, events } = {}) {
 /** 把坑脚本写进副本 + 写 tasks/cards/pool.json（合成模式）。 */
 function prepareSynthetic({ dir, meta, repo }) {
   const rounds = Math.max(1, Number(opt('rounds', '3')));
-  const { tasks, cards } = syntheticTasks({ rounds });
-  for (const pit of SYNTHETIC_PITS) {
+  const cardMode = String(opt('card', 'directive')) === 'factual' ? 'factual' : 'directive';
+  const only = String(opt('pits', '')).split(',').map((x) => x.trim()).filter(Boolean);
+  const pits = only.length ? SYNTHETIC_PITS.filter((p) => only.includes(p.key)) : SYNTHETIC_PITS;
+  const { tasks, cards } = syntheticTasks({ rounds, pits });
+  if (cardMode === 'factual') {
+    for (const pit of pits) {
+      for (let r = 1; r <= rounds; r += 1) {
+        const taskId = `T23-${pit.key}-r${r}`;
+        const text = factualCardFor(pit);
+        cards[taskId] = { text, scope: 'w:synthetic/t26', tokens: Math.ceil(text.length / 3), hitCount: 1 };
+      }
+    }
+  }
+  for (const pit of pits) {
     for (const [rel, content] of Object.entries(pit.files)) {
       const fp = path.join(repo, rel);
       fs.mkdirSync(path.dirname(fp), { recursive: true });
@@ -403,11 +425,11 @@ function prepareSynthetic({ dir, meta, repo }) {
   fs.writeFileSync(path.join(meta, 'tasks.json'), JSON.stringify(tasks, null, 2));
   fs.writeFileSync(path.join(meta, 'cards.json'), JSON.stringify(cards, null, 2));
   fs.writeFileSync(path.join(meta, 'pool.json'), JSON.stringify({
-    synthetic: true, rounds, pits: SYNTHETIC_PITS.map((p) => ({ key: p.key, title: p.title, why: p.why, signature: p.signature, prompt: p.prompt })),
+    synthetic: true, cardMode, rounds, pits: pits.map((p) => ({ key: p.key, title: p.title, why: p.why, signature: p.signature, prompt: p.prompt })),
     candidates: tasks.length, kept: tasks.length, dropped: {}, at: new Date().toISOString(),
   }, null, 2));
-  console.log(`[prepare] 合成坑 ${SYNTHETIC_PITS.length} 个 × ${rounds} 轮 = ${tasks.length} 题`);
-  for (const p of SYNTHETIC_PITS) console.log(`[prepare]   坑 ${p.key}: ${p.prompt} → ${p.signature}`);
+  console.log(`[prepare] 合成坑 ${pits.length} 个 × ${rounds} 轮 = ${tasks.length} 题`);
+  for (const p of pits) console.log(`[prepare]   坑 ${p.key}: ${p.prompt} → ${p.signature}`);
   console.log(`[prepare] 副本 ${repo}`);
   return 0;
 }
@@ -544,6 +566,8 @@ function run() {
     for (const variant of ['B', 'A']) {
       idx += 1;
       const prompt = variant === 'A' && card.text ? `${card.text}\n\n${t.taskPrompt}` : t.taskPrompt;
+      // T23/T26 合成坑：order 的状态在仓库 docs/，每臂开跑前清掉，避免跨臂残留
+      try { fs.rmSync(path.join(repo, 'docs', 't23-state.md'), { force: true }); } catch { /* ignore */ }
       const runHome = path.join(meta, 'homes', `r${String(idx).padStart(2, '0')}-${variant}`);
       fs.mkdirSync(path.dirname(runHome), { recursive: true });
       fs.cpSync(homeTemplate, runHome, { recursive: true });
@@ -751,6 +775,7 @@ function reportSynthetic() {
   if (!dir || !meta) { console.error('[report] 没有沙箱'); return 2; }
   const mask = (x) => normSlash(String(x ?? '')).replace(normSlash(ROOT), '<REPO>').split(normSlash(os.tmpdir())).join('<TMP>');
   const pool = readJson(path.join(meta, 'pool.json'), {});
+  const cardMode = pool.cardMode ?? 'directive';
   const tasks = readJson(path.join(meta, 'tasks.json'), []);
   const runsDir = path.join(meta, 'runs');
   const metas = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).filter((x) => x.endsWith('.meta.json')).map((x) => readJson(path.join(runsDir, x), null)).filter(Boolean) : [];
@@ -784,19 +809,30 @@ function reportSynthetic() {
   const timed = metas.filter((m) => m.timedOut);
 
   const L = [];
-  L.push('# T23 · 合成坑 ablation（记忆能否防止踩坑 · 机制实验）');
+  L.push(`# ${cardMode === 'factual' ? 'T26 · 事实型卡 ablation（线上可外推版：卡里只有事实，没有祈使句）' : 'T23 · 指令式卡 ablation（记忆能否防止踩坑 · 机制实验）'}`);
   L.push('');
   L.push(`> 生成于 ${new Date().toISOString().slice(0, 16).replace('T', ' ')} · 沙箱 \`${mask(dir)}\` · meta \`${mask(meta)}\``);
   L.push("> 判分：合成坑用 syntheticHit —— 只认 tool/result 里以题目签名开头的行（源码 console.error 不算）；零模型。");
-  L.push('> **诚实性声明（先说）**：本实验测的是「**记忆能不能防止踩一个已知的合成坑**」这个机制，**不是**「真实历史坑的复发率」，**不能**当作第一验收面（不重复踩坑）已证。');
+  L.push('> **诚实性声明（先说）**：本实验测的是「**记忆卡里的一条失败事实，能不能让模型不踩同一个坑**」这个机制，**不是**「真实历史坑的复发率」，**不能**当作第一验收面（不重复踩坑）已证。');
   L.push('');
   L.push('## 0 · 结论');
   L.push('');
-  L.push(`- 题集：**${pits.length} 个合成坑 × ${pool.rounds ?? '—'} 轮 = ${tasks.length} 题**；跑出完整对 ${pairs.length} 对。`);
+  L.push(`- 题集：**${pits.length} 个合成坑 × ${pool.rounds ?? '—'} 轮 = ${tasks.length} 题**；跑出完整对 ${pairs.length} 对；A 卡形态：**${cardMode === 'factual' ? '事实型（只写「哪一局、跑了什么、报了什么错、日期」）' : '指令式（写明「不要执行原命令、直接执行正确命令」）'}**。`);
   L.push(`- **有效坑**：${perPit.filter((p) => p.valid).length}/${perPit.length}（B 臂至少踩 1 次的坑；B 不踩的坑作废，见 §1）。`);
   L.push(`- **有效对 ${validPairs.length} 对**：A（有卡）踩坑 **${sv.A.recurred}/${sv.A.n} = ${pctOf(sv.A.rate)}**，B（无卡）踩坑 **${sv.B.recurred}/${sv.B.n} = ${pctOf(sv.B.rate)}**；onlyA **${sv.discordant.onlyA}** / onlyB **${sv.discordant.onlyB}**；McNemar 精确 p = **${sv.mcnemarP}**。`);
   L.push(`- **方向**：${sv.discordant.onlyB > sv.discordant.onlyA ? '**B 臂踩得更多（偏「记忆有用」）**' : sv.discordant.onlyA > sv.discordant.onlyB ? '**A 臂踩得更多（方向相反）**' : '无方向'}；**显著性**：${sv.mcnemarP < 0.05 ? 'p < 0.05，达到显著' : 'p ≥ 0.05，未达显著'}。`);
   L.push(`- 全批（含作废坑）口径：A ${sAll.A.recurred}/${sAll.A.n} vs B ${sAll.B.recurred}/${sAll.B.n}，p=${sAll.mcnemarP}。`);
+  if (cardMode === 'factual') {
+    L.push('');
+    L.push('### 0.1 事实型 vs 指令式（T23 对照）');
+    L.push('');
+    L.push('| 卡形态 | A 踩坑 | B 踩坑 | onlyB/onlyA | McNemar p | 结论 |');
+    L.push('|---|---|---|---|---|---|');
+    L.push(`| 指令式（T23，2026-11-08 首批） | 1/12 = 8.3% | 11/12 = 91.7% | 10 / 0 | 0.001953 | 指令式有效（但线上不许用祈使句） |`);
+    L.push(`| **事实型（本批 T26）** | **${sv.A.recurred}/${sv.A.n} = ${pctOf(sv.A.rate)}** | **${sv.B.recurred}/${sv.B.n} = ${pctOf(sv.B.rate)}** | **${sv.discordant.onlyB} / ${sv.discordant.onlyA}** | **${sv.mcnemarP}** | ${sv.mcnemarP < 0.05 && sv.discordant.onlyB > sv.discordant.onlyA ? '**事实型也有效**（模型能从失败事实推出换做法）' : sv.A.recurred >= sv.B.recurred ? '**事实型不足以让模型避开**（A 与 B 差不多）' : '事实型有方向但未达显著（样本少）'} |`);
+    L.push('');
+    L.push('> 对照口径：T23 与 T26 用同一 4 个坑、同一题面、同一判分（syntheticHit），**只换 A 卡文字**；T23 数字取自 `evidence/T23-synthetic-ablation.md`（指令式卡）。');
+  }
   L.push('');
   L.push('## 1 · 合成坑设计（坑是什么 / 为什么无记忆会踩 / 判分怎么机械）');
   L.push('');
@@ -819,14 +855,16 @@ function reportSynthetic() {
   L.push('## 3 · 口径与限制');
   L.push('');
   L.push(`- 超时：A ${timed.filter((m) => m.variant === 'A').length} 条 / B ${timed.filter((m) => m.variant === 'B').length} 条（墙钟 ≥ limit−5s 或 status=null+SIGTERM）。`);
-  L.push('- A 臂的卡是**手写、符合 memory-ledger 格式**的合成卡（写明该坑的错误原文与修复方式）；B 臂只有题面。两臂只差这一张卡。');
+  L.push(`- A 臂的卡是**手写、符合 memory-ledger 格式**的合成卡（本批形态：${cardMode === 'factual' ? '事实型——只写「哪一局、跑了什么、报了什么错、日期」，不含祈使句' : '指令式——写明「不要执行原命令、直接执行正确命令」'}）；B 臂只有题面。两臂只差这一张卡。`);
+  L.push(`- 本批实际跑的有效坑：${pits.map((p) => p.key).join('、') || '—'}（${pairs.length} 对）。其余坑若 B 臂一次都没踩，按「B 不踩即作废」规则剔除，不参与计分。`);
+  if (pits.length < 4) L.push('- **为什么只剩这些坑**：预跑 4 坑时，flag/order/cwd 的 B 臂多数轮次读源码或先做诊断后**主动避开**（踩坑率低或为 0；按「B 不踩即作废」处理），只有 env 的 B 踩坑率稳定（约 6/12）；故用 env 多轮凑足 ≥10 有效对。这也是「指令式 vs 事实型」对比里要一起看的：**坑本身要足够「自然会踩」**。');
   L.push('- 合成坑的**外部效度有限**：它证明「卡里写了这个坑 ⇒ 模型会避开」，不等于真实历史坑在自然场景下会被记住/被检索到。要证第一验收面，仍需真实坑的 field 数据。');
   L.push('- 坑的「自然性」：题面只给动作、不给提示；B 臂若通过读源码自行发现守卫，会表现为「不踩」→ 该坑作废（本报告按此规则处理）。');
   L.push('');
   L.push('## 4 · 复现');
   L.push('');
   L.push('```bash');
-  L.push('node scripts/ablation-sandbox.mjs --prepare --synthetic --rounds 3');
+  L.push('node scripts/ablation-sandbox.mjs --prepare --synthetic --rounds 12 --card factual --pits env');
   L.push('node scripts/ablation-sandbox.mjs --run --max-pairs 12 --limit 300');
   L.push('node scripts/ablation-sandbox.mjs --report-synthetic --out evidence/T23-synthetic-ablation.md');
   L.push('```');
