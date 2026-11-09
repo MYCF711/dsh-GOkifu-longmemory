@@ -436,7 +436,7 @@ test('T25 ⑤: sessionIdOf 只认非空字符串 id（其它一律 null，走旧
 // tombstone：把去重改回只靠内存 Set ⇒ T49 ① 红（新 apply 实例会再投一次）。
 // ---------------------------------------------------------------------------
 
-import { cardAlreadyInContext, walkCacheEntries, walkCacheSize, WALK_CACHE_IDLE_MS } from '../src/plugin.mjs';
+import { cardAlreadyInContext, walkCacheEntries, walkCacheSize, WALK_CACHE_IDLE_MS, probeCardValidity, probeCacheSize } from '../src/plugin.mjs';
 
 test('T49 ①: 宿主重新 apply（内存状态清空）后，同一张卡不会在同一会话再投一次', async () => {
   const { workspace, storeRoot, cleanup } = makeWorkspace();
@@ -2106,4 +2106,29 @@ test('T33 ④: 恢复事实从 T30 索引读（avoided 用它作证据）', () =
     assert.equal(rows[1].outcome, 'avoided');
     assert.equal(rows[1].evidenceSeq, 42);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// T64（2026-11-09）：探针缓存的 key 里带时间桶，**旧桶必须丢** ——
+// 否则每 60 秒堆一代新 key，宿主长驻就是无界增长（"无意义内存占用"的另一种形态）。
+test('T64: 探针缓存只保留当前时间桶（换桶即清，条数与运行时长无关）', () => {
+  const TTL = 60_000;
+  const claims = Array.from({ length: 5 }, (_, i) => ({ claimId: `c-00000t${i}0` }));
+  const store = {
+    get: (kind, id) => ({ id, kind: 'fact', text: `t-${id}`, scopeKey: 'w:d:/proj', support: [], validity: { type: 'none', value: null } }),
+  };
+  const deps = { probeValidity: () => ({ ok: true, reason: 'ok', checkedAt: 1 }) };
+  const card = { claims };
+
+  const t0 = Date.UTC(2026, 10, 9, 12, 0, 0);
+  probeCardValidity({ card, store, deps, now: t0 });
+  const size1 = probeCacheSize();
+  assert.equal(size1, 5, '一个桶内 5 条');
+
+  // 同一桶内再来一次 ⇒ 全部命中，不新增
+  probeCardValidity({ card, store, deps, now: t0 + 1000 });
+  assert.equal(probeCacheSize(), size1, '同桶内不许增长');
+
+  // 换桶 ⇒ 旧桶整份丢掉，条数回到 5（不是 10）
+  probeCardValidity({ card, store, deps, now: t0 + 3 * TTL });
+  assert.equal(probeCacheSize(), 5, '换桶后必须清掉旧桶（否则每 60 秒涨一代）');
 });

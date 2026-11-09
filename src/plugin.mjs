@@ -552,8 +552,17 @@ async function resolveCreateUserMessage(config, deps) {
  */
 const PROBE_CACHE = new Map();
 const PROBE_TTL_MS = 60_000;
+/**
+ * T64（2026-11-09）：`PROBE_CACHE` 的 key 里带**时间桶**（`floor(now/60s)`）——
+ * 旧实现从不删除过期桶 ⇒ 每个 60 秒都往 Map 里堆一代新 key，**永不释放**（宿主进程长驻）。
+ * 现在我们只保留**当前桶**：桶一换就整份清掉（过期条目本来就没用）。
+ * 上界 = 一个桶内的 (claim, workspace) 组合数，与运行时长无关。
+ */
+let PROBE_BUCKET = null;
+/** 测试用：当前探针缓存条数（有界性判据）。 */
+export function probeCacheSize() { return PROBE_CACHE.size; }
 
-function probeCardValidity({ card, store, deps, fallbackWorkspace = null, now = null }) {
+export function probeCardValidity({ card, store, deps, fallbackWorkspace = null, now = null }) {
   const results = {};
   const rows = Array.isArray(card?.claims) ? card.claims : [];
   for (const row of rows) {
@@ -573,6 +582,7 @@ function probeCardValidity({ card, store, deps, fallbackWorkspace = null, now = 
     // 之前直接传 cwd，同一批 claim 在两条口径下 53 条结论不同（cwd 有 package.json 时误判 version-mismatch ⇒ 闸 3 运行时误红）。
     const recordWorkspace = workspaceOf(record, fallbackWorkspace);
     const bucket = Math.floor((Number.isFinite(now) ? now : Date.now()) / PROBE_TTL_MS);
+    if (PROBE_BUCKET !== bucket) { PROBE_CACHE.clear(); PROBE_BUCKET = bucket; } // 过期桶一次性丢掉
     const cacheKey = `${key}|${recordWorkspace ?? ''}|${bucket}`;
     if (PROBE_CACHE.has(cacheKey)) {
       results[key] = PROBE_CACHE.get(cacheKey);
