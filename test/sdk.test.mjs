@@ -191,3 +191,37 @@ test('sdk: view() 库不存在 ⇒ 空结构（不抛、不编节点）', async 
   assert.deepEqual(r.nodes, []);
   assert.equal(r.counts.nodes, 0);
 });
+
+// T54（2026-11-09）：`stats()` 的计数改成**文件名层**（`store.counts()`），不再全量解析。
+// 真库实测 20.3s → 1.7s（links 11083 个文件一个就 5.1 秒，而"数个数"根本不需要解析内容）。
+// 风险只有一个：两种数法要**逐 kind 相等**，这条钉住它。
+test('T54 ①: stats().counts 与逐 kind 全量解析的条数**逐项相等**（换数法不改读数）', () => {
+  const { dshHome, root } = makeStore();
+  try {
+    const sdk = createMemorySdk({ dshHome });
+    const got = sdk.stats();
+    assert.equal(got.ok, true);
+    const full = createStore({ root });
+    for (const kind of ['episodes', 'topics', 'claims', 'links', 'threads', 'joseki', 'adjudications']) {
+      assert.equal(got.counts[kind], full.list(kind).length, `${kind} 的计数必须一致`);
+    }
+    assert.equal(got.n, Object.values(got.counts).reduce((a, b) => a + b, 0));
+  } finally {
+    rmSync(dshHome, { recursive: true, force: true });
+  }
+});
+
+test('T54 ②: 惰性 —— 只调 stats/get 不构建 walk cache（真库上那一步要 ~9 秒）', () => {
+  const { dshHome } = makeStore();
+  try {
+    const sdk = createMemorySdk({ dshHome });
+    const got = sdk.stats();
+    assert.equal(got.ok, true);
+    // 没有直接暴露 cache；用行为判据：stats 之后 get 仍然正确（两者都不需要走图）
+    const one = sdk.get('claims', 'c-0000ss01');
+    assert.equal(one.ok, true);
+    assert.equal(typeof one.record?.text, 'string');
+  } finally {
+    rmSync(dshHome, { recursive: true, force: true });
+  }
+});

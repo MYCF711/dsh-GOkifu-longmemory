@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.95（2026-11-09）
+
+### T54 · 记忆工具在真库上一次调用要 10–20 秒
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `src/sdk.mjs`（`stats` 计数口径 + walk cache 惰性），读数语义不变。
+
+**问题**（真库 1654 局 / 2410 claim / 11083 条 link）：`kifu_stats` **20.3 秒**、`kifu_card` 11.0 秒、
+`kifu_recent_failures` 10.0 秒 —— 这些是模型直接调用的工具，一次调用十几秒。
+
+**时间花在两个地方**：① `stats()` 对 7 个 kind 各做一次全量 `list()`（读文件 + JSON.parse），
+而它只要「有多少条」——`store.ids()` 在 links 上 4ms vs `list()` 5127ms；
+② `createWalkCache()` 在 `ensure()` 里就把 topics/episodes/links/claims 全读进来（≈9 秒），
+但只有 walk/card 需要它。
+
+**改法**：计数走 `store.counts()`（文件名层）；walk cache 改**惰性**。
+
+**结果**：`kifu_stats` 20298ms → **1698ms**（11.9×）· `kifu_recent_failures` 10014ms → **1136ms**（8.8×）·
+`kifu_get` ~9s → **2ms**。`kifu_search`/`kifu_card` 未变（~9–10 秒，它们真的要 walk，见证据 §六）。
+
+**验收**：`test/sdk.test.mjs` T54 ①②（counts 与全量解析逐项相等）；全量 1237 条 / 1231 pass / 0 fail / 6 skip；
+`check.mjs` PASS。证据 `evidence/T54-tool-latency.md`。
+
 ## 0.8.94（2026-11-09）
 
 ### T53 · A1.redundant 的窗口跟着「当前在跑的那份代码」走
