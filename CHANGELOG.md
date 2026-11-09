@@ -17,6 +17,31 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.127（2026-11-10）
+
+### T376 · H1 的 store 走生产同款：32.5s → 11.9s，**读数逐项不变**
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `scripts/eval.mjs` 的 `runH1()`。
+
+**病灶**：`runH1()` 用 `createStore({ root })`（默认逐文件读），而生产（`sdk`/`plugin`，以及 T370 后的 m5-report）
+都是 `bundle: true`。H1 要跑几十条信号 × 每条一次 walk→card→gates ⇒「读得慢」被放大几百倍，没人愿意跑。
+
+**改法**：`createStore({ root, bundle: opts.bundle !== false })` —— 默认走 bundle（生产同款），
+**显式 `bundle: false` 才回退旧路径**（给对拍与排查留路）。
+
+**读数**（真库 1917 局，signals=12）：
+
+```
+bundle 关  32483ms   {"injected":306,"stale":0,"unverified":8}
+bundle 开  11902ms   {"injected":306,"stale":0,"unverified":8}   ← 读数一致
+```
+
+**验收**：`test/t376-h1-bundle.test.mjs` 2/2（开/关读数逐项相同 · 默认等于 `bundle:true`）；
+全量 1299 条 / 1293 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T376-h1-bundle.md`。
+
+**归类**：这是同一类病灶的第三个受害者（前两个：A4 的 store（T370）、walk 的索引（T371））——
+「评测路径必须与生产路径同构」，否则量出来的既不是生产、也没人跑得动。
+
 ## 0.8.126（2026-11-10）
 
 ### T375 · 工具面两条注册路径：读不到 `ctx.tools` 就走 `ctx.inject` 延迟注册
