@@ -17,6 +17,23 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.104（2026-11-09）
+
+### T63 · `warm-bundles`：把「归档后第一次查询要等 6 秒」挪到归档之后
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。新增脚本 `scripts/warm-bundles.mjs`（只写 `.cache/`）。
+
+**问题**：T62 的 bundle 一遇库变更就失效 ⇒ **归档完的第一次查询**仍要付冷路径（真库实测 12.7 秒建四类，
+其中 links 6491ms）。
+
+**改法**：新增 `node scripts/warm-bundles.mjs`，给归档管线在**写完库之后**调一次；已新鲜的 kind 跳过。
+没有 manifest 的库（测试夹具）直接跳过，不建垃圾。
+
+**读数**：四类预热 12.7 秒（后台）⇒ 预热后首次查询 **214ms**（未预热是 6284ms）。
+
+**验收**：`test/t62-walk-bundle.test.mjs` 6/6（新增 T63：建/跳过/无 manifest 跳过）；
+全量 1256 条 / 1250 pass / 0 fail / 6 skip；`check.mjs` PASS。
+
 ## 0.8.103（2026-11-09）
 
 ### T62 · 单文件 bundle：`list()` 3.4–5.1 秒 → 27–35ms（顺手救回 T61 的空闲代价）
