@@ -46,8 +46,24 @@ test('patrol: 判定 —— 全绿时没问题；跨作用域/ missing / 日期�
   assert.ok(bad.problems.some((p) => p.includes('日期')));
 });
 
+// T57（2026-11-09）：`already-in-context`（T49 去重闸）与 `once-per-session`（T52 限流墓碑）
+// 之前只写不读 —— 违反本仓「指标先有消费者」。这条钉住它们真的被解析出来。
+test('T57: 心跳解析 —— 去重闸 / 限流墓碑两类 skip 原因要摆到台面上', () => {
+  const text = [
+    '动作：skip=10 · inject=3',
+    '原因：no-signal=5 · already-in-context=7 · once-per-session=2',
+  ].join(String.fromCharCode(10));
+  const s = parseLiveStats(text);
+  assert.equal(s.dedupeBlocked, 7);
+  assert.equal(s.oncePerSessionSilenced, 2);
+  // 没出现过 ⇒ null（不是 0）：0 次 vs 没这行数据，是两件事
+  const none = parseLiveStats('动作：skip=1 · inject=1' + String.fromCharCode(10, 10) + '原因：no-signal=1');
+  assert.equal(none.dedupeBlocked, null);
+  assert.equal(none.oncePerSessionSilenced, null);
+});
+
 test('patrol: 空输入不炸（没装 store 的机器上也能跑）', () => {
-  assert.deepEqual(parseLiveStats(''), { inject: null, skip: null, gatesFailed: null });
+  assert.deepEqual(parseLiveStats(''), { inject: null, skip: null, gatesFailed: null, dedupeBlocked: null, oncePerSessionSilenced: null });
   const empty = parseAudit('');
   assert.equal(empty.refs, null);
 });

@@ -35,7 +35,22 @@ export function parseLiveStats(text) {
   const skip = Number(/skip=(\d+)/.exec(action)?.[1] ?? NaN);
   // gates-failed 在「原因」那一行（动作行只有 skip/inject）—— 一开始写成同一条，读数一直是 ?。
   const gate = Number(/gates-failed=(\d+)/.exec(reason)?.[1] ?? NaN);
-  return { inject: Number.isFinite(inject) ? inject : null, skip: Number.isFinite(skip) ? skip : null, gatesFailed: Number.isFinite(gate) ? gate : null };
+  // T57（2026-11-09）：**给新写的两类 skip 原因接上消费者**。
+  // 本仓纪律「指标先有消费者」：`already-in-context`（T49 去重闸）与 `once-per-session`（T52 限流墓碑）
+  // 之前只写不读 —— 写了没人看，等于没有。这里把它们摆到巡检台上。
+  // 判据是**信息性**的（不参与 exit code）：0 次触发本身不能证明"闸坏了"，但"重启后长跑仍为 0"
+  // 是"这版代码没加载"或"确实一次都没撞上"的直接线索。
+  const num = (name) => {
+    const m = new RegExp(`${name}=(\\d+)`).exec(reason);
+    return m ? Number(m[1]) : null;
+  };
+  return {
+    inject: Number.isFinite(inject) ? inject : null,
+    skip: Number.isFinite(skip) ? skip : null,
+    gatesFailed: Number.isFinite(gate) ? gate : null,
+    dedupeBlocked: num('already-in-context'),
+    oncePerSessionSilenced: num('once-per-session'),
+  };
 }
 
 /** 从 `audit-card-samples --current` 的摘要行里取六项读数。 */
@@ -178,7 +193,7 @@ const lines = [
   '| 项 | 读数 | 判定 |',
   '|---|---|---|',
   a2b.text, // T250：主判据永远第一行
-  `| A3 心跳 | inject=${stats.inject ?? '?'} · skip=${stats.skip ?? '?'} · gates-failed=${stats.gatesFailed ?? '?'} | ${stats.inject > 0 ? '通过' : '无注入（查是否没信号）'} |`,
+  `| A3 心跳 | inject=${stats.inject ?? '?'} · skip=${stats.skip ?? '?'} · gates-failed=${stats.gatesFailed ?? '?'} · dedupe=${stats.dedupeBlocked ?? '?'} · 限流静默=${stats.oncePerSessionSilenced ?? '?'} | ${stats.inject > 0 ? '通过' : '无注入（查是否没信号）'} |`,
   `| A5 跨作用域 | ${audit.crossScope ?? '?'} | ${audit.crossScope === 0 ? '通过' : '**最高优先级**'} |`,
   `| A6 文字层 | ok ${audit.atSeq ?? '?'}/${audit.refs ?? '?'} · offset ${audit.elsewhere ?? 0} · notFound ${audit.missing ?? '?'} · unreadable ${audit.unreadable ?? 0} · 日期 ${audit.dateOk ?? '?'}/${audit.refs ?? '?'} | ${verdict.unverified ? '**未验证**（当前宿主无卡样本，不算通过）' : (verdict.ok ? '通过' : '**要看**')} |`,
   semantic.text, // T269：语义不变量（SI-1/2/4/5），紧接 A6 之后
