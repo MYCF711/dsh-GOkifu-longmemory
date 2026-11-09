@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.96（2026-11-09）
+
+### T55 · walk cache 跨 SDK 实例共享（`kifu_search`/`kifu_card` 9–10 秒 → 34ms–2 秒）
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `src/sdk.mjs`（新增进程级共享缓存 + TTL）。
+
+**问题**：T54 之后 `stats`/`get`/`recent_failures` 快了，但 `kifu_search` / `kifu_card` 仍稳定 9–10 秒。
+病根是每个工具调用都**新建 SDK 实例**、walk cache 每实例一份 ⇒ 每次调用重建（真库 ≈9 秒：
+topics 2.1s + links 5.1s + episodes/claims 1.6s）。
+
+**改法**：按 `storeRoot` 共享一份 walk cache，两道失效判据 —— ① **目录签名**（四个 kind 的条目数 + 目录 mtime，
+readdir 级，links 11083 个只要 4ms）；② **TTL 30 秒**（`counters.injections` 这类原地改写改不了条目数，只能靠时间兜住）。
+
+**结果**（真库）：第一次 `kifu_search` 8855ms（建一次），之后 `kifu_card` 1782ms、`kifu_search` **34ms**、`kifu_card` 2129ms。
+
+**验收**：T55 ①②③（共享 / 条目数变化必重建 / TTL 必须生效）；全量 1240 条 / 1234 pass / 0 fail / 6 skip；
+`check.mjs` PASS。证据 `evidence/T55-shared-walk-cache.md`。
+
 ## 0.8.95（2026-11-09）
 
 ### T54 · 记忆工具在真库上一次调用要 10–20 秒

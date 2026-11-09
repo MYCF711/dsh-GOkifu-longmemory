@@ -58,6 +58,35 @@ const hitView = (hit) => ({
   why: Array.isArray(hit?.why) ? hit.why.slice(0, 6).map(String) : (typeof hit?.why === 'string' ? hit.why : null),
 });
 
+/**
+ * T55（2026-11-09）：walk cache **跨 SDK 实例共享**。
+ *
+ * 为什么：每个 `kifu_*` 工具调用都会新建一个 SDK 实例（`buildMemoryTools()` 的 `run()` 里），
+ * 于是每次都重建一次 walk cache —— 真库上那一步 ≈9 秒（topics 2.1s + links 5.1s + episodes/claims 1.6s）。
+ * `kifu_search` / `kifu_card` 因此稳定在 9–10 秒。
+ *
+ * 失效判据（两道，任一不满足就重建）：
+ *   ① **目录签名**：四个 kind 各自的条目数 + 目录 mtime（readdir 级，links 11083 个也只要 4ms）；
+ *   ② **TTL**（`WALK_CACHE_TTL_MS`）：即使签名没变也最多用 30 秒 —— 计数器这类"原地改写"不会改条目数，
+ *      签名看不出来，靠 TTL 兜住。
+ *
+ * 共享是**按 storeRoot** 的（不同记忆库互不污染）；进程退出即丢，不落盘。
+ */
+const SHARED_WALK_CACHE = new Map();
+export const WALK_CACHE_TTL_MS = 30_000;
+let walkCacheBuilds = 0;
+
+/** 测试用：一共真正建了几次 walk cache（生产只读，不参与任何判定）。 */
+export function walkCacheBuildCount() {
+  return walkCacheBuilds;
+}
+
+/** 测试用：清空共享缓存与计数（避免用例之间串味）。 */
+export function resetWalkCache() {
+  SHARED_WALK_CACHE.clear();
+  walkCacheBuilds = 0;
+}
+
 export function createMemorySdk({ dshHome = null, scope = null, now = null } = {}) {
   const home = dshHome || defaultDshHome();
   const storeRoot = path.join(home, 'memory-context');
@@ -84,10 +113,36 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
     return store;
   };
 
-  /** walk cache 的惰性入口（T54）：只有真的要走图时才付这 ~9 秒。 */
+  /** 目录签名（T55 失效判据 ①）：四个 kind 的条目数 + 目录 mtime。 */
+  const walkSignature = () => {
+    const parts = [];
+    for (const kind of ['topics', 'episodes', 'links', 'claims']) {
+      let n = -1;
+      try { n = store.ids(kind).length; } catch { n = -1; }
+      let mt = 0;
+      try { mt = fs.statSync(path.join(storeRoot, kind)).mtimeMs; } catch { mt = 0; }
+      parts.push(`${kind}:${n}:${mt}`);
+    }
+    return parts.join('|');
+  };
+
+  /**
+   * walk cache 的惰性入口（T54 惰性 + T55 跨实例共享）。
+   * 命中条件：同 storeRoot + 目录签名一致 + 未过 TTL。否则重建（真库上 ≈9 秒，所以只该发生一次）。
+   */
   const walkCache = () => {
     ensure();
-    if (!cache && store) cache = createWalkCache(store);
+    if (!store) return null;
+    const now = clock();
+    const sig = walkSignature();
+    const hit = SHARED_WALK_CACHE.get(storeRoot);
+    if (hit && hit.sig === sig && (now - hit.at) < WALK_CACHE_TTL_MS) {
+      cache = hit.cache;
+      return cache;
+    }
+    walkCacheBuilds += 1;
+    cache = createWalkCache(store);
+    SHARED_WALK_CACHE.set(storeRoot, { sig, at: now, cache });
     return cache;
   };
 
