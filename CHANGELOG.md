@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.120（2026-11-09）
+
+### T368 · 影库「不一致」分得清是漏了还是源库在长
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `scripts/consolidate-apply.mjs` 的 `mirrorAll()`。
+
+**起于一次真实误判**：建影库时自查报「逐 kind 不一致：episodes, topics, claims」，但源库自己的 listing 一致。
+真因是**源库在镜像那 208 秒里长大了**（宿主还在跑，会话一结束就归档：1654 局 → 1908 局），
+而旧实现只在**结束时**读 `src.counts()` 去比影库 ⇒ 必然报不一致。
+
+**改法**：复制前拍一张 `beforeCounts`（影库对应的就是它，一致性以它为准），复制后再读 `sourceCounts`，
+两者不同 ⇒ 报告里单列一行「⚠ 源库在镜像期间变化（影库对应的是开始时快照）：episodes 1654→1908 …」。
+
+**为什么值得单独一刀**：这个误判会污染 `merge-acceptance` 的 ④a/④b —— 拿两个不同数据集比，
+会凭空长出「⚠ 反增」（我这次就看到 2 组，但那可能是假象）。
+
+**验收**：`test/t368-mirror-drift.test.mjs` 2/2（源库长大 ⇒ drift 且不算不一致 / 真漏仍红）；
+全量 1290 条 / 1284 pass / 0 fail / 6 skip。证据 `evidence/T368-mirror-drift.md`。
+
 ## 0.8.119（2026-11-09）
 
 ### T367 · `kifu_consolidate`：S4 工具面的最后一块（只读预览）
