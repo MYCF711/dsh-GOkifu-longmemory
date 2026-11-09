@@ -76,11 +76,19 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
     if (storeMissing()) return null;
     try {
       store = createStore({ root: storeRoot });
-      cache = createWalkCache(store);
+      // T54（2026-11-09）：walk cache **惰性构建** —— 它一次性把 topics/episodes/links/claims 全读进来
+      // （真库实测 ~9 秒，links 11083 个文件占 5.1 秒）。只有 walk/card 需要用；`stats`/`get` 不该替它付钱。
     } catch (error) {
       throw new SdkError('store-unreadable', `记忆库读不了：${String(error?.message ?? error)}`);
     }
     return store;
+  };
+
+  /** walk cache 的惰性入口（T54）：只有真的要走图时才付这 ~9 秒。 */
+  const walkCache = () => {
+    ensure();
+    if (!cache && store) cache = createWalkCache(store);
+    return cache;
   };
 
   const listSafe = (kind) => {
@@ -148,7 +156,7 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
     const budget = clampInt(opts.budgetTokens, 100, MAX_BUDGET_TOKENS, 500);
     const scope = opts.scope === undefined ? resolvedScope : (opts.scope == null ? null : String(opts.scope));
     const walk = walkFromSignals({
-      signal: signalFor(t), store: st, scope, cache, depth: depth.value, limit: limit.value, budgetTokens: budget.value,
+      signal: signalFor(t), store: st, scope, cache: walkCache(), depth: depth.value, limit: limit.value, budgetTokens: budget.value,
       // Q18=A（关闸）：类级 claim 不借跨域证据。SDK 默认与线上一致；要实验就显式传 true。
       allowCrossScopeClass: opts.allowCrossScopeClass === true,
     });
@@ -172,8 +180,13 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
     },
 
     stats() {
+      // T54（2026-11-09）：计数走**文件名层**（`store.counts()` → `ids()`，只 readdir、不解析内容）。
+      // 真库实测：全量解析 7 个 kind 要 9.4 秒（links 11083 个文件一个就 5.1 秒），而"数个数"根本不需要解析。
+      // 语义差异只有一处：文件名坏掉的条目 `list()` 会算成一个 error 条目、`ids()` 跳过 —— 那种文件不该计入。
+      const st = ensure();
+      const rawCounts = st ? st.counts() : {};
       const counts = {};
-      for (const kind of KINDS) counts[kind] = listSafe(kind).length;
+      for (const kind of KINDS) counts[kind] = Number(rawCounts[kind] ?? 0);
       const episodes = listSafe('episodes');
       const claims = listSafe('claims');
       const maxOf = (records, key) => records.reduce((acc, r) => (Number.isFinite(r?.[key]) && r[key] > acc ? r[key] : acc), 0);
@@ -232,7 +245,7 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
       });
       const wantGates = opts.gates !== false;
       const gates = wantGates
-        ? runGates({ card, walkResult: walk, store: st, cache, scope })
+        ? runGates({ card, walkResult: walk, store: st, cache: walkCache(), scope })
         : { ok: true, errors: [], skipped: true };
       const section = typeof card?.section === 'string' ? card.section : '';
       return {
