@@ -175,6 +175,24 @@ export function makeLogLoader({ home = HOME } = {}) {
  * @param {{claims:Array, episodes:Map<string,object>, loadEvents:Function, opts?:{limit?:number, detailLimit?:number}}} p
  * @returns {{stats:object, rows:Array, contaminated:Array, details:Array, ledgerEventTypes:Array}}
  */
+/**
+ * T58：方向判定（纯函数，可单测）。
+ *
+ * · `claim-from-card`：卡渲染**早于** claim 的 recordedAt ⇒ 这条 claim 有可能就是从卡里抓的（**真 F5**）；
+ * · `card-from-claim`：卡渲染**晚于** claim ⇒ 是卡引用了 claim，**不算**红线实例（但如果 quote 不是原文子串，那是 P2 指针问题）；
+ * · `unknown`：算不出来（读不到事件 / 缺 recordedAt）⇒ **fail-closed**，按真 F5 计。
+ *
+ * @param {number|null} earliestCard 该 quote 落在注入卡内的最早时间
+ * @param {number|null} claimRecordedAt claim 的入馆时间
+ * @returns {'claim-from-card'|'card-from-claim'|'unknown'}
+ */
+export function classifyDirection(earliestCard, claimRecordedAt) {
+  const card = Number.isFinite(earliestCard) ? earliestCard : null;
+  const recorded = Number.isFinite(claimRecordedAt) ? claimRecordedAt : null;
+  if (card === null || recorded === null) return 'unknown';
+  return card < recorded ? 'claim-from-card' : 'card-from-claim';
+}
+
 export function auditSelfContamination({ claims, episodes, loadEvents, opts = {} }) {
   const limit = Number.isFinite(opts.limit) ? opts.limit : Infinity;
   const detailLimit = Number.isFinite(opts.detailLimit) ? opts.detailLimit : 10;
@@ -255,6 +273,42 @@ export function auditSelfContamination({ claims, episodes, loadEvents, opts = {}
   }
 
   const contaminated = rows.filter((r) => r.selfContaminated);
+  // 1.5) T58（2026-11-09）：**方向要算全量，不能只算抽样**。
+  // 契约（见文件头 §维度 B）：`card-from-claim` = 卡渲染时间**晚于** claim 的 recordedAt ⇒ 是**卡引用了 claim**，
+  // 属 P2 改写问题，**不算**「卡→claim」的红线实例；只有 `claim-from-card`（卡早于 claim）才是真 F5。
+  // 旧实现把方向只算在 `details`（默认 5 条抽样）上，而汇总/退出码用**未区分方向**的 selfContaminated
+  // ⇒ 本机实测 60 条**全部**是 card-from-claim，却被判成红线、退出码 1。
+  const eventsCache = new Map();
+  const loadEventsCached = (episode) => {
+    if (eventsCache.has(episode)) return eventsCache.get(episode);
+    let events = null;
+    try {
+      const ep = episodes?.get?.(episode) ?? null;
+      events = ep ? loadEvents(episode, ep) : null;
+    } catch { events = null; }
+    eventsCache.set(episode, events);
+    return events;
+  };
+  /** 该 quote 在**本局**里最早一次"落在注入卡内"的时间（没有 ⇒ null）。 */
+  const earliestCardOf = (events, quote) => {
+    const needle = normalizeText(quote);
+    if (!needle || !events) return null;
+    let earliest = null;
+    for (const ev of events) {
+      const text = eventText(ev);
+      if (!text.includes(needle)) continue;
+      const at = text.indexOf(needle);
+      if (!ledgerSpans(text).some((sp) => at >= sp.start && at < sp.end)) continue;
+      const t = Number.isFinite(ev?.time) ? ev.time : null;
+      if (t !== null && (earliest === null || t < earliest)) earliest = t;
+    }
+    return earliest;
+  };
+  const directionByRow = new Map();
+  for (const row of contaminated) {
+    directionByRow.set(row, classifyDirection(earliestCardOf(loadEventsCached(row.episode), row.quote), row.claimRecordedAt));
+  }
+
   const byVerdict = rows.reduce((acc, r) => { acc[r.verdict] = (acc[r.verdict] ?? 0) + 1; return acc; }, {});
   const claimsTotal = Math.min(Array.isArray(claims) ? claims.length : 0, limit);
   const stats = {
@@ -267,6 +321,10 @@ export function auditSelfContamination({ claims, episodes, loadEvents, opts = {}
     elsewhereInEpisode: rows.filter((r) => r.elsewhereInEpisode).length,
     inLedger: rows.filter((r) => r.inLedger).length,
     selfContaminated: contaminated.length,
+    // T58：把「真 F5」与「反向（卡引用了 claim）」分开计数 —— 只有前者是红线。
+    claimFromCard: contaminated.filter((r) => directionByRow.get(r) === 'claim-from-card').length,
+    cardFromClaim: contaminated.filter((r) => directionByRow.get(r) === 'card-from-claim').length,
+    directionUnknown: contaminated.filter((r) => directionByRow.get(r) === 'unknown').length,
     contaminatedClaims: new Set(contaminated.map((r) => r.claimId)).size,
     contaminatedRate: rows.length ? +((contaminated.length / rows.length) * 100).toFixed(2) : 0,
     contaminatedClaimRate: claimsTotal ? +((new Set(contaminated.map((r) => r.claimId)).size / claimsTotal) * 100).toFixed(2) : 0,
@@ -297,12 +355,12 @@ export function auditSelfContamination({ claims, episodes, loadEvents, opts = {}
     }
     const cardTimes = occurrences.filter((o) => o.inLedger && o.time).map((o) => o.time);
     const earliestCard = cardTimes.length ? Math.min(...cardTimes) : null;
-    const direction = earliestCard !== null && row.claimRecordedAt !== null
-      ? (earliestCard < row.claimRecordedAt ? 'claim-from-card' : 'card-from-claim')
-      : 'unknown';
+    const direction = directionByRow.get(row) ?? classifyDirection(earliestCard, row.claimRecordedAt);
     details.push({ ...row, occurrences, earliestCard, direction });
   }
 
+  // 红线实例 = 卡早于 claim（有嫌疑）+ 方向算不出来（fail-closed，不许当没事）
+  stats.realF5 = stats.claimFromCard + stats.directionUnknown;
   return { stats, rows, contaminated, details, ledgerEventTypes: [...ledgerEventTypes].sort((a, b) => b[1] - a[1]) };
 }
 
@@ -381,8 +439,9 @@ function renderEvidence({ stats, details, scan }) {
   L.push('');
   L.push('## 0 · 一句话');
   L.push('');
-  const fromCard = details.filter((d) => d.direction === 'claim-from-card').length;
-  const cardFromClaim = details.filter((d) => d.direction === 'card-from-claim').length;
+  // T58：方向计数取自**全量** stats（旧实现取 details 抽样，60 条只看到 5 条）
+  const fromCard = stats.claimFromCard ?? 0;
+  const cardFromClaim = stats.cardFromClaim ?? 0;
   L.push(stats.selfContaminated > 0
     ? `**红线实例：${stats.selfContaminated} / ${stats.refs} 条引用（${stats.contaminatedRate}%）的引文在本局**唯一来源是注入卡**；`
       + `其中"卡早于 claim"（卡→claim，真 F5）${fromCard} 条、"claim 早于卡"（claim→卡，属 P2 改写）${cardFromClaim} 条。**`
@@ -449,6 +508,9 @@ async function main(argv) {
     console.log(formatSummary(result.stats));
     console.log(`in-ledger=${result.stats.inLedger} · 远偏移命中=${result.stats.elsewhereInEpisode} · self-contaminated=${result.stats.selfContaminated}`
       + `（refs ${result.stats.contaminatedRate}% / claims ${result.stats.contaminatedClaimRate}%，${result.stats.contaminatedClaims} 条 claim）`);
+    console.log(`方向拆分（T58）：真 F5（卡早于 claim + 方向不明）= **${result.stats.realF5}**`
+      + ` · 卡早于 claim=${result.stats.claimFromCard} · 卡引用 claim=${result.stats.cardFromClaim} · 方向不明=${result.stats.directionUnknown}`
+      + `（全部方向已在**全量** contaminated 上算过，不是抽样）`);
     if (scan) {
       console.log(`\n卡事件类型分布（scanned-logs=${scan.scanned} · 含卡日志=${scan.withCard} · 卡事件=${scan.cardEvents} · 总事件=${scan.totalEvents}）:`);
       for (const [k, v] of scan.types) console.log(`  ${k} : ${v}`);
@@ -466,7 +528,8 @@ async function main(argv) {
     fs.writeFileSync(out, renderEvidence({ ...result, scan }), 'utf8');
     if (!args.json) console.log(`\nevidence: ${path.relative(process.cwd(), out)}`);
   }
-  return result.stats.selfContaminated > 0 ? 1 : 0;
+  // T58：红线只看**真 F5**（卡早于 claim / 方向算不出来）。反向（卡引用 claim）属 P2 改写问题，不在这里判。
+  return (result.stats.realF5 ?? result.stats.selfContaminated) > 0 ? 1 : 0;
 }
 
 const invokedDirectly = process.argv[1] ? import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href : false;
