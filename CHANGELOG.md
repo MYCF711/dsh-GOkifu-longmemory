@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.126（2026-11-10）
+
+### T375 · 工具面两条注册路径：读不到 `ctx.tools` 就走 `ctx.inject` 延迟注册
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `src/tools-plugin.mjs`。
+
+**现象**（重启后 01:55，宿主 `Desktop-0.2.2-rc.1` pid 23364）：
+
+```
+home/memory-context/tools-registered.json   via: tools-plugin-none · ctxHasRegister: false · count: 0
+home-0.2.2-rc.1/…（21:35 更早一次启动）     via: direct · ctxHasRegister: true · count: 6
+```
+
+两个 home 的 profile **都挂了 `kifu-tools`** ⇒ 配置不是差异点 ⇒ **`apply` 那一刻 `ctx.tools` 是否就绪不能假设**。
+
+**改法**：宿主的官方插件对「可能还没就绪的服务」用的是 `ctx.inject(deps, cb)` 延迟获取。我们照做：
+① 能直接读 → 直接注册（**与改动前逐字节一致**）；② 读不到但给了 `ctx.inject` → 登记 `['tools']` 回调，
+就绪时再注册（凭据 `via: tools-plugin-deferred`）；③ 两者都没有 → 如实记 `names:[]`（不抛、不装成功）。
+
+**验收**：`test/t375-tools-deferred.test.mjs` 3/3；`tools-plugin/tools` 老契约 12/12；
+全量 1297 条 / 1291 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T375-tools-deferred.md`。
+
+**诚实边界**：这条**要重启才生效**；本会话 `kifu_*` 仍不可用。走不通时仍是 ③（如实记 0），**不会更差**。
+
 ## 0.8.125（2026-11-09）
 
 ### T373 · ④b 那 22 行「丢内容」：源库自己的合并节点行不是内容
