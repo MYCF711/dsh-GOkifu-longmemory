@@ -109,8 +109,14 @@ export function collectTrackedTestCounts({ repoRoot = REPO_ROOT, execFile = null
   } catch (error) {
     // 有红用例时 execFile 会抛错，但 stdout 里仍有计数 —— 与 ledger-check 同一处理
     const parsed = parseTestCounts(String(error?.stdout ?? ''));
-    if (!parsed) throw error;
-    return { ...parsed, files: tracked.length, failed: true };
+    if (parsed) return { ...parsed, files: tracked.length, failed: true };
+    // T59（2026-11-09）：拿不到计数 ⇒ **串行重跑一次**再判。
+    // 依据：本机已 5 次遇到"并发跑全量时某个隔离子进程忙等、父进程无输出"，而 `--test-concurrency=1`
+    // 单次实测 1246 条 252 秒**未复现**（并发 4 时 3/7 复发）。卡死不该让发版直接失败。
+    const retry = run(process.execPath, ['--test', `--test-timeout=${TEST_TIMEOUT_MS}`, '--test-concurrency=1', ...tracked]);
+    const reparsed = parseTestCounts(String(retry ?? ''));
+    if (!reparsed) throw error;
+    return { ...reparsed, files: tracked.length, failed: false, retriedSerially: true };
   }
 }
 
