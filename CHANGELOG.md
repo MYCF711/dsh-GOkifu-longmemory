@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.98（2026-11-09）
+
+### T57 · 新写的两类 skip 原因只写不读（违反「指标先有消费者」）
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `scripts/patrol.mjs` 的解析与巡检行。
+
+**问题**：T49 的 `already-in-context` 与 T52 的 `once-per-session` 两个 skip 原因，全仓 `grep` 只有**写入点**、
+没有任何消费者。本仓纪律「任何指标必须有真实语料消费者，否则会一直算假数」—— 写了没人看等于没有，
+而且更糟：会让人以为「已经在观测了」。
+
+**改法**：`parseLiveStats` 把这两类原因一并取出来，摆到 A3 那一行：
+`inject=… · skip=… · gates-failed=… · dedupe=… · 限流静默=…`。
+判定口径是**信息性**的（不参与 exit code）；原因行里没出现这一类 ⇒ 取 `null` 而不是 `0`（0 次 ≠ 没数据）。
+
+**验收**：`test/patrol.test.mjs` 18/18（含 T57：已出现取到数 / 未出现返回 null / 空输入不炸）；
+全量 1240 条 / 1234 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T57-skip-reason-consumer.md`。
+
+**边界**：线上还看不到数（宿主跑旧代码）；它**不是判据**，`dedupe=0` 不会让巡检变红 ——
+要判「闸有没有生效」仍看真库回放与重启后 A1.redundant 的判据窗口。
+
 ## 0.8.97（2026-11-09）
 
 ### T56 · 发版时 `node --test` 卡死会无声挂住 25 分钟 → 加有界超时
