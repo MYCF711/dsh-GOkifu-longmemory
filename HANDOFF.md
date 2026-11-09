@@ -12,8 +12,8 @@ DSH 的长期记忆插件（棋院 / Kifu-in）：每局会话结束后把「**�
 ## 二、当前真实状态
 
 - **宿主没重启**（pid 8040，2026-11-08T17:52:55Z 启动）。本次会话改的代码都在仓库里，**要重启才进进程**。
-- 本会话改了 **13 个版本（0.8.88 → 0.8.101）**，全部走 分支→PR→required rules→squash→release（**未发 npm**）。
-- **全量测试 1247 条 / 1241 pass / 0 fail / 6 skip**；`check.mjs` / `tag-audit` / `ledger-check --full` / `patrol --full` 全 PASS。
+- 本会话改了 **30 个版本（0.8.88 → 0.8.117）**，全部走 分支→PR→required rules→squash→release（**未发 npm**）。
+- **全量测试 1282 条 / 1276 pass / 0 fail / 6 skip**；`check.mjs` / `tag-audit` / `ledger-check --full` / `patrol` 全 PASS（2026-11-09 20:07 复核）。
 - **`post-restart-verify` = 6/7**（FAIL=1 · NO-SAMPLE=0）。那条 FAIL 是**真红**：`29ec9d7`（T49）晚于宿主首心跳 ⇒ 新代码确实没加载。
 
 ### 四项复测：**4/4 已 PASS**（不再待样本）
@@ -43,6 +43,14 @@ DSH 的长期记忆插件（棋院 / Kifu-in）：每局会话结束后把「**�
 | **T56 / T59** | 并发跑全量会卡死：有界超时（240s）+ 拿不到计数就**串行重跑一次** | `evidence/T56-bounded-release-tests.md`、`evidence/T59-serial-retry.md` |
 | **T57** | 新写的 skip 原因（`already-in-context` / `once-per-session`）**只写不读** ⇒ 接到巡检台 | `evidence/T57-skip-reason-consumer.md` |
 | **T58** | 自证污染核查把「卡引用 claim」判成红线（60 条全是反向）⇒ 方向改全量算，退出码 1→0 | `evidence/T58-self-contamination-direction.md` |
+| **T61** | 三处**无界增长**清零（插件 walk cache 按世代累积 / 会话键 Map / 探针缓存）+ 空闲自灭 ⇒ 空闲堆 38.8MB→**6.9MB**（基线 6.4） | `evidence/T61-memory-idle-release.md` |
+| **T62** | `store.list()` 走单文件 bundle ⇒ links **3393ms→35ms**、查询 6284ms→161ms | `evidence/T62-walk-bundle.md` |
+| **T63** | `warm-bundles` 把冷路径搬后台 ⇒ 归档后首次查询 **214ms** | `evidence/T63-warm-bundles.md` |
+| **T64** | 探针缓存每 60 秒堆一代 ⇒ 只保留当前时间桶 | `evidence/T64` · CHANGELOG 0.8.105 |
+| **T65** | 一次建卡重复解析同一份 bundle ⇒ 5 秒 memo，建卡 **180→109ms** | CHANGELOG 0.8.106 |
+| **T66–T70** | `quote-not-substring` 分桶 → 修截断加 `…`(400 条) → 分来源（图 89.3%/信号 1.4%）→ 修 `edgeSeq` 取错头 → 校空白口径 | `evidence/T67-clip-quote.md`、`T70-p2-whitespace.md` |
+| **T69 / T72** | **根因**：`edgeSeq` 取 `evidence.start` 而引文在 `evidence.end`；**端到端证明** 命中率 **0%→88–100%** | `evidence/T69-edge-seq.md`、`T72-edge-seq-proven.md` |
+| **T74 / T365** | 454 条「本局没有」定因为**上游 `errorSnippet` 是摘要**（源头文字不存在）⇒ 判定三态，单列 `unverifiable-source` | `evidence/T365-unverifiable-source.md` |
 
 ## 四、下次开工第一件事
 
@@ -75,13 +83,14 @@ DSH 的长期记忆插件（棋院 / Kifu-in）：每局会话结束后把「**�
    **未定位到具体文件**（隔离子进程 argv 不带文件名、日志是完成序）。已缓解（T56 超时 + T59 串行重试），**根因未修**。
 2. **`store.list()` 仍每次全量读**（真库 11083 条 link = 5.1s）：进程内第一次工具调用仍 ~9 秒。要改得引入磁盘索引/二进制格式，是独立设计题。
 3. **一次查询的峰值堆约 42 MB**（episodes 占 27.6 MB）：数据本身的成本，不是泄漏；再降一个量级要按需索引。
-4. **82% 的 support.quote 不是原文逐字子串**（4315 条里 3565 条）：属 P2 指针精度问题，要改抽取时的引文捕获方式（数据模型级），**不能**靠回填改写历史（只增不改）。
+4. **`support.quote` 的账已清**（2026-11-09）：`ok 750 · 位置偏 3111 · 不可核验(源头不存在) 454`。位置偏是 `edgeSeq` 取错头（**T69 已修，只对新归档生效**）；454 条是上游 `graph.json` 的 `errorSnippet` 本身是摘要，**我们这侧改不了**（T74 定因）。历史不回填（只增不改）。
 5. **A2b 认顶 46.6%**（holdout n=118）—— 不是 bug，是当前能力上限。
 
 ## 六、工程纪律（照做，别重新设计）
 
 - 分支 → PR → required check `rules` → squash 合并 → `node scripts/release.mjs --require-ci`（**不发 npm**）；版本一律 **patch**（`v0.9.0` 被旧线占用）。
 - 发版前：`node scripts/ledger-sync.mjs` + `ledger-check --full`；`check.mjs` 必过。
+- **切片编号先查 `计划表.md`**：本表已有 49 个重复 T 号（历史遗留），新刀请取 `最大号+1`（当前 T364 → 新刀用 T365 起）。
 - 一刀一个 commit，首行 = 切片 id；**禁止 `git add -A`**；PR 分支永不强推。
 - **样本不足就 NO-SAMPLE，不许硬算过**；指标必须**先有消费者**再谈加减。
 - **禁止重启 / 关闭 DSH、禁止 `taskkill`、禁止关 magpie**（本机铁律）。
@@ -93,5 +102,5 @@ DSH 的长期记忆插件（棋院 / Kifu-in）：每局会话结束后把「**�
 | 版本 / 测试数 / 六轴 / 下一步 | `MAINTENANCE.md` |
 | 逐条任务状态 | `计划表.md`（唯一权威） |
 | 每次改了什么 | `CHANGELOG.md`（**顶部有「更正 · 2026-11-09」段**，T49 根因补正） |
-| 实测证据 | `evidence/`（T49 – T59） |
+| 实测证据 | `evidence/`（T49 – T365；性能与内存总账见 `evidence/perf-memory-2026-11-09.md`） |
 | 方向与边界 | `方案.md` / `docs/记忆的职责边界.md` / `docs/拷问记录.md` |
