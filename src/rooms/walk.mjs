@@ -650,12 +650,75 @@ export function createWalkCache(store, { records = null } = {}) {
       if (rec && typeof rec.id === 'string') byId.set(`${kind}:${rec.id}`, rec);
     }
   }
+  // -------------------------------------------------------------------------
+  // T371（2026-11-09）：**两张索引在这里建，不在每次 walk 里重建**。
+  //
+  // 实测（真库 1908 局 / 14320 link）：一次 walk 中位 **31.1ms**，占 A4 全链的 94%；
+  // 而这两个结构是**只随库变、不随查询变**的，每次调用都重扫全库纯属白烧：
+  //   ① holdersByTopic：主题 → 持有该主题的棋谱 id（并上 `topic.episodes` 与 `episode.topics` 两路，与旧口径等价）；
+  //   ② adjacency：棋谱邻接表（旧代码每次遍历 14320 条 link 现建现排）。
+  // 二者都在 cache 里建一次；cache 本身按库签名重建（T55/T61），所以不会陈旧。
+  // `fresh` 依赖本次命中的主题 ⇒ 留在 walk 里现算，**不预烘焙**。
+  // -------------------------------------------------------------------------
+  const holdersByTopic = new Map();
+  const pushHolder = (topicId, episodeId) => {
+    if (typeof topicId !== 'string' || topicId === '' || typeof episodeId !== 'string' || episodeId === '') return;
+    let set = holdersByTopic.get(topicId);
+    if (!set) { set = new Set(); holdersByTopic.set(topicId, set); }
+    set.add(episodeId);
+  };
+  for (const episode of episodes) {
+    if (!Array.isArray(episode?.topics)) continue;
+    for (const t of episode.topics) if (t && typeof t.id === 'string') pushHolder(t.id, episode.id);
+  }
+  for (const topic of topics) {
+    if (!Array.isArray(topic?.episodes)) continue;
+    for (const episodeId of topic.episodes) pushHolder(topic.id, episodeId);
+  }
+  const holdersByTopicSorted = new Map();
+  for (const [topicId, set] of holdersByTopic) holdersByTopicSorted.set(topicId, [...set].sort());
+
+  const topicKeyById = new Map();
+  for (const t of topics) if (t && typeof t.id === 'string' && typeof t.key === 'string') topicKeyById.set(t.id, t.key);
+  const adjacency = new Map();
+  let linksWithoutWhy = 0;
+  for (const link of links) {
+    const a = link?.a?.episode;
+    const b = link?.b?.episode;
+    if (typeof a !== 'string' || typeof b !== 'string' || a === b) continue;
+    const why = [];
+    for (const topicId of Array.isArray(link.topics) ? link.topics : []) {
+      if (typeof topicId !== 'string' || topicId === '') continue;
+      const key = topicKeyById.get(topicId) ?? null;
+      if (key && !why.includes(key)) why.push(key);
+    }
+    if (why.length === 0 && typeof link.why === 'string') {
+      for (const part of link.why.split(',')) {
+        const key = part.trim();
+        if (key !== '' && !why.includes(key)) why.push(key);
+      }
+    }
+    if (why.length === 0) { linksWithoutWhy += 1; continue; } // 没有 why 的边不跳（契约：每跳必须有 why）
+    const weight = Number.isFinite(link.weight) ? link.weight : 0;
+    const base = { why, weight, link: typeof link.id === 'string' ? link.id : null };
+    for (const [from, to] of [[a, b], [b, a]]) {
+      if (!adjacency.has(from)) adjacency.set(from, []);
+      adjacency.get(from).push({ from, to, ...base, fresh: false });
+    }
+  }
+  // 固定排序只做一次（`fresh` 全部置 false 时排出来的次序 = 同 fresh 值下的次序；
+  // walk 里按 fresh 分组后再排序，与旧行为逐位一致 —— 见 walkFromSignals 的用法）
+  for (const list of adjacency.values()) list.sort(compareHops);
+
   return Object.freeze({
     episodes,
     topics,
     topicsByKey,
     links,
     claims,
+    holdersByTopic: holdersByTopicSorted,
+    adjacency,
+    linksWithoutWhy,
     get(kind, id) {
       return byId.get(`${kind}:${id}`) ?? null;
     },
@@ -954,13 +1017,18 @@ export function walkFromSignals(opts = {}) {
     }
   }
   for (const match of picked) {
-    const holders = new Set(topicEpisodes.get(match.topic.id) ?? []);
-    for (const episode of episodes) {
-      if (!Array.isArray(episode.topics)) continue;
-      if (episode.topics.some((t) => t && t.id === match.topic.id)) holders.add(episode.id);
+    // T371：cache 里有预建索引就直接用（旧路径每次 walk 都要扫全部 episodes —— A4 的主要成本）
+    let holderIds = cache?.holdersByTopic?.get(match.topic.id) ?? null;
+    if (!Array.isArray(holderIds)) {
+      const holders = new Set(topicEpisodes.get(match.topic.id) ?? []);
+      for (const episode of episodes) {
+        if (!Array.isArray(episode.topics)) continue;
+        if (episode.topics.some((t) => t && t.id === match.topic.id)) holders.add(episode.id);
+      }
+      holderIds = [...holders].sort();
     }
     const weight = topicWeight(match.topic);
-    for (const episodeId of [...holders].sort()) {
+    for (const episodeId of holderIds) {
       const episode = episodeById.get(episodeId);
       if (!episode) continue;
       if (!allowRecord(episode, `episodes:${episodeId}`)) continue; // 作用域闸：跨域/无域不入 hits
@@ -993,48 +1061,64 @@ export function walkFromSignals(opts = {}) {
 
   // ---- 第 2 跳：棋谱 → 相关棋谱（store links；每跳必须有 why）----
   if (maxDepth >= 2) {
-    const links = cache?.links ?? readRecords(store, 'links');
-    const adjacency = new Map();
-    const linkWhyKeys = (link) => {
-      const keys = [];
-      for (const topicId of Array.isArray(link.topics) ? link.topics : []) {
-        if (typeof topicId !== 'string' || topicId === '') continue;
-        const key = topicById.get(topicId)?.key ?? null;
-        if (key && !keys.includes(key)) keys.push(key);
-      }
-      if (keys.length === 0 && typeof link.why === 'string') {
-        for (const part of link.why.split(',')) {
-          const key = part.trim();
-          if (key !== '' && !keys.includes(key)) keys.push(key);
+    // T371：cache 里已有预建邻接表 ⇒ 不再"每次遍历全部 link + 现建现排"（真库 14320 条）。
+    // `fresh` 依赖本次命中的主题，所以它仍然现算；算完按 compareHops 重排 —— 与旧路径逐位一致。
+    let adjacency = null;
+    if (cache?.adjacency) {
+      adjacency = cache.adjacency;
+      dropped.hopNoWhy += Number(cache.linksWithoutWhy) || 0;
+    } else {
+      const links = cache?.links ?? readRecords(store, 'links');
+      adjacency = new Map();
+      const linkWhyKeys = (link) => {
+        const keys = [];
+        for (const topicId of Array.isArray(link.topics) ? link.topics : []) {
+          if (typeof topicId !== 'string' || topicId === '') continue;
+          const key = topicById.get(topicId)?.key ?? null;
+          if (key && !keys.includes(key)) keys.push(key);
+        }
+        if (keys.length === 0 && typeof link.why === 'string') {
+          for (const part of link.why.split(',')) {
+            const key = part.trim();
+            if (key !== '' && !keys.includes(key)) keys.push(key);
+          }
+        }
+        return keys;
+      };
+
+      for (const link of links) {
+        const a = link?.a?.episode;
+        const b = link?.b?.episode;
+        if (typeof a !== 'string' || typeof b !== 'string' || a === b) continue;
+        const why = linkWhyKeys(link);
+        if (why.length === 0) {
+          dropped.hopNoWhy += 1; // 没有 why 的边不跳（契约：每跳必须有 why）
+          continue;
+        }
+        const weight = finiteNumber(link.weight) ? link.weight : 0;
+        const fresh = why.some((key) => !matchedKeys.has(key));
+        for (const [from, to] of [[a, b], [b, a]]) {
+          if (!adjacency.has(from)) adjacency.set(from, []);
+          adjacency.get(from).push({ from, to, why, weight, fresh, link: typeof link.id === 'string' ? link.id : null });
         }
       }
-      return keys;
-    };
-
-    for (const link of links) {
-      const a = link?.a?.episode;
-      const b = link?.b?.episode;
-      if (typeof a !== 'string' || typeof b !== 'string' || a === b) continue;
-      const why = linkWhyKeys(link);
-      if (why.length === 0) {
-        dropped.hopNoWhy += 1; // 没有 why 的边不跳（契约：每跳必须有 why）
-        continue;
-      }
-      const weight = finiteNumber(link.weight) ? link.weight : 0;
-      const fresh = why.some((key) => !matchedKeys.has(key));
-      for (const [from, to] of [[a, b], [b, a]]) {
-        if (!adjacency.has(from)) adjacency.set(from, []);
-        adjacency.get(from).push({ from, to, why, weight, fresh, link: typeof link.id === 'string' ? link.id : null });
-      }
+      for (const list of adjacency.values()) list.sort(compareHops);
     }
-    for (const list of adjacency.values()) list.sort(compareHops);
+
+    // fresh 现算 + 重排（预建表的 fresh 恒为 false；旧路径虽已算过，重算同值、无害）
+    const hopsOf = (from) => {
+      const base = adjacency.get(from) ?? [];
+      const hops = base.map((h) => ({ ...h, fresh: h.why.some((key) => !matchedKeys.has(key)) }));
+      hops.sort(compareHops);
+      return hops;
+    };
 
     const frontier = [...episodeHits.values()]
       .filter((hit) => !hit.claim && hit.depth === 1)
       .sort((x, y) => (x.episode < y.episode ? -1 : x.episode > y.episode ? 1 : 0));
 
     for (const parent of frontier) {
-      for (const hop of adjacency.get(parent.episode) ?? []) {
+      for (const hop of hopsOf(parent.episode)) {
         const target = episodeById.get(hop.to);
         if (!target || isFolded(target)) continue;
         // 作用域闸放在 followedLinks 之前：跨域棋谱连"相关边"都不留（path 里也不出现）

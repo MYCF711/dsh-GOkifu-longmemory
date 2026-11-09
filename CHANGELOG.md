@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.123（2026-11-09）
+
+### T371 · walk 的两张索引：A4 p50 38.8ms → 15.6ms
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `src/rooms/walk.mjs`（`createWalkCache` + `walkFromSignals`）。
+
+**病灶**：walk 里两个**只随库变、不随查询变**的结构被**每次调用重建** ——
+① 主题持有者（`for (const episode of episodes)`，1908 局 × 每个命中主题）；② 邻接表（每次遍历 14320 条 link + 全量排序）。
+T370 的拆账显示 walk 占 A4 全链的 **94%**。
+
+**改法**：在 `createWalkCache()` 里预建 `holdersByTopic`（并上 `episode.topics` 与 `topic.episodes` 两路）与
+`adjacency` + `linksWithoutWhy`。`fresh`（这条边是否带来新主题）依赖本次命中 ⇒ 留在 walk 里现算后按 `compareHops` 重排，
+**排序规则不动、结果逐位一致**。没有 cache 的调用路径仍走旧代码。
+
+**读数**：walk **31.1 → 12.4ms**、全链 **33.1 → 13.2ms**；A4 p50 **38.76 → 15.59/15.76/16.78ms**（门槛 50ms，只用掉 31%）。
+
+**等价性证据**：`walk.test.mjs` 41/41；全量 1292 条 / 1286 pass / 0 fail / 6 skip；
+`metrics-guard` PASS 且 **A2b 严格 46.6% · 覆盖 79.7% 与改前完全一致**（走图结果没变）。
+证据 `evidence/T371-walk-index.md`。
+
 ## 0.8.122（2026-11-09）
 
 ### T370 · A4 量的是生产不走的那条慢路（并撞上 50ms 门槛）
