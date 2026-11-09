@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.100（2026-11-09）
+
+### T59 · 并发跑全量会卡死 ⇒ 发版改成「拿不到计数就串行重跑一次」
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `scripts/release.mjs` 的测试步骤（加一条重试路径）。
+
+**依据**（本轮实测）：
+
+- 并发跑全量已 **5 次**卡死（日志停住、某个隔离子进程内核态 CPU 持续增长、父进程无输出，最长干等 25 分钟）；
+- 紧接其后的重跑几乎总是通过；
+- `--test-concurrency=1`（串行）实测 **1246 条 / 252.9 秒 / 未复现**。
+
+**改法**：`collectTrackedTestCounts` 拿不到计数（stdout 解析不出）时，**串行重跑一次**再判；
+重跑成功则照常同步台账并标记 `retriedSerially`，仍失败才抛原错。
+
+**验收**：`test/release-ledger.test.mjs` 20/20（含 T59：第一次拿不到计数 ⇒ 第二次必须带 `--test-concurrency=1`，
+并如实标记 `retriedSerially`）；全量 1246 条 / 1240 pass / 0 fail / 6 skip；`check.mjs` PASS。
+**证据** `evidence/T56-bounded-release-tests.md` §六/§七、`evidence/T59-serial-retry.md`。
+
+**边界**：这是**重试**，不是根因修复 —— 具体哪个测试文件在忙等仍未定位。
+
 ## 0.8.99（2026-11-09）
 
 ### T58 · 自证污染核查把「卡引用 claim」判成了红线（退出码 1 是假的）

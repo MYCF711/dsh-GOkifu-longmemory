@@ -367,6 +367,39 @@ test('T168: collectTrackedTestCounts —— 只数 HEAD 已跟踪的测试文件
   assert.equal(counts.skip, 0);
 });
 
+// T59（2026-11-09）：并发跑全量时偶尔会卡死（隔离子进程忙等、父进程无输出，本机 5 次），
+// 拿不到计数时**串行重跑一次**再判 —— 卡死不该让发版直接失败。
+test('T59: 并发跑卡死（拿不到计数）⇒ 串行重跑一次；仍拿不到才算失败', (t) => {
+  isolateGitRepositoryEnv(t);
+  const repo = mkdtempSync(path.join(tmpdir(), 'kifuin-retry-'));
+  const git = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' });
+  git(['init', '-q']);
+  git(['config', 'user.email', 't@example.com']);
+  git(['config', 'user.name', 't']);
+  mkdirSync(path.join(repo, 'test'), { recursive: true });
+  writeFileSync(path.join(repo, 'test', 'a.test.mjs'), ["import test from 'node:test';", "test('a', () => {});", ''].join(String.fromCharCode(10)));
+  git(['add', 'test/a.test.mjs']);
+  git(['commit', '-q', '-m', 'init']);
+
+  const seen = [];
+  const fakeExec = (file, args) => {
+    seen.push(args);
+    if (seen.length === 1) {
+      // 模拟卡死后被杀：没有计数行、stdout 是半截
+      const err = new Error('ETIMEDOUT');
+      err.stdout = '✔ a (0.5ms)' + String.fromCharCode(10); // 解析不出计数
+      throw err;
+    }
+    return ['✔ a (0.5ms)', 'ℹ tests 1', 'ℹ pass 1', 'ℹ fail 0', 'ℹ skipped 0', ''].join(String.fromCharCode(10));
+  };
+  const counts = collectTrackedTestCounts({ repoRoot: repo, execFile: fakeExec });
+  assert.equal(seen.length, 2, '第一次拿不到计数 ⇒ 必须重跑一次');
+  assert.deepEqual(seen[0], ['--test', '--test-timeout=240000', 'test/a.test.mjs'], '第一次是并发跑（默认并发）');
+  assert.deepEqual(seen[1], ['--test', '--test-timeout=240000', '--test-concurrency=1', 'test/a.test.mjs'], '重跑必须**串行**（--test-concurrency=1）');
+  assert.equal(counts.total, 1);
+  assert.equal(counts.retriedSerially, true, '要如实标记"这次是串行重跑救回来的"');
+});
+
 test('T168: syncLedgerTests 的 dryRun 分支不写盘', async () => {
   const { deps, state } = makeDeps();
   const out = await syncLedgerTests({ repoRoot: 'X', now: NOW, dryRun: true, deps });
