@@ -45,6 +45,8 @@ import { createHash } from 'node:crypto';
 
 export const STORE_VERSION = 1;
 export const STORE_SCHEMA = 'dsh-kifuin/memory-store@1';
+import { readKindBundle, writeKindBundle, WALK_BUNDLE_KINDS } from './walkbundle.mjs';
+
 export const MANIFEST_FILE = 'manifest.json';
 export const INDEX_FILE = 'index.md';
 export const JOURNAL_REL = 'journal/archive.jsonl';
@@ -507,6 +509,8 @@ export function createStore(opts = {}) {
   const user = typeof opts.user === 'string' && opts.user !== '' ? opts.user : DEFAULT_USER;
   const version = Number.isFinite(opts.version) ? opts.version : STORE_VERSION;
   const clock = typeof opts.now === 'function' ? opts.now : () => (Number.isFinite(opts.now) ? opts.now : Date.now());
+  // T62：**可选**的单文件 bundle 快路径（只有生产路径 sdk/plugin 打开；测试默认关 —— 见 walkbundle.mjs 的复用判据）。
+  const useBundle = opts.bundle === true;
 
   let tmpSeq = 0;
 
@@ -859,6 +863,12 @@ export function createStore(opts = {}) {
    */
   function list(kind, listOpts = {}) {
     assertKind(kind);
+    // T62：bundle 命中就直接返回（真库 6.9 秒 → 不到 1 秒）。只在**生产 store** 上启用。
+    const bundleOn = useBundle && !listOpts.strict && WALK_BUNDLE_KINDS.includes(kind);
+    if (bundleOn) {
+      const hit = readKindBundle(root, kind);
+      if (hit) return hit.map((record) => ({ id: record?.id ?? null, path: `${kind}/${record?.id ?? ''}.json`, record }));
+    }
     const dir = path.join(root, kind);
     const out = [];
     for (const name of readDirSafe(dir)) {
@@ -876,6 +886,10 @@ export function createStore(opts = {}) {
         if (listOpts.strict) throw err;
         out.push({ id, path: `${kind}/${name}`, record: null, error: String(err?.code ?? err?.message ?? err) });
       }
+    }
+    // T62：慢路径读完补写 bundle（只有全绿才写 —— 有坏文件就不拿它当缓存，免得把错误固化）
+    if (bundleOn && out.every((item) => item.record)) {
+      try { writeKindBundle(root, kind, out.map((item) => item.record)); } catch { /* 缓存失败无所谓 */ }
     }
     return out;
   }

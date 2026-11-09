@@ -1975,7 +1975,7 @@ export async function runInject({ flags = {}, positional = [], root = '' } = {})
   }
 
   const { createStore } = await import('./persist.mjs');
-  const store = createStore({ root: storeRoot });
+  const store = createStore({ root: storeRoot, bundle: true }); // T62
 
   const at = Date.now();
   const signal = signalFromText(rawSignal, { at, kind: typeof flags.kind === 'string' ? flags.kind : 'root-message' });
