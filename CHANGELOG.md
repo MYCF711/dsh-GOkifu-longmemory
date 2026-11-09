@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.112（2026-11-09）
+
+### T70 · P2 的 3565 拆成「位置偏 3111 / 本局没有 454」，并修掉白色噪音
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。只改审计口径（`scripts/provenance-p2.mjs`）+ 测试。
+
+**发现**：`support.quote` 是**单行视图**（生成侧 `clipQuote()` 把空白折成单空格），而 `normalizeText()`
+不折叠连续空白 ⇒ 拿单行引文跟多行日志逐字节比，等于两套口径互判。实测 3565 条失败里 **1223 条（34%）**
+只是差空白。
+
+**改法**：① `normalizeText()` 增加连续空白折叠并写进 `NORMALIZE_RULES`（可被审计）；
+② `indexEvents()` 的跨段拼接改用单空格（原来用 `
+` 拼 ⇒ 跨段引文永远对不上）；
+③ `stats.breakdown = {offset, absent}` + `formatSummary()` 带上「位置偏 / 本局没有」。
+
+**改后**：`ok 750 · not-substring 3565 · 其中：位置偏 3111 · 本局没有 454`。
+（`ok` 不变是预期的 —— 这一刀修归因口径，不修数据；位置偏那 3111 条靠 T69 在**新归档**里消失。）
+
+**验收**：`provenance-p2.test.mjs` 6/6 + 新增 `t70-p2-breakdown.test.mjs` 3/3；
+全量 1278 条 / 1272 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T70-p2-whitespace.md`。
+
 ## 0.8.111（2026-11-09）
 
 ### T69 · 边的 `seq` 取错了那一头：89.3% 的图来源引文因此对不上
