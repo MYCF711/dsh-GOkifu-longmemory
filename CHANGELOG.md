@@ -17,6 +17,29 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.111（2026-11-09）
+
+### T69 · 边的 `seq` 取错了那一头：89.3% 的图来源引文因此对不上
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `src/rooms/extract.mjs` 的 `edgeSeq()`。
+
+**病灶（一行代码）**：`edgeQuote()` 优先取**结果侧**文本（`errorSnippet` / `verify.summary`），
+而 `edgeSeq()` 无条件先取 `evidence.start`（**动作**事件）—— 引文与 seq 天然对不上。
+图边自带 `evidence:{start(动作), end(结果)}`，我们**选错了那一头**。
+
+**真库实测**：边 `e6793` 的 `evidence = {start:50332, end:50334}`，`errorSnippet` 真身在 **50334**（tool/result），
+旧代码却把 support.seq 记成 **50332**；改后 `edgeSeq(e6793) = 50334` ✅。
+这解释了 T68 的分桶：图来源 403 条坏 360（89.3%）· 信号来源 71 条坏 1（1.4%）。
+
+**改法**：按引文来源决定取哪一头（结果侧 ⇒ `end`；动作侧 ⇒ `start`），取不到再退另一头，都没有 ⇒ `null`。
+判据与 `edgeQuote()` 同一口径（含 T251「测试通过汇总不算失败原文」）。
+
+**验收**：`test/t69-edge-seq.test.mjs` 5/5；全量 1275 条 / 1269 pass / 0 fail / 6 skip；`check.mjs` PASS。
+证据 `evidence/T69-edge-seq.md`。
+
+**诚实说明**：已入馆的 claim 不回填 ⇒ `provenance-p2` 的 `ok` 数这一版**不会跳**，效果在**新归档**的 claim 上。
+上游 `graph.json` 没问题（`evidence.end` 本来就是对的）。
+
 ## 0.8.110（2026-11-09）
 
 ### T68 · 把 `quote-not-substring` 按**出处来源**分桶：89.3% 图来源 / 1.4% 信号来源

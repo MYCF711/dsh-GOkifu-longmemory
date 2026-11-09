@@ -182,11 +182,34 @@ function normalizeEvents(events) {
 }
 
 /** 边的源 seq：`evidence.start`（动作事件）优先，退 `evidence.end`（结果事件）。 */
-function edgeSeq(edge) {
+/**
+ * T69（2026-11-09）：边的 `seq` 必须与 `quote` **取自同一条事件**。
+ *
+ * 病灶（真库实测）：`edgeQuote()` 优先取 `errorSnippet` / `verify.summary` —— 那是**结果侧**文本，
+ * 落在 `evidence.end` 那条事件上；而 `edgeSeq()` 却无条件先取 `evidence.start`（**动作**事件）。
+ * 于是引文与 seq 天然对不上：实测 claim 的「图来源」support **403 条里 360 条（89.3%）** 不是原文子串，
+ * 而本仓自己抽的信号只有 1.4% 坏 —— 差别就在这一步。
+ *
+ * 现在按**引文来源**决定取哪一头：结果侧文本 ⇒ `evidence.end`；否则（action/intent）⇒ `evidence.start`。
+ * 取不到对应那头再退另一头（不猜、不编）。
+ */
+export function edgeSeq(edge) {
   const ev = edge?.evidence ?? {};
-  if (Number.isFinite(ev.start)) return ev.start;
-  if (Number.isFinite(ev.end)) return ev.end;
+  const usesResultSide = quoteFromResultSide(edge);
+  const first = usesResultSide ? ev.end : ev.start;
+  const second = usesResultSide ? ev.start : ev.end;
+  if (Number.isFinite(first)) return first;
+  if (Number.isFinite(second)) return second;
   return null;
+}
+
+/** 该边的引文是否取自**结果侧**（`errorSnippet` / `verify.summary`）—— 与 `edgeQuote()` 同口径。 */
+function quoteFromResultSide(edge) {
+  const snippet = String(edge?.errorSnippet ?? '').trim();
+  if (snippet && !isTestPassSummary(snippet)) return true;
+  const kind = edge?.verify?.kind;
+  const summary = String(edge?.verify?.summary ?? '').trim();
+  return Boolean(summary) && (kind === 'exit' || kind === 'host-error');
 }
 
 /**
