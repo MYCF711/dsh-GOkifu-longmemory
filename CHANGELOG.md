@@ -17,6 +17,29 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.129（2026-11-10）
+
+### T377 · rc1 验收探针收编进仓库，并在当前宿主上跑通
+
+**版本说明**：新增只读脚本 `scripts/rc1-probe.mjs`（不改 `src/**` 行为）⇒ **patch**。
+
+**起于 T186 的 C 类发现**：「`AGENTS.md` §2.2.1 写着 `longmemory-rc1-probe.mjs`，主线里却没有它」。
+原探针把 asar / worktree / home **写死**成升级任务当时的现场，且断言 `runtimeVersion === '0.2.2-rc.1'` ⇒
+换个目录或宿主一升级就报废，`tmp/` 又不进 git ⇒ 这条验收能力一直是**一次性**的。
+
+**改法**：`--asar`（默认 `DSH_ASAR`）/ `--repo`（默认本仓）/ `--home`（默认系统临时目录）；
+版本断言放宽成 `startsWith('0.2.2-rc.')`（要钉死用 `--expect-version`）；
+仓库根改用 `fileURLToPath`（原 `new URL().pathname` 在中文路径上会双重百分号编码，直接 `ERR_MODULE_NOT_FOUND`）。
+
+**实测（当前宿主，exit 0）**：`LONGMEMORY_RC1_PROBE_PASS` —— `startupError:null` · 核心 effect=function ·
+disposers **5→0** · `autoBuildSharedCalls=1/Finished=1` · `CancelCalls=0` · `PostDisposeCalls=0` ·
+严格同 Promise · 全部探针 disposers=0。逐条对上 §2.2.1 的验收口径。
+
+**附带**：T186 C 类里的 `fix/profile-verify` 当场核完 —— 主线 `scripts/kifu-profile-stage.mjs` 已 421 行
+（含 T217 真 YAML 校验 + T219 fail-closed），分支版 376 行 ⇒ **已被取代**，可删。
+
+证据 `evidence/T377-rc1-probe-adopted.md`。
+
 ## 0.8.128（2026-11-10）
 
 ### T186 · 遗留分支逐个甄别（只读，不删）
