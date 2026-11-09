@@ -359,7 +359,7 @@ test('T168: collectTrackedTestCounts —— 只数 HEAD 已跟踪的测试文件
     return ['✔ a (0.5ms)', 'ℹ tests 1', 'ℹ pass 1', 'ℹ fail 0', 'ℹ skipped 0', ''].join(String.fromCharCode(10));
   };
   const counts = collectTrackedTestCounts({ repoRoot: repo, execFile: fakeExec });
-  assert.deepEqual(seen[0], ['--test', 'test/a.test.mjs'], '只把 HEAD 已跟踪的测试文件交给 node --test（未跟踪的那个不传）');
+  assert.deepEqual(seen[0], ['--test', '--test-timeout=240000', 'test/a.test.mjs'], '只把 HEAD 已跟踪的测试文件交给 node --test（未跟踪的那个不传）；T56 起带单测超时');
   assert.equal(counts.files, 1, '只数已跟踪的 1 个文件');
   assert.equal(counts.total, 1);
   assert.equal(counts.pass, 1);
