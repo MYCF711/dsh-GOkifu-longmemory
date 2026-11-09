@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.102（2026-11-09）
+
+### T61 · 把「无意义的内存占用」清掉：一份 cache 从**永驻**改成**空闲即还**
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `src/plugin.mjs` 的 walk cache 生命周期与 `src/sdk.mjs` 的空闲释放。
+
+**实测**（真库 1654 局 / 4417 主题 / 11083 link / 2410 claim）：建一次 walk cache 常驻堆 **+44MB**、RSS +123MB。
+
+**三处「无意义占用」**：
+
+1. **最严重**：插件侧 `WALK_CACHES` 把 manifest 的 mtime 拼进 key 却**从不删旧 key** ⇒ 库每更新一次就多留
+   一份完整图（≈35MB 堆），宿主进程长驻 ⇒ **无界泄漏**。改成按 `storeRoot` 只留最新一代 + 闲置 10 分钟自灭。
+2. 缓存里装着走图**用不到**的字段：`l1`（每局 ≤4000 字符）与 `closure.nodeIds/edgeIds`（实测 17.2 万/24.4 万个 id）
+   ⇒ `projectEpisodeForWalk()` 只做减法（拿不准的一律保留）。堆增量 **+44MB → +35MB**。
+3. 会话键 Map（`LAST_SCOPE` / `SESSION_LOG_SCOPE_CACHE`）无上界 ⇒ `SESSION_MAP_MAX = 2000` 按插入序淘汰。
+
+**改后**（同一台机器）：用完一次 38.8MB 堆 / 186.6MB RSS ⇒ **空闲 33 秒后 6.9MB 堆**（基线 6.4）/ 96.7MB RSS。
+性能不退：`kifu_search` 第二次起仍 **34ms**、`kifu_stats` 仍 1.70s。
+
+**验收**：T61 ①②③（换世代只留一份 / 空闲自灭 / 摘掉后必须重建）；全量 1250 条 / 1244 pass / 0 fail / 6 skip；
+`check.mjs` PASS。证据 `evidence/T61-memory-idle-release.md`。
+
+**边界**：`store.list()` 仍每次全量读（第一次调用 ~6–9 秒的根，属独立设计题）；V8 保留的 ~33MB RSS 不是我们的对象。
+
 ## 0.8.101（2026-11-09）
 
 ### HANDOFF 重写：本会话 13 刀、四项复测 4/4、以及四条已知未解

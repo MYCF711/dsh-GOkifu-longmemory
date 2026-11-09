@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-import { createMemorySdk, SdkError, SDK_VERSION, MAX_LIMIT, MAX_BUDGET_TOKENS, WALK_CACHE_TTL_MS, walkCacheBuildCount, resetWalkCache } from '../src/sdk.mjs';
+import { createMemorySdk, SdkError, SDK_VERSION, MAX_LIMIT, MAX_BUDGET_TOKENS, WALK_CACHE_TTL_MS, WALK_CACHE_IDLE_MS, walkCacheBuildCount, resetWalkCache, dropWalkCache } from '../src/sdk.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
 
 const T = (day, hour = 12) => Date.UTC(2026, 9, day, hour, 0, 0);
@@ -282,6 +282,23 @@ test('T55 ③: 签名没变也要过 TTL（原地改写改不了条目数，靠�
     clock += 2; // 越过 TTL
     createMemorySdk({ dshHome, now: () => clock }).search('Cannot find module', { limit: 1 });
     assert.equal(walkCacheBuildCount(), 2, 'TTL 外 ⇒ 必须重建');
+  } finally {
+    resetWalkCache();
+    rmSync(dshHome, { recursive: true, force: true });
+  }
+});
+
+// T61（2026-11-09）：空闲要真的**还回去**（真库一份 ≈35MB 堆，用户明确不许常驻）。
+test('T61 ③: dropWalkCache 之后必须重建 —— 空闲释放不是"假的"', () => {
+  const { dshHome } = makeStore();
+  try {
+    resetWalkCache();
+    assert.ok(Number.isFinite(WALK_CACHE_IDLE_MS) && WALK_CACHE_IDLE_MS > 0, '必须有闲置上限');
+    createMemorySdk({ dshHome }).search('Cannot find module', { limit: 1 });
+    assert.equal(walkCacheBuildCount(), 1);
+    dropWalkCache(path.join(dshHome, 'memory-context'));
+    createMemorySdk({ dshHome }).search('Cannot find module', { limit: 1 });
+    assert.equal(walkCacheBuildCount(), 2, '摘掉之后下一次必须重建（否则等于没释放）');
   } finally {
     resetWalkCache();
     rmSync(dshHome, { recursive: true, force: true });

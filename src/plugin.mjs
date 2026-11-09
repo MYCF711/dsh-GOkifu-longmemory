@@ -708,7 +708,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
   const cwd = typeof session?.cwd === 'string' && session.cwd.trim() !== '' ? session.cwd : process.cwd();
   const resolved = resolveSessionScope({ session, store, storeRoot });
   const sid = sessionIdOf(session);
-  if (sid) LAST_SCOPE.set(sid, resolved);
+  if (sid) capSessionMap(LAST_SCOPE.set(sid, resolved) && LAST_SCOPE);
   const scope = resolved.scope;
   // T332：**costIndex 接线** —— 读预计算 sidecar（`<store>/corpus/antipattern-cost.json`），
   // 交给 `buildMemoryCard` 做 `cost: 0` 降级门。**只读、失败静默**（索引缺失 ⇒ 不过滤，行为不变）。
@@ -897,7 +897,15 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
  * @param {object} [rawConfig]
  * @returns {Function} Cordis disposer；旧诊断字段挂在函数属性上
  */
-const WALK_CACHES = new Map();
+/**
+ * T61（2026-11-09）：walk cache 按 **storeRoot** 存一份，**换版本就替换、空闲就摘掉**。
+ *
+ * 旧实现把 `manifest.json` 的 mtime 拼进 key 却**从不删除**旧 key ⇒ 库每更新一次就多一份
+ * 完整图（真库实测一份 ≈35MB 堆）留在宿主进程里，永不释放。这是"无意义内存占用"最典型的一种。
+ * 现在：① 同 storeRoot 只留最新一代（旧的立刻失去引用）；② 闲置 `WALK_CACHE_IDLE_MS` 后自动摘掉。
+ */
+const WALK_CACHES = new Map(); // storeRoot -> { stamp, cache, at, timer }
+export const WALK_CACHE_IDLE_MS = 10 * 60_000;
 
 const BUILDING = new Map();
 
@@ -984,15 +992,48 @@ function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing', li
   record.timer = setTimeout(() => { void run(); }, 0);
 }
 
+function dropWalkCache(storeRoot) {
+  const entry = WALK_CACHES.get(storeRoot);
+  if (entry?.timer) clearTimeout(entry.timer);
+  WALK_CACHES.delete(storeRoot);
+}
+
+/** 测试用：清空全部 walk cache。 */
+export function walkCacheEntries() {
+  for (const root of [...WALK_CACHES.keys()]) dropWalkCache(root);
+  return 0;
+}
+
+/** 测试用：当前保留的 walk cache 份数（**同库只该有 1 份**，T61 之前是"每换一次 manifest 多一份"）。 */
+export function walkCacheSize() {
+  return WALK_CACHES.size;
+}
+
+function scheduleIdleDrop(storeRoot, entry) {
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.timer = setTimeout(() => {
+    const cur = WALK_CACHES.get(storeRoot);
+    if (cur === entry) dropWalkCache(storeRoot);
+  }, WALK_CACHE_IDLE_MS);
+  if (typeof entry.timer?.unref === 'function') entry.timer.unref(); // 不许因此拖住进程退出
+}
+
 function walkCacheFor(storeRoot, store, deps) {
   try {
     const mf = `${storeRoot}/manifest.json`;
     const stamp = fs.existsSync(mf) ? fs.statSync(mf).mtimeMs : 0;
-    const key = `${storeRoot}::${stamp}`;
-    if (WALK_CACHES.has(key)) return WALK_CACHES.get(key);
+    const hit = WALK_CACHES.get(storeRoot);
+    if (hit && hit.stamp === stamp) {
+      scheduleIdleDrop(storeRoot, hit); // 每次命中都把"闲置倒计时"推后
+      return hit.cache;
+    }
     const build = typeof deps.createWalkCache === 'function' ? deps.createWalkCache : createWalkCache;
     const cache = build(store);
-    WALK_CACHES.set(key, cache);
+    // 替换而不是累积：旧世代在 set 之后立刻失去引用，可被回收
+    const entry = { stamp, cache, timer: null };
+    if (hit?.timer) clearTimeout(hit.timer);
+    WALK_CACHES.set(storeRoot, entry);
+    scheduleIdleDrop(storeRoot, entry);
     return cache;
   } catch {
     return null;
@@ -1099,6 +1140,22 @@ function repeatStateFor(map, session, after) {
 // 一个没有棋谱的假作用域，导致永远 no-hit。用**本会话历史 episode 的 scopeKey**兜底（归档时读过会话
 // header 的真实 cwd），比猜目录名可靠。
 const SESSION_SCOPE_CACHE = new WeakMap();
+/**
+ * T61：会话键的 Map 都要**有界**。宿主进程是长驻的，`session.id` 只会越积越多；
+ * 每个值都很小（一个 scope 字符串），但没有上界就是"无意义增长"——按插入序淘汰最老的即可
+ * （这些值都是可重算的缓存，丢了最多多算一次）。
+ */
+export const SESSION_MAP_MAX = 2000;
+
+function capSessionMap(map) {
+  if (map.size <= SESSION_MAP_MAX) return map;
+  for (const key of map.keys()) {
+    if (map.size <= SESSION_MAP_MAX) break;
+    map.delete(key);
+  }
+  return map;
+}
+
 const LAST_SCOPE = new Map();
 export function lastResolvedScope(sessionId) { return sessionId ? (LAST_SCOPE.get(sessionId) ?? null) : null; }
 
@@ -1146,6 +1203,7 @@ export function sessionLogScope(sessionId, home) {
     }
   } catch { scope = null; }
   SESSION_LOG_SCOPE_CACHE.set(sessionId, scope);
+  capSessionMap(SESSION_LOG_SCOPE_CACHE);
   return scope;
 }
 

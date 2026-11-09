@@ -74,6 +74,17 @@ const hitView = (hit) => ({
  */
 const SHARED_WALK_CACHE = new Map();
 export const WALK_CACHE_TTL_MS = 30_000;
+/** T61：**空闲即释放** —— 缓存闲置这么久就把它从共享 Map 里摘掉（真库上一份 ≈35MB 堆）。 */
+export const WALK_CACHE_IDLE_MS = 30_000;
+const WALK_CACHE_TIMERS = new Map(); // storeRoot -> timer
+
+/** 摘掉某个库的缓存（测试与空闲释放共用）。 */
+export function dropWalkCache(storeRoot) {
+  SHARED_WALK_CACHE.delete(storeRoot);
+  const t = WALK_CACHE_TIMERS.get(storeRoot);
+  if (t && typeof t.clearTimeout !== 'function') clearTimeout(t);
+  WALK_CACHE_TIMERS.delete(storeRoot);
+}
 let walkCacheBuilds = 0;
 
 /** 测试用：一共真正建了几次 walk cache（生产只读，不参与任何判定）。 */
@@ -83,6 +94,8 @@ export function walkCacheBuildCount() {
 
 /** 测试用：清空共享缓存与计数（避免用例之间串味）。 */
 export function resetWalkCache() {
+  for (const t of WALK_CACHE_TIMERS.values()) clearTimeout(t);
+  WALK_CACHE_TIMERS.clear();
   SHARED_WALK_CACHE.clear();
   walkCacheBuilds = 0;
 }
@@ -143,6 +156,15 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
     walkCacheBuilds += 1;
     cache = createWalkCache(store);
     SHARED_WALK_CACHE.set(storeRoot, { sig, at: now, cache });
+    // T61：**空闲就还回去** —— 没有这一步，工具用过一次之后那 ≈35MB 会一直挂在宿主里（用户明确不许）。
+    const prev = WALK_CACHE_TIMERS.get(storeRoot);
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      const cur = SHARED_WALK_CACHE.get(storeRoot);
+      if (cur && cur.at === now) dropWalkCache(storeRoot);
+    }, WALK_CACHE_IDLE_MS);
+    if (typeof timer.unref === 'function') timer.unref(); // 不许因此拖住进程退出
+    WALK_CACHE_TIMERS.set(storeRoot, timer);
     return cache;
   };
 

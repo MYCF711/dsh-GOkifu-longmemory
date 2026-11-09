@@ -16,7 +16,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, truncateSync, statSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync, truncateSync, statSync, mkdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -338,6 +338,52 @@ test('T25 ④: oncePerSession:false ⇒ 同一 session.id 每步都注入（向�
   }
 });
 
+// T61（2026-11-09）：宿主进程是长驻的，**任何跟着库版本增长的东西都必须在内存里"有上界或会自灭"**。
+// 旧实现把 manifest 的 mtime 拼进 key 却从不删旧 key ⇒ 库每更新一次就多留一份完整图（真库 ≈35MB 堆）。
+test('T61 ①: 同一记忆库只保留**一份** walk cache（换 manifest 是替换，不是累积）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    walkCacheEntries();
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot }));
+    const run = (id) => {
+      const { session } = makeSession(workspace, id);
+      const payload = { agent: { session }, messages: [userMessage('yaml 装不上')] };
+      return runHook({ hooks, payload, decision: enterDecision([userMessage('yaml 装不上')]) });
+    };
+    await run('session-t61-aaaa');
+    assert.equal(walkCacheSize(), 1, '第一次用到 ⇒ 建一份');
+    // 模拟"库更新"：manifest 的 mtime 变了
+    const manifest = path.join(storeRoot, 'manifest.json');
+    const bump = Date.now() + 5000;
+    writeFileSync(manifest, String(Date.now()));
+    utimesSync(manifest, bump / 1000, bump / 1000);
+    await run('session-t61-bbbb');
+    assert.equal(walkCacheSize(), 1, '换了一代 ⇒ 旧的必须被替换掉，不许两份同时挂');
+  } finally {
+    walkCacheEntries();
+    cleanup();
+  }
+});
+
+test('T61 ②: 空闲会自灭（WALK_CACHE_IDLE_MS 有值且 walkCacheEntries 能清空）', async () => {
+  const { workspace, storeRoot, cleanup } = makeWorkspace();
+  try {
+    assert.ok(Number.isFinite(WALK_CACHE_IDLE_MS) && WALK_CACHE_IDLE_MS > 0, '必须有闲置上限');
+    const { ctx, hooks } = makeCtx();
+    apply(ctx, baseConfig({ storeRoot }));
+    const { session } = makeSession(workspace, 'session-t61-cccc');
+    const payload = { agent: { session }, messages: [userMessage('yaml 装不上')] };
+    await runHook({ hooks, payload, decision: enterDecision([userMessage('yaml 装不上')]) });
+    assert.equal(walkCacheSize(), 1);
+    assert.equal(walkCacheEntries(), 0);
+    assert.equal(walkCacheSize(), 0, '清空后不许还有残留（测试与空闲释放共用同一个入口）');
+  } finally {
+    walkCacheEntries();
+    cleanup();
+  }
+});
+
 test('T52: 被 oncePerSession 拦下时留一条墓碑行（否则"被限流静默"与"插件死了"分不清）', async () => {
   const { workspace, storeRoot, cleanup } = makeWorkspace();
   try {
@@ -390,7 +436,7 @@ test('T25 ⑤: sessionIdOf 只认非空字符串 id（其它一律 null，走旧
 // tombstone：把去重改回只靠内存 Set ⇒ T49 ① 红（新 apply 实例会再投一次）。
 // ---------------------------------------------------------------------------
 
-import { cardAlreadyInContext } from '../src/plugin.mjs';
+import { cardAlreadyInContext, walkCacheEntries, walkCacheSize, WALK_CACHE_IDLE_MS } from '../src/plugin.mjs';
 
 test('T49 ①: 宿主重新 apply（内存状态清空）后，同一张卡不会在同一会话再投一次', async () => {
   const { workspace, storeRoot, cleanup } = makeWorkspace();
