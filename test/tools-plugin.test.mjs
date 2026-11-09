@@ -15,13 +15,13 @@ test('tools-plugin: 模块声明 inject=[tools]（宿主据此交付工具服务
   assert.equal(typeof apply, 'function');
 });
 
-test('tools-plugin: 有工具面 ⇒ 五个 kifu_* 全部注册', () => {
+test('tools-plugin: 有工具面 ⇒ 七个 kifu_* 全部注册', () => {
   const registered = [];
   const out = apply({ tools: { register: (t) => registered.push(t.name) }, logger: { warn: () => {} } });
   assert.deepEqual(registered, [
-    'kifu_stats', 'kifu_search', 'kifu_card', 'kifu_recent_failures', 'kifu_view', 'kifu_get',
+    'kifu_stats', 'kifu_search', 'kifu_card', 'kifu_recent_failures', 'kifu_view', 'kifu_consolidate', 'kifu_get',
   ]);
-  assert.equal(out.registered, 6);
+  assert.equal(out.registered, 7);
 });
 
 test('tools-plugin: 没有工具面 ⇒ 注册 0 个，但**不抛**（插件不连累宿主）', () => {
@@ -40,7 +40,7 @@ test('tools-plugin: 凭据写明 via=tools-plugin（成功时）', () => {
     mkdirSync(store, { recursive: true });
     apply({ tools: { register: () => {} }, logger: { warn: () => {} } });
     const back = JSON.parse(readFileSync(path.join(store, 'tools-registered.json'), 'utf8'));
-    assert.equal(back.count, 6);
+    assert.equal(back.count, 7);
     assert.equal(back.via, 'tools-plugin');
     assert.equal(back.ctxHasRegister, true);
   } finally {

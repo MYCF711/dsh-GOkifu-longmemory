@@ -93,6 +93,18 @@ export function buildMemoryTools({ createSdk = createMemorySdk } = {}) {
       isConcurrencySafe: () => true,
     },
     {
+      name: `${TOOL_PREFIX}_consolidate`,
+      description: '合流**预览**（只读）：把同 scopeKey + 同 kind 的重复 claim 按 V3–V8 判据分组，返回组数、每组成员与该组代表条的正文；**不写任何库**（写模式要显式影子库，工具面不给）。',
+      parameters: argsSchema({
+        scope: scopeProp,
+        limit: limitProp,
+        previewChars: { type: 'integer', minimum: 40, maximum: 400, description: '每组代表正文的截断长度（默认 160，上限 400）。' },
+      }, []),
+      output: jsonOutput,
+      execute: run((sdk, args) => sdk.consolidate({ scope: args.scope, limit: args.limit, previewChars: args.previewChars })),
+      isConcurrencySafe: () => true,
+    },
+    {
       name: `${TOOL_PREFIX}_get`,
       description: '按 id 取一条记录（kinds: episodes/topics/claims/links/threads/joseki/adjudications）。只读。',
       parameters: argsSchema({

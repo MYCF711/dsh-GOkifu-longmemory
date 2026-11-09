@@ -16,11 +16,11 @@ const fakeSdk = (calls) => (opts) => ({
   get: (kind, id) => { calls.push(['get', kind, id]); return { ok: true, kind, id, record: { id } }; },
 });
 
-test('tools: 五个工具、名字带 kifu_ 前缀、都有 parameters/output/execute', () => {
+test('tools: 七个工具、名字带 kifu_ 前缀、都有 parameters/output/execute', () => {
   const tools = buildMemoryTools();
   assert.deepEqual(tools.map((t) => t.name), [
     `${TOOL_PREFIX}_stats`, `${TOOL_PREFIX}_search`, `${TOOL_PREFIX}_card`, `${TOOL_PREFIX}_recent_failures`,
-    `${TOOL_PREFIX}_view`, `${TOOL_PREFIX}_get`,
+    `${TOOL_PREFIX}_view`, `${TOOL_PREFIX}_consolidate`, `${TOOL_PREFIX}_get`,
   ]);
   for (const t of tools) {
     assert.equal(typeof t.description, 'string');
@@ -71,7 +71,7 @@ test('tools: 每个工具都是并发安全的（PTC 代码块里会并行调用
 test('tools: 注册 —— 有 ctx.tools.register 就全注册；没有就安静跳过；单个失败不连累其它', () => {
   const ok = [];
   assert.deepEqual(registerMemoryTools({ tools: { register: (t) => ok.push(t.name) } }), ok);
-  assert.equal(ok.length, 6);
+  assert.equal(ok.length, 7);
 
   assert.deepEqual(registerMemoryTools({}), [], '没有工具面 ⇒ 返回空数组，不抛');
   assert.deepEqual(registerMemoryTools(null), []);
@@ -81,7 +81,7 @@ test('tools: 注册 —— 有 ctx.tools.register 就全注册；没有就安静
   const names = registerMemoryTools({
     tools: { register: (t) => { if (t.name.endsWith('_card')) throw new Error('deliberate'); partial.push(t.name); } },
   }, { warn: (_ctx, msg) => warned.push(msg) });
-  assert.equal(names.length, 5, '除被拒的那个，其余都注册成功');
+  assert.equal(names.length, 6, '除被拒的那个，其余都注册成功');
   assert.ok(warned.some((m) => m.includes('_card')), '被拒的要 warn，且说明不影响注入');
 });
 
