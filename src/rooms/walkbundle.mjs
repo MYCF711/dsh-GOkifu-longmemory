@@ -80,3 +80,49 @@ export function dropKindBundles(storeRoot, kinds = WALK_BUNDLE_KINDS) {
   }
   return ok;
 }
+
+/**
+ * T65（2026-11-09）：**同一份 bundle 不重复解析**。
+ *
+ * 实测：一次"建卡"里 `store.list()` 会被调用多次（walk 一次、inject 再几次），而每次读 bundle 都要
+ * `JSON.parse` 十几 MB（episodes bundle 12MB ≈ 100ms）⇒ 一次建卡 180ms 里有大半是**重复解析同一份数据**。
+ * 这里加一层**极短命**的内存 memo（`KIND_MEMO_MS`）：stamp 一致就直接给数组。
+ *
+ * 为什么敢：① stamp 覆盖 manifest + 条目数（库一变立刻失效）；② TTL 只有几秒，且闲置就清；
+ * ③ 它缓存的是"某个 stamp 对应的记录数组"，与磁盘 bundle 同源，不会比 bundle 更新鲜或更陈旧。
+ */
+export const KIND_MEMO_MS = 5_000;
+const KIND_MEMO = new Map(); // `${root}|${kind}` -> { stamp, records, at }
+let KIND_MEMO_TIMER = null;
+
+export function dropKindMemo(storeRoot = null) {
+  if (storeRoot === null) KIND_MEMO.clear();
+  else for (const key of [...KIND_MEMO.keys()]) if (key.startsWith(`${storeRoot}|`)) KIND_MEMO.delete(key);
+  if (KIND_MEMO.size === 0 && KIND_MEMO_TIMER) { clearTimeout(KIND_MEMO_TIMER); KIND_MEMO_TIMER = null; }
+}
+
+function scheduleMemoSweep() {
+  if (KIND_MEMO_TIMER) return;
+  KIND_MEMO_TIMER = setTimeout(() => {
+    KIND_MEMO_TIMER = null;
+    const now = Date.now();
+    for (const [key, entry] of [...KIND_MEMO]) {
+      if (now - entry.at > KIND_MEMO_MS) KIND_MEMO.delete(key);
+    }
+    if (KIND_MEMO.size > 0) scheduleMemoSweep();
+  }, KIND_MEMO_MS);
+  if (typeof KIND_MEMO_TIMER?.unref === 'function') KIND_MEMO_TIMER.unref();
+}
+
+/** 读 bundle 的**带 memo** 版本（stamp 一致且未过期 ⇒ 直接返回内存数组）。 */
+export function readKindBundleCached(storeRoot, kind, { stamp = kindBundleStamp(storeRoot, kind), now = Date.now() } = {}) {
+  if (!stamp) return null;
+  const key = `${storeRoot}|${kind}`;
+  const hit = KIND_MEMO.get(key);
+  if (hit && hit.stamp === stamp && (now - hit.at) < KIND_MEMO_MS) return hit.records;
+  const records = readKindBundle(storeRoot, kind, { stamp });
+  if (!records) { KIND_MEMO.delete(key); return null; }
+  KIND_MEMO.set(key, { stamp, records, at: now });
+  scheduleMemoSweep();
+  return records;
+}

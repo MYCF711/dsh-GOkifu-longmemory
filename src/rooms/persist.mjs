@@ -45,7 +45,7 @@ import { createHash } from 'node:crypto';
 
 export const STORE_VERSION = 1;
 export const STORE_SCHEMA = 'dsh-kifuin/memory-store@1';
-import { readKindBundle, writeKindBundle, WALK_BUNDLE_KINDS } from './walkbundle.mjs';
+import { readKindBundleCached, writeKindBundle, WALK_BUNDLE_KINDS } from './walkbundle.mjs';
 
 export const MANIFEST_FILE = 'manifest.json';
 export const INDEX_FILE = 'index.md';
@@ -866,7 +866,7 @@ export function createStore(opts = {}) {
     // T62：bundle 命中就直接返回（真库 6.9 秒 → 不到 1 秒）。只在**生产 store** 上启用。
     const bundleOn = useBundle && !listOpts.strict && WALK_BUNDLE_KINDS.includes(kind);
     if (bundleOn) {
-      const hit = readKindBundle(root, kind);
+      const hit = readKindBundleCached(root, kind);
       if (hit) return hit.map((record) => ({ id: record?.id ?? null, path: `${kind}/${record?.id ?? ''}.json`, record }));
     }
     const dir = path.join(root, kind);

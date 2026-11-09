@@ -11,9 +11,12 @@ import path from 'node:path';
 import { createStore } from '../src/rooms/persist.mjs';
 import {
   KIND_BUNDLE_VERSION,
+  KIND_MEMO_MS,
   dropKindBundles,
+  dropKindMemo,
   kindBundleStamp,
   readKindBundle,
+  readKindBundleCached,
   writeKindBundle,
 } from '../src/rooms/walkbundle.mjs';
 
@@ -128,5 +131,48 @@ test('T63: warm-bundles 预热四类；已新鲜就跳过；没有 manifest 就�
   } finally {
     fs.rmSync(withManifest.root, { recursive: true, force: true });
     fs.rmSync(withoutManifest.root, { recursive: true, force: true });
+  }
+});
+
+// T65（2026-11-09）：一次建卡里 `list()` 会被调多次，每次 `JSON.parse` 十几 MB 是白花钱。
+// 加了一层极短命的内存 memo —— 这里钉住"真的省了"和"真的会失效"。
+test('T65 ①: memo 命中 ⇒ 返回**同一个数组**（没有重复解析）', () => {
+  const { root } = makeStore();
+  try {
+    dropKindMemo(root);
+    assert.ok(writeKindBundle(root, 'topics', [{ id: 'a' }]));
+    const first = readKindBundleCached(root, 'topics');
+    const second = readKindBundleCached(root, 'topics');
+    assert.deepEqual(first, [{ id: 'a' }]);
+    assert.equal(first, second, 'TTL 内必须是同一份内存数组（否则等于没 memo）');
+  } finally {
+    dropKindMemo(root);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('T65 ②: 过期 / 换 stamp / 手动清 之后都必须重新读盘', () => {
+  const { root } = makeStore();
+  try {
+    dropKindMemo(root);
+    assert.ok(writeKindBundle(root, 'topics', [{ id: 'a' }]));
+    const t0 = Date.now();
+    const first = readKindBundleCached(root, 'topics', { now: t0 });
+    // 过期：显式给一个超过 TTL 的时间
+    const later = readKindBundleCached(root, 'topics', { now: t0 + KIND_MEMO_MS + 1 });
+    assert.deepEqual(later, [{ id: 'a' }]);
+    assert.notEqual(later, first, '过了 TTL 必须重新解析');
+
+    // 换 stamp（库变了）⇒ 即使 TTL 内也不许用旧的
+    fs.writeFileSync(path.join(root, 'manifest.json'), '{"version":1,"n":2}', 'utf8');
+    const afterChange = readKindBundleCached(root, 'topics', { now: t0 });
+    assert.equal(afterChange, null, 'stamp 变了 ⇒ bundle 本身失效，返回 null');
+
+    // 手动清
+    dropKindMemo(root);
+    assert.deepEqual(readKindBundleCached(root, 'topics'), null, '清过之后要重新读（此时 bundle 已失效）');
+  } finally {
+    dropKindMemo(root);
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

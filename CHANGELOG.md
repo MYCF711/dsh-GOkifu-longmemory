@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.106（2026-11-09）
+
+### T65 · 同一份 bundle 不重复解析：建卡 180ms → 109ms
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。`walkbundle.mjs` 加一层极短命内存 memo。
+
+**问题**：一次「建卡」里 `store.list()` 会被调多次（walk 一次、inject 再几次），而每次读 bundle 都要
+`JSON.parse` 十几 MB（episodes bundle 12MB ≈ 100ms）⇒ 一次建卡 180ms 里大半是**重复解析同一份数据**。
+
+**改法**：`readKindBundleCached()` —— 极短命 memo（`KIND_MEMO_MS = 5 秒`）：stamp 一致且未过期就直接给数组。
+敢这么做的三条依据：① stamp 覆盖 manifest + 条目数（库一变立刻失效）；② TTL 只有 5 秒且闲置就清（`unref` 定时器）；
+③ 它缓存的就是「某个 stamp 对应的记录数组」，与磁盘 bundle 同源，不会更新鲜也不会更陈旧。
+
+**读数**：建卡 180ms → **109ms**；连续建卡 233ms → **83ms**；`search` 仍 ~48ms。
+
+**验收**：`test/t62-walk-bundle.test.mjs` 8/8（新增 T65 ①②：命中返回同一数组 / 过期+换 stamp+手动清都必须重读）；
+全量 1259 条 / 1253 pass / 0 fail / 6 skip；`check.mjs` PASS。
+
 ## 0.8.105（2026-11-09）
 
 ### T64 · 探针缓存每 60 秒堆一代、永不释放（又一处无界增长）
