@@ -66,6 +66,18 @@ const USER_SOURCE_KIND = 'user';
  * 截引文：去首尾空白、连续空白压成单空格、按码点截到 `max` 字（截断时末位补 `…`）。
  * 只做"排版级"归一，不改词、不改标点顺序。
  */
+/**
+ * T67（2026-11-09）：**引文截断不许加省略号**（与 `claim.clipQuote` 同口径）。
+ *
+ * `support.quote` 是可机械核验的出处指针（必须是原文的逐字子串），不是展示文本；
+ * 旧实现走 `clip()`（截断时追加 `…`）⇒ 任何超长引文都必然"不是子串"。
+ */
+export function clipQuote(text, max = MAX_QUOTE) {
+  const s = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (s.length <= max) return s;
+  return [...s].slice(0, Math.max(1, max)).join('');
+}
+
 export function clip(text, max = MAX_QUOTE) {
   const s = String(text ?? '')
     .replace(/\s+/g, ' ')
@@ -315,7 +327,7 @@ export function deriveFalsifiableWhen(text, { maxQuote = MAX_QUOTE } = {}) {
   for (const r of FALSIFIABLE_RULES) {
     const m = r.re.exec(raw);
     if (!m) continue;
-    return { kind: 'text-pattern', rule: r.id, when: r.when(m), quote: clip(raw, maxQuote) };
+    return { kind: 'text-pattern', rule: r.id, when: r.when(m), quote: clipQuote(raw, maxQuote) };
   }
   return null;
 }
