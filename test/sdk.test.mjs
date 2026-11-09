@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-import { createMemorySdk, SdkError, SDK_VERSION, MAX_LIMIT, MAX_BUDGET_TOKENS } from '../src/sdk.mjs';
+import { createMemorySdk, SdkError, SDK_VERSION, MAX_LIMIT, MAX_BUDGET_TOKENS, WALK_CACHE_TTL_MS, walkCacheBuildCount, resetWalkCache } from '../src/sdk.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
 
 const T = (day, hour = 12) => Date.UTC(2026, 9, day, hour, 0, 0);
@@ -222,6 +222,68 @@ test('T54 ②: 惰性 —— 只调 stats/get 不构建 walk cache（真库上�
     assert.equal(one.ok, true);
     assert.equal(typeof one.record?.text, 'string');
   } finally {
+    rmSync(dshHome, { recursive: true, force: true });
+  }
+});
+
+// T55（2026-11-09）：walk cache **跨 SDK 实例共享**。
+// 病根：每个 `kifu_*` 工具调用都新建一个 SDK 实例 ⇒ 每次重建 walk cache（真库 ≈9 秒），
+// `kifu_search`/`kifu_card` 因此稳定在 9–10 秒。改后第二次起只走内存。
+test('T55 ①: 两个 SDK 实例共用同一份 walk cache（真库上那 9 秒只付一次）', () => {
+  const { dshHome } = makeStore();
+  try {
+    resetWalkCache();
+    const a = createMemorySdk({ dshHome });
+    const b = createMemorySdk({ dshHome });
+    a.search('Cannot find module', { limit: 1 });
+    const afterFirst = walkCacheBuildCount();
+    assert.equal(afterFirst, 1, '第一次必须真的建一次');
+    b.search('Cannot find module', { limit: 1 });
+    assert.equal(walkCacheBuildCount(), 1, '第二个实例必须命中共享缓存，不许重建');
+  } finally {
+    resetWalkCache();
+    rmSync(dshHome, { recursive: true, force: true });
+  }
+});
+
+test('T55 ②: 库里新增条目 ⇒ 目录签名变了 ⇒ 必须重建（不许拿旧图当新图）', () => {
+  const { dshHome } = makeStore();
+  try {
+    resetWalkCache();
+    const a = createMemorySdk({ dshHome });
+    a.search('Cannot find module', { limit: 1 });
+    assert.equal(walkCacheBuildCount(), 1);
+
+    const store = createStore({ root: path.join(dshHome, 'memory-context') });
+    store.putMany('claims', [claim({ id: 'c-0000ss09', kind: 'antipattern', text: 'ECONNREFUSED 127.0.0.1:3425', day: 24, support: [{ episode: 'ep-sssssss2', seq: 88 }] })]);
+
+    const b = createMemorySdk({ dshHome });
+    b.search('Cannot find module', { limit: 1 });
+    assert.equal(walkCacheBuildCount(), 2, '条目数变了 ⇒ 签名变了 ⇒ 重建');
+  } finally {
+    resetWalkCache();
+    rmSync(dshHome, { recursive: true, force: true });
+  }
+});
+
+test('T55 ③: 签名没变也要过 TTL（原地改写改不了条目数，靠时间兜住）', () => {
+  const { dshHome } = makeStore();
+  try {
+    resetWalkCache();
+    let clock = T(24);
+    const a = createMemorySdk({ dshHome, now: () => clock });
+    a.search('Cannot find module', { limit: 1 });
+    assert.equal(walkCacheBuildCount(), 1);
+
+    clock += WALK_CACHE_TTL_MS - 1;
+    createMemorySdk({ dshHome, now: () => clock }).search('Cannot find module', { limit: 1 });
+    assert.equal(walkCacheBuildCount(), 1, 'TTL 内 ⇒ 命中');
+
+    clock += 2; // 越过 TTL
+    createMemorySdk({ dshHome, now: () => clock }).search('Cannot find module', { limit: 1 });
+    assert.equal(walkCacheBuildCount(), 2, 'TTL 外 ⇒ 必须重建');
+  } finally {
+    resetWalkCache();
     rmSync(dshHome, { recursive: true, force: true });
   }
 });
