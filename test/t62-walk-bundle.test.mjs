@@ -107,3 +107,26 @@ test('T62 ⑤: bundle 是纯派生 —— 删掉它读数一字不变', () => {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// T63（2026-11-09）：把「归档后第一次查询要等 6 秒」挪到归档之后 —— 预热脚本。
+test('T63: warm-bundles 预热四类；已新鲜就跳过；没有 manifest 就跳过（不建垃圾）', async () => {
+  const { warmBundles } = await import('../scripts/warm-bundles.mjs');
+  const withManifest = makeStore();
+  const withoutManifest = makeStore({ manifest: false });
+  try {
+    const first = warmBundles({ root: withManifest.root });
+    assert.equal(first.ok, true);
+    assert.equal(first.kinds.topics.status, 'built', '第一次应当真建');
+    assert.ok(fs.existsSync(path.join(withManifest.root, '.cache', 'topics.bundle.json')));
+
+    const second = warmBundles({ root: withManifest.root });
+    assert.equal(second.ok, true);
+    assert.equal(second.kinds.topics.status, 'fresh', '第二次应当命中，不重复建');
+
+    const skipped = warmBundles({ root: withoutManifest.root });
+    assert.equal(skipped.skipped, 'no-manifest', '没有 manifest（测试夹具）⇒ 直接跳过');
+  } finally {
+    fs.rmSync(withManifest.root, { recursive: true, force: true });
+    fs.rmSync(withoutManifest.root, { recursive: true, force: true });
+  }
+});
