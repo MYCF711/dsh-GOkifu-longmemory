@@ -61,6 +61,14 @@ const ms = (n) => (n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} 
 export function mirrorAll({ src, dst, at = Date.now(), extraClaims = 0 } = {}) {
   if (!src || !dst) throw new Error('mirror-all: 需要 src/dst store');
   const started = Date.now();
+  // T368（2026-11-09）：**先拍一张源库快照**。
+  // 真事：宿主还在跑、会话一结束就归档，一次 --all 要 200 秒 —— 期间源库从 1654 局长到 1908 局。
+  // 旧实现只在**结束时**读 `src.counts()` 去比影库，于是必然报「逐 kind 不一致」——
+  // 可那个「不一致」其实是「源库变了」，不是「镜像漏了」。现在把三个数分开：
+  //   · before：开始时快照（**影库对应的就是它**）
+  //   · after ：结束时快照
+  //   · drift ：两者不同的 kind ⇒ 明确写「源库在镜像期间变化」，不再冒充不一致
+  const beforeCounts = typeof src.counts === 'function' ? { ...src.counts() } : null;
   const kinds = {};
   for (const kind of ENTRY_KINDS) {
     const records = src.list(kind).map((entry) => entry?.record).filter(Boolean);
@@ -89,16 +97,24 @@ export function mirrorAll({ src, dst, at = Date.now(), extraClaims = 0 } = {}) {
   const elapsedMs = Date.now() - started;
   const sourceCounts = src.counts();
   const shadowCounts = dst.counts();
+  // T368：一致性以**开始时的快照**为准（影库镜像的就是那个状态）；结束时的数只用来判「源库有没有动」
+  const baseCounts = beforeCounts ?? sourceCounts;
+  const drift = beforeCounts
+    ? ENTRY_KINDS.filter((kind) => Number(beforeCounts[kind] ?? 0) !== Number(sourceCounts[kind] ?? 0))
+      .map((kind) => ({ kind, before: beforeCounts[kind], after: sourceCounts[kind] }))
+    : [];
   // claims 会多出本次新增的合并节点（`merged added`）—— 那不是"镜像不全"，是合流的产出
-  const expected = { ...sourceCounts };
-  expected.claims = sourceCounts.claims + Math.max(0, Number(extraClaims) || 0);
+  const expected = { ...baseCounts };
+  expected.claims = baseCounts.claims + Math.max(0, Number(extraClaims) || 0);
   const mismatches = ENTRY_KINDS.filter((kind) => expected[kind] !== shadowCounts[kind]);
   return {
     kinds,
     index,
     manifest: { changed: Boolean(manifest?.changed), files: manifest?.manifest?.files ?? null },
     sourceCounts,
+    beforeCounts: baseCounts,
     shadowCounts,
+    drift,
     expected,
     extraClaims: Math.max(0, Number(extraClaims) || 0),
     mismatches,
@@ -179,6 +195,10 @@ export function formatReport(out) {
     }
     lines.push(`index.md ${m.index.missing ? '缺失' : `${m.index.bytes} B${m.index.changed ? '（已更新）' : ''}`} · manifest ${m.manifest.files ?? '?'} 个文件${m.manifest.changed ? '（已更新）' : ''}`);
     lines.push(`逐 kind 一致：${m.mirrorOk ? '是' : `否（不一致：${m.mismatches.join(', ')}）`} · 镜像耗时 ${ms(m.elapsedMs)}`);
+    if (Array.isArray(m.drift) && m.drift.length) {
+      // T368：源库在镜像期间变了 —— 这一行比「不一致」准确得多
+      lines.push(`⚠ 源库在镜像期间变化（影库对应的是开始时快照）：${m.drift.map((d) => `${d.kind} ${d.before}→${d.after}`).join(' · ')}`);
+    }
   }
   if (out.verify) {
     const total = Object.values(out.verify.counts ?? {}).reduce((a, b) => a + (Number(b) || 0), 0);
