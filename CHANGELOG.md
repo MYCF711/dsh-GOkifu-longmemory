@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.99（2026-11-09）
+
+### T58 · 自证污染核查把「卡引用 claim」判成了红线（退出码 1 是假的）
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `scripts/self-contamination-audit.mjs` 的结算口径。
+
+**问题**：脚本自己的契约写着「`card-from-claim`（卡渲染晚于 claim = 卡引用了 claim）**不算**红线实例」，
+但方向只算在 `details`（默认 5 条抽样）上，结算与退出码却用**未区分方向**的 `selfContaminated`。
+本机实测 60 条**全部**是反向，却被判成红线、退出码 1。
+
+**改法**：方向在**全量** contaminated 上算（按 episode 缓存 events）；`classifyDirection()` 抽成纯函数并导出；
+`stats.realF5 = claimFromCard + directionUnknown`（方向算不出来一律 fail-closed）；**退出码只看真 F5**。
+
+**改后**：真 F5 = **0**（卡早于 claim=0 · 卡引用 claim=60 · 方向不明=0），退出码 **0** ——
+与 T245 当时的结论「真 F5 = 0」一致：不是新出现污染，是判据一直把反向案例算成了红线。
+
+**验收**：新增 `test/self-contamination-audit.test.mjs` 5/5（三类方向 + 时间相同边界 + 源码契约）；
+全量 1246 条 / 1240 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T58-self-contamination-direction.md`。
+
+**边界**：那 60 条不是「没问题」—— 它们是 `quote-not-substring`（引文不是原文子串），属 P2 指针精度问题，
+该由 `provenance-p2` 那条线管；本轮只把它们归到正确的账上，没有去修。
+
 ## 0.8.98（2026-11-09）
 
 ### T57 · 新写的两类 skip 原因只写不读（违反「指标先有消费者」）
