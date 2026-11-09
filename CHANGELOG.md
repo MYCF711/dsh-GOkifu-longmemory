@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.122（2026-11-09）
+
+### T370 · A4 量的是生产不走的那条慢路（并撞上 50ms 门槛）
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `scripts/m5-report.mjs`（A4 流水线的 store）+ `ledger-sync` 注记 + 测试口径。
+
+**现场**：今天早些时候 A4 p50 台账记 27.8/29.8ms；晚上实测 **43–56ms**，被 `ledger-check --full` 拦下
+（`A4 p50 53.16ms > 门槛 50ms`）—— 这条门槛是硬的，不是抖动。
+
+**根因**：评测用的 store 与生产的 store **不是同一条路径**。生产（`sdk`/`plugin`）是 `bundle: true`（T62 快路径），
+而 `m5-report` 用默认（逐文件读）⇒ A4 量的是生产**根本不走**的慢路，随语料增长（1654→1908 局 / 11083→14320 link）越来越慢。
+
+**改法**：`runPipeline()` 换成生产同款 store（只在能拿到 `root` 时；测试的假 store 原样用）。
+顺带修正两处口径：① 台账「单次抖动 ±2ms」改成实测区间 **33–56ms**；② 测试的 `hashTree` 跳过顶层 `.cache/`
+（派生物，`rm -rf` 安全）——「只读」要保的是权威数据不变。
+
+**读数**：bundle 关 43.6/46.4/55.9ms → bundle 开 **33.2–41.3ms**；台账记 38.76ms。其余轴不变（A2b 46.6% / A5 0 / A6 1）。
+
+**下一笔账**：同一条链按阶段拆 **walk 31.1ms / card 0.9ms / gates 0.1ms** ⇒ A4 的 94% 是 `walkFromSignals`，
+要再降一个量级得给它建主题倒排索引（独立设计题，本刀不碰）。
+
+**验收**：`test/m5-report.test.mjs` 17/17；全量 1292 条 / 1286 pass / 0 fail / 6 skip；`metrics-guard` PASS。
+证据 `evidence/T370-a4-bundle-path.md`。
+
 ## 0.8.121（2026-11-09）
 
 ### T369 · 「claims 不一致」的第二个误区：按**组数**算新节点

@@ -122,7 +122,7 @@ if (m.axes) {
   // T225：p50 是**统计量**（GC / 磁盘缓存 / 调度都会让它抖 5–10ms），台账与实测**不做绝对相等比对**，
   // 只按量级校验（`ledger-check.mjs` 的 `a4MagnitudeOk`：台账 ≤ max(实测×2, 实测+20ms)，且实测 ≤ 50ms）。
   // 这句跟着模板走，否则下次 sync 就把台账行旁那行注记擦掉了。
-  lines.push({ key: '六轴', text: `| 六轴 | A1 **${pct(a.A1?.value)}${a1Note}** · A2 **${pct(a.A2?.value)}** · A3 ${a.A3?.status ?? 'n/a'} · A4 p50 **${Number.isFinite(a.A4?.value) ? a.A4.value.toFixed(2) + 'ms' : 'n/a'}（3 次中位数，单次抖动 ±2ms）**（p50 是抖动量，按量级校验：台账 ≤ max(实测×2, 实测+20ms)） · A5 **${pct(a.A5?.value)}** · A6 **${pct(a.A6?.value)}** \`[本] ${at} · node scripts/m5-report.mjs\` |` });
+  lines.push({ key: '六轴', text: `| 六轴 | A1 **${pct(a.A1?.value)}${a1Note}** · A2 **${pct(a.A2?.value)}** · A3 ${a.A3?.status ?? 'n/a'} · A4 p50 **${Number.isFinite(a.A4?.value) ? a.A4.value.toFixed(2) + 'ms' : 'n/a'}（3 次中位数；**跨批实测 33–56ms**，抖动远大于旧注记的 ±2ms）**（p50 是抖动量，按量级校验：台账 ≤ max(实测×2, 实测+20ms)） · A5 **${pct(a.A5?.value)}** · A6 **${pct(a.A6?.value)}** \`[本] ${at} · node scripts/m5-report.mjs\` |` });
 }
 const au = m.audit;
 if (au && Number.isFinite(m.episodes)) {
