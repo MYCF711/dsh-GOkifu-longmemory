@@ -49,6 +49,10 @@ export const NORMALIZE_RULES = Object.freeze([
   'CRLF(U+000D U+000A) / 裸 CR(U+000D) → LF',
   'NBSP(U+00A0) → 空格(U+0020)',
   'ZWSP(U+200B) 删除',
+  // T70（2026-11-09）：**连续空白折叠成单个空格**。
+  // 依据：`support.quote` 是**单行视图** —— 生成侧 `clipQuote()` 明确把空白折叠成 ' '（卡片只能单行）。
+  // 拿它跟多行日志做"逐字节子串"比较等于两套口径互判：实测 3565 条失败里 **1223 条（34%）** 只差空白。
+  '连续空白折叠为单空格（引文是单行视图，生成侧 clipQuote 会折叠）',
 ]);
 
 /** 归一化：NBSP/CRLF/ZWSP 三类"渲染看不见却让子串判定失败"的差异。 */
@@ -57,7 +61,9 @@ export function normalizeText(value) {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/\u00a0/g, ' ')
-    .replace(/\u200b/g, '');
+    .replace(/\u200b/g, '')
+    .replace(/\s+/g, ' ')   // T70：引文是单行视图，比对必须同口径（见 NORMALIZE_RULES）
+    .trim();
 }
 
 /** 递归收集对象里的全部字符串（不用 JSON.stringify：避免把 `"` 转义成 `\"` 造成假阴）。 */
@@ -83,7 +89,9 @@ export function indexEvents(events) {
     if (!segments.length) continue;
     const prev = map.get(seq);
     const merged = prev ? [...prev.segments, ...segments] : segments;
-    map.set(seq, { text: merged.join('\n'), segments: merged });
+    // T70：跨段拼接也用**单空格**（与归一化后的引文同口径）。
+    // 原来用 `\n` 拼 ⇒ 跨两段的引文（如 "bar\nbaz"）归一化后是 "bar baz"，永远对不上。
+    map.set(seq, { text: normalizeText(merged.join(' ')), segments: merged });
   }
   return map;
 }
@@ -151,6 +159,11 @@ export function makeLogLoader({ home = HOME } = {}) {
 
 /** 汇总一行（格式固定，守卫测试会断言它）。 */
 export function formatSummary(stats) {
+  // 有 breakdown 时把它带在尾巴上：一个 3565 看不出该改哪一侧（T70）
+  if (stats?.breakdown) {
+    const base = `claims ${stats.claims} · refs ${stats.refs} · ok ${stats.ok} · not-substring ${stats.notSubstring} · unreadable ${stats.unreadable}`;
+    return `${base} · 其中：位置偏 ${stats.breakdown.offset} · 本局没有 ${stats.breakdown.absent}`;
+  }
   return `claims ${stats.claims} · refs ${stats.refs} · ok ${stats.ok} · not-substring ${stats.notSubstring} · unreadable ${stats.unreadable}`;
 }
 
@@ -262,6 +275,10 @@ export async function auditP2({ claims, episodes, loadEvents, opts = {} } = {}) 
     notSubstring: failures.length,
     unreadable: unreadableRefs.length,
     normalizeRules: [...NORMALIZE_RULES],
+    // T70：把 3565 拆成**可解释的两锅**，别让一个数糊住归因方向
+    //   · offset：引文在本局别处（多半是 ±2/±4 —— 动作事件 vs 结果事件，T69 已在生成侧修掉）
+    //   · absent：本局根本没有这段文字（改写/截断/跨局）
+    breakdown: { offset: elsewhereStrict + elsewhereCollapsedOnly, absent: notFoundAnywhere },
     diagnosis: { elsewhereStrict, elsewhereCollapsedOnly, notFoundAnywhere, distanceBuckets },
   };
   return { stats, refs, failures, unreadableRefs };
