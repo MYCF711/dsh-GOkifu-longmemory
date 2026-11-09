@@ -83,7 +83,8 @@ test('P2: seq 读不到 ⇒ seq-unreadable，绝不算进 ok', async () => {
   assert.equal(out.stats.unreadable, 1);
   assert.equal(out.refs[0].reason, 'episode-unreadable');
   // T70：汇总行尾巴会带 breakdown（位置偏 / 本局没有）；这里只钉前五段
-  assert.match(formatSummary(out.stats), /^claims 1 · refs 1 · ok 0 · not-substring 0 · unreadable 1( · 其中：位置偏 \d+ · 本局没有 \d+)?$/);
+  // T75：汇总行多了「不可核验(源头不存在)」一段（既不冒充 ok，也不算 fail）
+  assert.match(formatSummary(out.stats), /^claims 1 · refs 1 · ok 0 · not-substring 0( · 不可核验\(源头不存在\) \d+)? · unreadable 1( · 其中：位置偏 \d+ · 本局没有 \d+)?$/);
 });
 
 // ---------------------------------------------------------------------------
@@ -106,12 +107,13 @@ test('P2: 汇总行格式固定，端到端三态计数正确', async () => {
     episodes,
     loadEvents: async (id) => eventsByEp[id] ?? null,
   });
+  // T75：'beta DELTA' 在本局任何地方都不存在 ⇒ 单列成 unverifiable-source（不是 fail、也不是 ok）
   assert.deepEqual(
-    { claims: out.stats.claims, refs: out.stats.refs, ok: out.stats.ok, notSubstring: out.stats.notSubstring, unreadable: out.stats.unreadable },
-    { claims: 4, refs: 4, ok: 2, notSubstring: 1, unreadable: 1 },
+    { claims: out.stats.claims, refs: out.stats.refs, ok: out.stats.ok, notSubstring: out.stats.notSubstring, unverifiableSource: out.stats.unverifiableSource, unreadable: out.stats.unreadable },
+    { claims: 4, refs: 4, ok: 2, notSubstring: 0, unverifiableSource: 1, unreadable: 1 },
   );
-  assert.match(formatSummary(out.stats), /^claims 4 · refs 4 · ok 2 · not-substring 1 · unreadable 1( · 其中：位置偏 \d+ · 本局没有 \d+)?$/);
-  assert.equal(out.failures[0].claimId, 'c-bad');
+  assert.match(formatSummary(out.stats), /^claims 4 · refs 4 · ok 2 · not-substring 0( · 不可核验\(源头不存在\) \d+)? · unreadable 1( · 其中：位置偏 \d+ · 本局没有 \d+)?$/);
+  assert.equal(out.refs.find((r) => r.claimId === 'c-bad').verdict, 'unverifiable-source');
   assert.equal(out.unreadableRefs[0].claimId, 'c-unread');
 });
 
