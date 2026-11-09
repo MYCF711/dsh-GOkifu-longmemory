@@ -113,10 +113,18 @@ export function collectTrackedTestCounts({ repoRoot = REPO_ROOT, execFile = null
     // T59（2026-11-09）：拿不到计数 ⇒ **串行重跑一次**再判。
     // 依据：本机已 5 次遇到"并发跑全量时某个隔离子进程忙等、父进程无输出"，而 `--test-concurrency=1`
     // 单次实测 1246 条 252 秒**未复现**（并发 4 时 3/7 复发）。卡死不该让发版直接失败。
-    const retry = run(process.execPath, ['--test', `--test-timeout=${TEST_TIMEOUT_MS}`, '--test-concurrency=1', ...tracked]);
-    const reparsed = parseTestCounts(String(retry ?? ''));
+    // 重跑本身也可能因**有红用例**而抛错（stdout 里仍有计数）⇒ 同样要兜住，别把"红"变成"崩"
+    let retryOut = '';
+    let retryFailed = false;
+    try {
+      retryOut = String(run(process.execPath, ['--test', `--test-timeout=${TEST_TIMEOUT_MS}`, '--test-concurrency=1', ...tracked]) ?? '');
+    } catch (retryError) {
+      retryOut = String(retryError?.stdout ?? '');
+      retryFailed = true;
+    }
+    const reparsed = parseTestCounts(retryOut);
     if (!reparsed) throw error;
-    return { ...reparsed, files: tracked.length, failed: false, retriedSerially: true };
+    return { ...reparsed, files: tracked.length, failed: retryFailed, retriedSerially: true };
   }
 }
 
