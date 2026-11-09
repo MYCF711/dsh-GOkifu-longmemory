@@ -857,7 +857,11 @@ export async function runH1(opts = {}) {
   const { runGates, runValidityCheck, workspaceOf } = await import('../src/rooms/gates.mjs');
   const walkRoom = await import('../src/rooms/walk.mjs').catch(() => null);
 
-  const store = createStore({ root: storeRoot });
+  // T376（2026-11-10）：**store 也要走生产那条路径**。
+  // 生产（`sdk` / `plugin` / m5-report 的 A4 流水线，见 T370）都是 `createStore({ bundle: true })`；
+  // H1 一直用默认（逐文件读）⇒ 跑 A1/A2 这些轴时要读十几万条记录、几百次，慢到没人愿意跑。
+  // `bundle` 只换"怎么读"，不改任何一条记录的内容（T62/T65 的判据就是"结果逐条一致"）。
+  const store = createStore({ root: storeRoot, bundle: opts.bundle !== false });
   const read = (kind) => {
     try {
       return store.list(kind).map((x) => x?.record).filter((r) => r && typeof r === 'object');
