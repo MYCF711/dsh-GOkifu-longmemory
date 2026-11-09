@@ -117,7 +117,7 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
     if (store) return store;
     if (storeMissing()) return null;
     try {
-      store = createStore({ root: storeRoot });
+      store = createStore({ root: storeRoot, bundle: true }); // T62：生产读路径走单文件 bundle
       // T54（2026-11-09）：walk cache **惰性构建** —— 它一次性把 topics/episodes/links/claims 全读进来
       // （真库实测 ~9 秒，links 11083 个文件占 5.1 秒）。只有 walk/card 需要用；`stats`/`get` 不该替它付钱。
     } catch (error) {

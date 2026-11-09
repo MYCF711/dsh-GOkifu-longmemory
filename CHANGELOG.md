@@ -17,6 +17,27 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.103（2026-11-09）
+
+### T62 · 单文件 bundle：`list()` 3.4–5.1 秒 → 27–35ms（顺手救回 T61 的空闲代价）
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。新增 `src/rooms/walkbundle.mjs` + `createStore({bundle:true})`。
+
+**问题**：`store.list(kind)` 每次逐文件读+解析（真库 links 11083 个文件 = 5127ms，四类合计 9.4 秒）。
+① 进程内第一次查记忆要等这么久；② T61 的空闲释放让「闲置 10 分钟后的第一轮」付这 6.3 秒。
+
+**做法**：慢路径读完一个 kind 后把整份记录写成 `<root>/.cache/<kind>.bundle.json`（原子 rename）；
+下次先查 bundle。失效判据 = `manifest.json` 的 mtime+字节数 + 该 kind 的条目数（1 次 stat + 1 次 readdir）。
+纯派生：删掉 `.cache/` 只会让下一次变慢，读数一字不变；**测试默认关，只有生产三处显式开启**。
+
+**读数**：`list('links')` 3393ms → **35ms**（≈150×）；`kifu_search` 端到端 6284ms → **161ms**；
+空闲释放后重建 6300ms → **180ms**。
+
+**验收**：`test/t62-walk-bundle.test.mjs` 5/5（逐条一致 / 失效判据 / 坏文件 / 纯派生）；
+全量 1255 条 / 1249 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T62-walk-bundle.md`。
+
+**边界**：热路径峰值内存与逐文件读同量级（只是快），空闲释放仍由 T61 负责；`.cache/` 是纯派生目录。
+
 ## 0.8.102（2026-11-09）
 
 ### T61 · 把「无意义的内存占用」清掉：一份 cache 从**永驻**改成**空闲即还**

@@ -704,7 +704,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
   }
 
   const at = clockOf(config);
-  const store = deps.createStore({ root: storeRoot });
+  const store = deps.createStore({ root: storeRoot, bundle: true }); // T62：热路径批量读走 bundle
   const cwd = typeof session?.cwd === 'string' && session.cwd.trim() !== '' ? session.cwd : process.cwd();
   const resolved = resolveSessionScope({ session, store, storeRoot });
   const sid = sessionIdOf(session);
@@ -1557,7 +1557,7 @@ export function apply(ctx, rawConfig = {}) {
     if (config.enabled || config.shadow) {
       const root = resolveStoreRoot(config);
       if (root && fs.existsSync(root)) {
-        walkCacheFor(root, createStore({ root }), { createWalkCache });
+        walkCacheFor(root, createStore({ root, bundle: true }), { createWalkCache });
       }
     }
   } catch (error) {
