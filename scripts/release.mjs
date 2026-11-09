@@ -87,6 +87,9 @@ export function rewriteLedgerTests(text, counts, stamp) {
  * → 解析 `ℹ tests/pass/fail/skipped`），没有导出函数。所以这里照抄同一口径复算一遍；
  * 计数解析复用 `scripts/ledger-parse.mjs` 的 `parseTestCounts`（与 ledger-check 的兜底分支同一个）。
  */
+/** T56：发版时单测的有界超时（毫秒）。见下方注释里的实测事故。 */
+export const TEST_TIMEOUT_MS = 240_000;
+
 export function collectTrackedTestCounts({ repoRoot = REPO_ROOT, execFile = null } = {}) {
   const run = execFile ?? ((file, args) => execFileSync(file, args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
   const tracked = execSync('git ls-tree -r --name-only HEAD test/', { cwd: repoRoot, encoding: 'utf8' })
@@ -95,7 +98,11 @@ export function collectTrackedTestCounts({ repoRoot = REPO_ROOT, execFile = null
     .filter((file) => file.endsWith('.test.mjs'));
   if (tracked.length === 0) throw new Error('HEAD 里没有已跟踪的 test/**/*.test.mjs（拒绝在无测试的情况下同步台账）');
   try {
-    const stdout = run(process.execPath, ['--test', ...tracked]);
+    // T56（2026-11-09）：**有界超时**。实测发版时 `node --test` 卡死过一次、干等 25 分钟
+    // （子进程在忙等/极慢 I/O，父进程没有任何输出）⇒ 发版被无声挂住。加上单测超时后，
+    // 卡住会变成"某个测试超时失败"并**点名**，最坏 4 分钟出结论。
+    // 240 秒是 2.3× 余量（真库最慢一条 T213 现在 ~41 秒，T54/T55 之前 ~104 秒）。
+    const stdout = run(process.execPath, ['--test', `--test-timeout=${TEST_TIMEOUT_MS}`, ...tracked]);
     const parsed = parseTestCounts(String(stdout ?? ''));
     if (!parsed) throw new Error('测试计数解析失败（fail-closed）');
     return { ...parsed, files: tracked.length };
