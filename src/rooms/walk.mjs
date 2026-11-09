@@ -602,6 +602,25 @@ export const WALK_CACHE_KINDS = Object.freeze(['topics', 'episodes', 'links', 'c
  * @param {{records?: {topics?:object[], episodes?:object[], links?:object[], claims?:object[]}|null}} [opts]
  * @returns {object|null} `{episodes, topics, topicsByKey, links, claims, get(kind,id)}`
  */
+/**
+ * T61（2026-11-09）：**walk cache 只留走图真正用得到的字段**。
+ *
+ * 为什么：真库实测建一次 cache 常驻堆 **+44MB**（序列化口径 19.2MB），其中 episodes 占 11.2MB ——
+ * 而 `l1`（每局最多 4000 字符）与 `closure.nodeIds/edgeIds`（实测 17.2 万 / 24.4 万个 id，3.1MB）
+ * **走图一个都不用**：`l1` 只在 `rooms/view.mjs` 里当 `l0` 为空时的兜底（那条路读的是 store，不是 cache），
+ * `closure` 只用到 `logPath` / `seqFrom`。
+ *
+ * 纪律：投影**只做减法**，且必须是"上游明确证明用不到"的字段；任何拿不准的字段一律保留。
+ */
+export function projectEpisodeForWalk(episode) {
+  if (!episode || typeof episode !== 'object') return episode;
+  const { l1, closure, ...rest } = episode; // eslint-disable-line no-unused-vars
+  const slimClosure = closure && typeof closure === 'object'
+    ? { logPath: closure.logPath ?? null, seqFrom: closure.seqFrom ?? null }
+    : closure;
+  return { ...rest, closure: slimClosure };
+}
+
 export function createWalkCache(store, { records = null } = {}) {
   const provided = records && typeof records === 'object' && !Array.isArray(records) ? records : null;
   const given = (kind) => (provided && Array.isArray(provided[kind]) ? provided[kind] : null);
@@ -610,8 +629,9 @@ export function createWalkCache(store, { records = null } = {}) {
   if (!storeOk && !coveredAll) return null;
   const readKind = (kind) => {
     const fromRecords = given(kind);
-    if (fromRecords) return normalizeRecords(fromRecords);
-    return storeOk ? readRecords(store, kind) : [];
+    const arr = fromRecords ? normalizeRecords(fromRecords) : (storeOk ? readRecords(store, kind) : []);
+    // T61：episodes 是 cache 里最大的一块（l1 + closure.nodeIds/edgeIds 走图用不到）
+    return kind === 'episodes' ? arr.map(projectEpisodeForWalk) : arr;
   };
   const topics = readKind('topics');
   const topicsByKey = new Map();
