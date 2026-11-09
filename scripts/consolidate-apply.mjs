@@ -103,9 +103,29 @@ export function mirrorAll({ src, dst, at = Date.now(), extraClaims = 0 } = {}) {
     ? ENTRY_KINDS.filter((kind) => Number(beforeCounts[kind] ?? 0) !== Number(sourceCounts[kind] ?? 0))
       .map((kind) => ({ kind, before: beforeCounts[kind], after: sourceCounts[kind] }))
     : [];
-  // claims 会多出本次新增的合并节点（`merged added`）—— 那不是"镜像不全"，是合流的产出
+  // T369（2026-11-09）：claims 的"多出来"必须按**实际新增的 id** 数，不能按组数。
+  //
+  // 真事：源库**已经含 39 个合并节点**（早前一次合流的产物）。于是本轮 73 个组里，
+  // 32 个的合并 id 在源库里已经存在 ⇒ 影库只会多出 41 条，而旧公式写死"源库 + 组数" ⇒
+  // 必然报「claims 不一致」（误区：以为镜像漏了）。现在直接数 id：
+  //   addedIds = 影库 claims id − 源库 claims id
+  // 并把"其中已存在于源库的"另记一笔，便于看出是"重复合流"而不是"漏镜像"。
+  const idSetOf = (store) => {
+    try {
+      return new Set(store.list('claims').map((entry) => String(entry?.record?.id ?? '')).filter(Boolean));
+    } catch { return null; }
+  };
+  const srcIds = idSetOf(src);
+  const dstIds = idSetOf(dst);
+  let addedIds = null;
+  let alreadyInSource = null;
+  if (srcIds && dstIds) {
+    addedIds = [...dstIds].filter((id) => !srcIds.has(id)).length;
+    alreadyInSource = Math.max(0, (dstIds.size - addedIds) - srcIds.size);
+  }
+  const mergeExtra = addedIds === null ? Math.max(0, Number(extraClaims) || 0) : addedIds;
   const expected = { ...baseCounts };
-  expected.claims = baseCounts.claims + Math.max(0, Number(extraClaims) || 0);
+  expected.claims = baseCounts.claims + mergeExtra;
   const mismatches = ENTRY_KINDS.filter((kind) => expected[kind] !== shadowCounts[kind]);
   return {
     kinds,
@@ -116,7 +136,10 @@ export function mirrorAll({ src, dst, at = Date.now(), extraClaims = 0 } = {}) {
     shadowCounts,
     drift,
     expected,
-    extraClaims: Math.max(0, Number(extraClaims) || 0),
+    extraClaims: mergeExtra,
+    // T369：组数 与"实际写进去的新节点数"不是一回事（重复合流时后者更小）
+    groupCount: Math.max(0, Number(extraClaims) || 0),
+    mergedAlreadyInSource: alreadyInSource,
     mismatches,
     mirrorOk: mismatches.length === 0,
     elapsedMs,
