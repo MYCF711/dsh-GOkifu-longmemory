@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.119（2026-11-09）
+
+### T367 · `kifu_consolidate`：S4 工具面的最后一块（只读预览）
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `src/sdk.mjs` / `src/tools.mjs`。
+
+**发现**：计划表 T143 标了「进行中」，但工具面实际只有 **6 个**（`stats/search/card/recent_failures/view/get`），
+`kifu_consolidate` 没落地。
+
+**为什么是只读预览**：`rooms/consolidate` 的写模式会产**影子库**（`dryRun:false` + `outStoreDir`），
+那是「改记忆」的动作，绝不该从代码块里发生 ⇒ 工具面**不暴露 `dryRun`**，SDK 写死 `dryRun:true`。
+输出有界：组数 ≤50、每组成员 ≤10、正文按 `previewChars`（40–400）截断。
+
+**验收**：`test/t367-kifu-consolidate.test.mjs` 3/3（无 dryRun 参数 / 输出有界且 JSON 安全 /
+**真跑一次零写入**——整库 sha256 前后一致）；全量 1288 条 / 1282 pass / 0 fail / 6 skip；`check.mjs` PASS。
+证据 `evidence/T367-kifu-consolidate.md`。
+
+**诚实细节**：`ok` 是质量闸 t1–t5 的合取（t5 = reduction ≤25%），小夹具下 `ok:false` 是如实的 ——
+测试钉的是「输出有界 / 零写入 / 参数不可绕过」，不是「ok 必须 true」。
+
 ## 0.8.118（2026-11-09）
 
 ### T366 · HANDOFF 对齐当前状态（本会话 30 刀）

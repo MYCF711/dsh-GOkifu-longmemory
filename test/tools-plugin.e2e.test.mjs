@@ -97,6 +97,7 @@ test('T213: 真库只读 —— 每个工具都真调一次，返回非空且结
     ['kifu_card', { text: 'stale', limit: 3, scope }],
     ['kifu_recent_failures', { limit: 3 }],
     ['kifu_view', { kind: 'episode', id: episodeId, maxNodes: 20 }],
+    ['kifu_consolidate', { limit: 3, previewChars: 80, scope }],
     ['kifu_get', { kind: 'claims', id: claimId }],
   ];
   const results = [];
@@ -112,7 +113,7 @@ test('T213: 真库只读 —— 每个工具都真调一次，返回非空且结
     assert.ok(text && text !== '{}', `${name} 返回了空对象`);
     results.push({ name, size: text.length, head: truncate(text) });
   }
-  assert.equal(results.length, 6);
+  assert.equal(results.length, 7);
   test.diagnostic?.(results.map((r) => `${r.name} ${r.size}B :: ${r.head}`).join('\n'));
 });
 

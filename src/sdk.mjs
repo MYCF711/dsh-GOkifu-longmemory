@@ -15,6 +15,7 @@ import { buildMemoryCard, signalFromText, estimateTokens, scopeKeyFromPath } fro
 import { runGates } from './rooms/gates.mjs';
 import { errorClassKeyOf } from './rooms/topic.mjs';
 import { buildNeighborhood, MAX_VIEW_NODES, LIBRARY_ID, LIBRARY_TITLE } from './rooms/view.mjs';
+import { consolidate as consolidateRoom } from './rooms/consolidate.mjs';
 
 export const SDK_VERSION = 1;
 
@@ -391,6 +392,46 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
         scope,
         status: page.length ? 'measured' : 'empty',
         items: page,
+      };
+    },
+
+    /**
+     * T367（2026-11-09）· 合流**预览**（只读）：把同 scopeKey + 同 kind 的重复 claim 按 V3–V8 判据分组。
+     *
+     * 为什么只给预览：`room/consolidate` 的写模式会产影子库（`dryRun:false` + `outStoreDir`），
+     * 那是"改记忆"的动作，不该从代码块里发生。这里**永远 `dryRun:true`**，只回统计与代表条。
+     * 输出有界：组数 `limit`（≤50）、每组成员最多 10 个、正文按 `previewChars` 截断（≤400）。
+     */
+    consolidate(opts = {}) {
+      const limit = clampInt(opts.limit, 1, MAX_LIMIT, 10);
+      const previewChars = clampInt(opts.previewChars, 40, 400, 160);
+      const scope = opts.scope == null ? null : String(opts.scope);
+      if (storeMissing()) {
+        return { ok: true, status: 'missing', n: 0, total: 0, clamped: limit.clamped, scope, quality: null, stats: null, groups: [] };
+      }
+      const res = consolidateRoom({ store: ensure(), scope, dryRun: true, now: Date.now() });
+      const groups = (res.groups ?? []).slice(0, limit.value).map((g) => ({
+        key: String(g.key ?? ''),
+        kind: String(g.kind ?? ''),
+        scopeKey: String(g.scopeKey ?? ''),
+        tier: g.tier,
+        memberCount: Array.isArray(g.members) ? g.members.length : 0,
+        members: Array.isArray(g.members) ? g.members.slice(0, 10).map(String) : [],
+        representativeId: g.representative?.id ?? null,
+        text: String(g.mergedText ?? '').length > previewChars.value
+          ? `${String(g.mergedText).slice(0, previewChars.value)}…`
+          : String(g.mergedText ?? ''),
+      }));
+      return {
+        ok: Boolean(res.ok),
+        status: groups.length ? 'measured' : 'empty',
+        n: groups.length,
+        total: (res.groups ?? []).length,
+        clamped: limit.clamped,
+        scope,
+        quality: res.quality ?? null,
+        stats: res.stats ?? null,
+        groups,
       };
     },
 
