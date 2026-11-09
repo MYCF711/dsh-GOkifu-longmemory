@@ -33,6 +33,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { runH1, runEval } from './eval.mjs';
 import { createStore } from '../src/rooms/persist.mjs';
+
 import { walkFromSignals, createWalkCache, isScopeVisible, normalizeScopeKey, estimateTokens } from '../src/rooms/walk.mjs';
 import { readFrames, parseEvents } from '../src/rooms/logread.mjs';
 import { errorClassKeyOf } from '../src/rooms/topic.mjs';
@@ -1110,8 +1111,14 @@ function signalScope(workspace) {
  */
 export function runPipeline({ store, workspace, texts, runs, now }) {
   const scope = signalScope(workspace);
+  // T370：A4 量的是「与插件热路径同一条链」——**那 store 也得是同一条**。
+  // 生产（sdk/plugin）都是 `createStore({ bundle: true })`；这里若用默认（逐文件读），
+  // 量到的是生产根本不走的慢路：真库上同一条链 bundle 开 33–37ms、关 43–46ms（2026-11-09 实测），
+  // 于是 A4 p50 逼近 50ms 门槛并开始假红。
+  // 只在**能拿到 root** 时替换（测试给的假 store 没有 root ⇒ 原样用）。
+  const ioStore = (typeof store?.root === 'string' && store.root) ? createStore({ root: store.root, bundle: true }) : store;
   const t0 = performance.now();
-  const cache = createWalkCache(store);
+  const cache = createWalkCache(ioStore);
   const coldCacheMs = performance.now() - t0;
 
   const times = [];
@@ -1126,9 +1133,9 @@ export function runPipeline({ store, workspace, texts, runs, now }) {
     const signal = signalFromText(text, { at: now });
     signal.scopeKey = scope;
     const started = performance.now();
-    const walk = walkFromSignals({ signal, store, scope, cache, depth: 2, limit: 5, budgetTokens: 500 });
-    const card = buildMemoryCard({ cache, signal, walkResult: walk, store, scope, now, limit: 5, budgetTokens: 500 });
-    const gates = runGates({ card, walkResult: walk, store, scope, cache });
+    const walk = walkFromSignals({ signal, store: ioStore, scope, cache, depth: 2, limit: 5, budgetTokens: 500 });
+    const card = buildMemoryCard({ cache, signal, walkResult: walk, store: ioStore, scope, now, limit: 5, budgetTokens: 500 });
+    const gates = runGates({ card, walkResult: walk, store: ioStore, scope, cache });
     const ms = performance.now() - started;
     times.push(ms);
     walkCrossScope += Number(walk.dropped?.crossScope ?? 0);

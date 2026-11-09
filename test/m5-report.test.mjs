@@ -180,12 +180,19 @@ function buildFixture({ withValidity = false, withClaims = true } = {}) {
   return { root, storeRoot, scopeKey };
 }
 
+/**
+ * 全树 sha256。**跳过 `.cache/`** —— 那是**派生物**（T62 的单文件 bundle），
+ * `rm -rf .cache` 只让下次变慢、不丢任何数据；"只读"要保的是**权威数据**
+ * （七个 kind + manifest + journal + index.md）一个字节都不变。
+ * T370：m5-report 现在与生产同一条 store 路径（bundle 开），冷读会产生一次 `.cache/` 写入。
+ */
 function hashTree(dir) {
   const out = [];
   const walk = (d) => {
     let names = [];
     try { names = readdirSync(d).sort(); } catch { return; }
     for (const name of names) {
+      if (d === dir && name === '.cache') continue; // 顶层 .cache = 派生物，不算"写 store"
       const full = path.join(d, name);
       const st = statSync(full);
       if (st.isDirectory()) walk(full);
