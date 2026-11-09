@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.109（2026-11-09）
+
+### T67 · 引文截断加了省略号 ⇒ `support.quote` 必然不是原文子串
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。`claim.mjs` / `extract.mjs` 新增 `clipQuote()`。
+
+**病灶**：`clip()` 截断长文本时**追加 `…`**，而 `support.quote` 的契约是「必须是 (episode, seq) 原文的**逐字子串**」
+—— 它是可机械核验的出处指针，不是展示文本。往证据字段里塞一个原文没有的字符，等于让每条超长引文**必然**判红。
+
+**实测**：4315 条 support 引用里 **400 条（9.3%）** 以 `…` 结尾。
+
+**改法**：新增 `clipQuote(text, max)`（同样的空白归一 + 截断，**不加省略号**），改到 6 处 claim 引文与 1 处 extract 引文；
+`clip()` 本身不动（它还给 `claim.text` 等展示字段用）。
+
+**验收**：`test/t67-clip-quote.test.mjs` 3/3（截断结果是子串 / 短引文原样 / 空值不炸）；
+全量 1266 条 / 1260 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T67-clip-quote.md`。
+
+**诚实说明**：`support.quote` 只增不改 ⇒ 这一版 `provenance-p2` 的 `ok` 数**不会跳**；
+改的是生成侧，效果要等**新归档的 claim** 才出现；历史 400 条不回填（改写证据字段比留着更危险）。
+
 ## 0.8.108（2026-11-09）
 
 ### T66 · 3565 条 `quote-not-substring` 到底是哪种坏（先分桶，再动手）

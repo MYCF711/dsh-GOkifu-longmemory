@@ -142,6 +142,20 @@ function hash8(input) {
 
 
 
+/**
+ * T67（2026-11-09）：**引文（support.quote）的截断不许加省略号**。
+ *
+ * 为什么：`support.quote` 是**可机械核验的出处指针**（`quote` 必须是 (episode, seq) 原文的逐字子串），
+ * 不是展示文本。旧实现统一走 `clip()` —— 它截断时会**追加 `…`**，等于往引文里塞了一个原文没有的字符，
+ * 于是任何超过 `maxQuote` 的引文都必然"不是子串"（实测 4315 条引用里 **400 条（9.3%）** 以 `…` 结尾）。
+ * 展示层要省略号就在渲染时加，别写进证据字段。
+ */
+export function clipQuote(text, max) {
+  const s = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (s.length <= max) return s;
+  return [...s].slice(0, Math.max(1, max)).join('');
+}
+
 function clip(text, max) {
 
   const s = String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -734,7 +748,7 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
       // T343：首条支撑没派生出失效条件、而这条有 ⇒ 只补空（不覆盖已有；只增不改）
       if (!g.falsifiableWhen && f?.falsifiableWhen) g.falsifiableWhen = f.falsifiableWhen;
 
-      addSupport(g, ep, { episode: ep.id, nodeId: f.nodeId, edgeId: f.edgeId, seq: f.seq, quote: clip(rawQuote, opts.maxQuote), occurredAt: at });
+      addSupport(g, ep, { episode: ep.id, nodeId: f.nodeId, edgeId: f.edgeId, seq: f.seq, quote: clipQuote(rawQuote, opts.maxQuote), occurredAt: at });
 
     }
 
@@ -788,7 +802,7 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
       if (g.level === null && c.level) g.level = c.level;
 
-      addSupport(g, ep, { episode: ep.id, nodeId: c.nodeId, edgeId: c.edgeId, seq: c.seq, quote: clip(rawQuote, opts.maxQuote), occurredAt: at });
+      addSupport(g, ep, { episode: ep.id, nodeId: c.nodeId, edgeId: c.edgeId, seq: c.seq, quote: clipQuote(rawQuote, opts.maxQuote), occurredAt: at });
 
     }
 
@@ -877,7 +891,7 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
       }
 
-      addSupport(g, ep, { episode: ep.id, nodeId: f.nodeId, edgeId: f.edgeId, seq: f.seq, quote: clip(errLine, opts.maxQuote), occurredAt: at });
+      addSupport(g, ep, { episode: ep.id, nodeId: f.nodeId, edgeId: f.edgeId, seq: f.seq, quote: clipQuote(errLine, opts.maxQuote), occurredAt: at });
 
       fileFacts.push({ g, path, episode: ep.id });
 
@@ -947,7 +961,7 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
         }
 
-        addSupport(g, ep, { episode: ep.id, nodeId: e.nodeId, edgeId: e.edgeId, seq: e.seq, quote: clip(v.text, opts.maxQuote), occurredAt: at });
+        addSupport(g, ep, { episode: ep.id, nodeId: e.nodeId, edgeId: e.edgeId, seq: e.seq, quote: clipQuote(v.text, opts.maxQuote), occurredAt: at });
 
       }
 
@@ -1009,7 +1023,7 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
       }
 
-      addSupport(g, ep, { episode: ep.id, nodeId: fact.nodeId, edgeId: fact.edgeId, seq: fact.seq, quote: clip(rawQuote, opts.maxQuote), occurredAt: at });
+      addSupport(g, ep, { episode: ep.id, nodeId: fact.nodeId, edgeId: fact.edgeId, seq: fact.seq, quote: clipQuote(rawQuote, opts.maxQuote), occurredAt: at });
 
     }
 
@@ -1043,7 +1057,7 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
         if (!Number.isFinite(at) || at <= factAt) continue;
 
-        const entry = supportEntry({ episode: ep.id, nodeId: e.nodeId, edgeId: e.edgeId, seq: e.seq, quote: clip(rawQuote, opts.maxQuote), occurredAt: at });
+        const entry = supportEntry({ episode: ep.id, nodeId: e.nodeId, edgeId: e.edgeId, seq: e.seq, quote: clipQuote(rawQuote, opts.maxQuote), occurredAt: at });
 
         if (!g.counters.some((x) => supportKeyOf(x) === supportKeyOf(entry))) g.counters.push(entry);
 
@@ -1380,7 +1394,7 @@ export function ensureClassClaims({ claims = [], minSupport = 2, maxQuote = 200 
       const key = [s.episode, s.seq, s.quote].join('');
       if (seen.has(key)) continue;
       seen.add(key);
-      support.push({ episode: s.episode, threadId: s.threadId ?? null, nodeId: s.nodeId ?? null, edgeId: s.edgeId ?? null, seq: Number.isFinite(s.seq) ? s.seq : null, quote: clip(String(s.quote ?? ''), maxQuote), occurredAt: Number.isFinite(s.occurredAt) ? s.occurredAt : null });
+      support.push({ episode: s.episode, threadId: s.threadId ?? null, nodeId: s.nodeId ?? null, edgeId: s.edgeId ?? null, seq: Number.isFinite(s.seq) ? s.seq : null, quote: clipQuote(String(s.quote ?? ''), maxQuote), occurredAt: Number.isFinite(s.occurredAt) ? s.occurredAt : null });
     }
     const times = support.map((s) => s.occurredAt).filter((t) => Number.isFinite(t));
     added.push({
