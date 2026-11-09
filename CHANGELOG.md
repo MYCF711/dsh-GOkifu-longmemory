@@ -17,6 +17,24 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.121（2026-11-09）
+
+### T369 · 「claims 不一致」的第二个误区：按**组数**算新节点
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `scripts/consolidate-apply.mjs` 的 expected 公式。
+
+**读数**（安静窗口，`drift` 为空）：`| claims | 2671+73 | 2712 ❌ |`，其余 kind 全对。逐文件数：影库多出 **41**。
+
+**真因**：源库**已经有 39 个合并节点**（早前一次合流的产物，id 由成员列表决定 ⇒ 重复合流得同一个 id）。
+本轮 73 组里 **32 个 id 源库已有** ⇒ 影库只多出 41 条，**镜像一条没漏**，是公式写死了「源库 + 组数」。
+
+**改法**：直接数 **id 差集** —— `expected.claims = 源库 + (影库 id − 源库 id)`；
+并把 `extraClaims`（实际新增）/ `groupCount`（组数）/ `mergedAlreadyInSource` 分三个数记。
+按新口径复算：`2671 + 41 = 2712` = 影库实际条数 ✅。
+
+**验收**：`test/t369-mirror-claims-expect.test.mjs` 2/2（部分 id 已在源库 ⇒ 报一致 / 真少一条仍红）；
+全量 1292 条 / 1286 pass / 0 fail / 6 skip。证据 `evidence/T369-mirror-claims-expect.md`。
+
 ## 0.8.120（2026-11-09）
 
 ### T368 · 影库「不一致」分得清是漏了还是源库在长
