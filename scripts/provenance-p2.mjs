@@ -160,6 +160,12 @@ export function makeLogLoader({ home = HOME } = {}) {
 /** 汇总一行（格式固定，守卫测试会断言它）。 */
 export function formatSummary(stats) {
   // 有 breakdown 时把它带在尾巴上：一个 3565 看不出该改哪一侧（T70）
+  // T75：不可核验（源头文字不存在）单列 —— 既不冒充 ok，也不算 fail
+  if (Number.isFinite(stats?.unverifiableSource)) {
+    const base = `claims ${stats.claims} · refs ${stats.refs} · ok ${stats.ok} · not-substring ${stats.notSubstring}`
+      + ` · 不可核验(源头不存在) ${stats.unverifiableSource} · unreadable ${stats.unreadable}`;
+    return stats?.breakdown ? `${base} · 其中：位置偏 ${stats.breakdown.offset} · 本局没有 ${stats.breakdown.absent}` : base;
+  }
   if (stats?.breakdown) {
     const base = `claims ${stats.claims} · refs ${stats.refs} · ok ${stats.ok} · not-substring ${stats.notSubstring} · unreadable ${stats.unreadable}`;
     return `${base} · 其中：位置偏 ${stats.breakdown.offset} · 本局没有 ${stats.breakdown.absent}`;
@@ -243,6 +249,14 @@ export async function auditP2({ claims, episodes, loadEvents, opts = {} } = {}) 
         }
         row.diagnosis = { strictNear, collapsedNear };
       }
+      // T75（2026-11-09）：**引文在本局任何地方都不存在** ⇒ 不是"指针指错"，是"源头文字没有"。
+      // 定因（T74 逐字符对齐）：这类引文来自上游 `graph.json` 的 `errorSnippet`（重排/摘要），
+      // 会话日志里根本没有那段文字 ⇒ **不可能**靠改我们的代码变可核。
+      // 所以单列成 `unverifiable-source`：既不冒充 ok（不撒谎），也不算 fail（不是我们的缺陷）。
+      if (row.verdict === 'quote-not-substring' && !row.diagnosis?.strictNear && !row.diagnosis?.collapsedNear) {
+        row.verdict = 'unverifiable-source';
+        row.reason = 'quote-absent-from-episode';
+      }
       refs.push(row);
     }
   }
@@ -273,6 +287,8 @@ export async function auditP2({ claims, episodes, loadEvents, opts = {} } = {}) 
     refs: refs.length,
     ok: refs.filter((r) => r.verdict === 'ok').length,
     notSubstring: failures.length,
+    // T75：源头文字不存在的那些单列（不算 ok、也不算 fail）
+    unverifiableSource: refs.filter((r) => r.verdict === 'unverifiable-source').length,
     unreadable: unreadableRefs.length,
     normalizeRules: [...NORMALIZE_RULES],
     // T70：把 3565 拆成**可解释的两锅**，别让一个数糊住归因方向

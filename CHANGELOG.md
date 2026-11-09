@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.117（2026-11-09）
+
+### T365 · 三种失败分开算：位置偏 3111 / 源头不存在 454 / 读不到 0
+
+**版本说明**：`v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。改 `scripts/provenance-p2.mjs` 的判定与汇总行。
+
+**为什么**：T74 定因——引文在**本局任何地方都不存在**的那 454 条来自上游 `graph.json` 的 `errorSnippet`（摘要），
+我们改不了。把它们算成 `quote-not-substring`（我们的缺陷）是在撒谎；直接删掉又丢信息。
+
+**改法**：判定从两态变三态——`quote-not-substring` 且「本局别处也找不到」⇒ 降级为 **`unverifiable-source`**
+（单列、不算 ok 也不算 fail）。规则是**数据驱动**的，所以历史里那些**指错位置**的（真缺陷）不会被一起放过。
+
+**改后**：`ok 750 · 位置偏 3111 · 不可核验(源头不存在) 454 · unreadable 0`。
+
+**验收**：`test/t365-unverifiable-source.test.mjs` 3/3（三态分开 / 偏移不许被吃掉 / 读不到 fail-closed）；
+全量 1282 条 / 1276 pass / 0 fail / 6 skip；`check.mjs` PASS。证据 `evidence/T365-unverifiable-source.md`。
+
+**边界**：`unverifiable-source` **不是通过** —— 它明确表示「这条证据不可机械核验」，下游判据不许当 ok。
+
 ## 0.8.116（2026-11-09）
 
 ### T74 · 逐字符对齐定因：454 条的**源头文字在日志里不存在**（上游摘要），我们这侧修不了
