@@ -198,6 +198,12 @@ export function checkMembersResolvable({ merges = [], shadowClaimIds = null } = 
  */
 export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, merges = [], limit = 20, budgetTokens = 2000, measure = null, shadowClaimIds = null } = {}) {
   const rows = [];
+  // T373：源库侧的合并节点 id 集合（这些行是派生物，不是内容）
+  const sourceMergeIds = new Set((() => {
+    try {
+      return source.list('claims').map((e) => e?.record).filter((c) => c && c.merge).map((c) => String(c.id));
+    } catch { return []; }
+  })());
   for (const merged of merges) {
     const text = normalizeText(merged?.text);
     const scopeKey = typeof merged?.scopeKey === 'string' ? merged.scopeKey : '';
@@ -255,9 +261,20 @@ export function sampleMergeGroups({ source, shadow, sourceCache, shadowCache, me
       }
       return false;
     };
+    // T373（2026-11-09）：**源库里本来就是合并节点的那一行不算"内容"**。
+    //
+    // 真事：源库**已经含 39 个合并节点**（早前一次合流写进去的）。旧口径下，源卡里那 39 个节点的行
+    // 在影卡里"没有对应行"（T187 有意不让合并节点成行）⇒ 一律记 lostRows。
+    // 实测：能复现的丢失行 **14/14 都是"源库就是合并节点"**，没有一行是普通内容行、也没有成员行。
+    // 合并节点的**成员**才是内容，它们由影卡里的合并节点代表 ⇒ 这类行不进 ④b 的分母，另记一笔。
+    const derivedRowSkipped = sourceClaims.filter((entry) => {
+      const id = String(entry?.claimId ?? '');
+      return Boolean(id) && sourceMergeIds.has(id);
+    }).length;
     const lostRows = sourceClaims.filter((entry) => {
       const id = String(entry?.claimId ?? '');
       if (!id) return false;
+      if (sourceMergeIds.has(id)) return false; // 派生物，不是内容
       if (shadowIds.has(id)) return false;
       return !coveredByRenderedMerge(id);
     }).length;
