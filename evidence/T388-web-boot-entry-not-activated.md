@@ -70,3 +70,24 @@ node --test "test/*.test.mjs" → 1299 条 / 1293 通过 / 0 失败 / 6 跳过
 - 这次修的是**启动期**的失败类；`kifu_*` 工具在读不到 `ctx.tools` 时仍然注册不上（如实记 `via: none`）——
   但**不会再把 DSH 拖到起不来**。
 - 崩溃日志里其余几条（`Web authentication failed`、`host exited 134`、模型列表 401）与本插件无关，已在报告里分开列出。
+
+---
+
+## 六、补 tombstone（2026-11-19 · T389）
+
+`test/t388-no-waiting-entries.test.mjs` —— 把 `ctx.inject(...)` 加回 `src/plugin.mjs` 就红：
+
+| 用例 | 钉的是什么 |
+|---|---|
+| ① 没有 tools / webServer | `apply` **一次都不许** `ctx.inject`（不许留等待项） |
+| ② 只缺 webServer（web 侧最常见） | 同上 |
+| ③ 服务都在 | 同样不派生等待项 |
+
+**改动量实证**（注释行不计）：
+
+```
+v0.8.129  src/plugin.mjs 里真实的 ctx.inject(['…']) 调用：3
+当前 main  ：0
+```
+
+全量：**1302 条 / 1296 通过 / 0 失败 / 6 跳过**。
