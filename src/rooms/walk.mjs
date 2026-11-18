@@ -331,10 +331,22 @@ function compareMatches(a, b) {
  * @param {{signal:object, topics:Array}} p
  * @returns {Array<{topic:object, score:number, matchedBy:'entity'|'term', input:string}>}
  */
+// T392：通用时间/寒暄词 —— 永远不是有用的记忆主题（与 topic.mjs 的 CJK_STOPWORDS 同源）
+const GENERIC_TIME_KEYS = new Set([
+  '今天', '昨天', '明天', '后天', '前天', '今晚', '早上', '上午', '下午', '晚上', '中午',
+  '今年', '去年', '明年', '本月', '上月', '刚才', '最近', '后来', '未来', '以前',
+  '有时', '偶尔', '经常', '通常', '还行', '不错', '好吧',
+]);
+
 export function matchTopics({ signal, topics = [], index = null } = {}) {
   const sig = normalizeSignal(signal);
+  // T392（2026-11-19）：**命中面收窄** —— 通用时间/寒暄词不参与主题匹配。
+  // 真库实测：「今天天气不错」原样命中主题 `今天`（历史抽取把通用时间词收进了 topics），
+  // 于是闲聊也建卡、也注入记忆。这里挡掉这批键（不删数据）。
+  // 注意：`walk.mjs` 设计上**零 import**，所以这张小表就地重复一份，与 `topic.mjs` 的停用词同源。
   const list = (Array.isArray(topics) ? topics : [])
-    .filter((t) => t && typeof t.id === 'string' && t.id !== '' && typeof t.key === 'string');
+    .filter((t) => t && typeof t.id === 'string' && t.id !== '' && typeof t.key === 'string')
+    .filter((t) => !GENERIC_TIME_KEYS.has(String(t.key)));
   const best = new Map();
 
   const consider = (topic, score, matchedBy, input) => {
