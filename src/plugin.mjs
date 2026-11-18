@@ -1789,6 +1789,11 @@ export function apply(ctx, rawConfig = {}) {
         }
         const liveStatsWrite = appendLiveStats(storeRootForStats, {
           kind: 'pre-step',
+          // T364（2026-11-19）：**带上会话 id**。
+          // 没有它，A1.redundant 只能按「同 scope」判，于是把「跨会话重注」（必要）和
+          // 「同会话重注」（浪费）混在一起 —— 回放实测 430 次、23.86% 全是上界，不可判。
+          // 只加一个字段，不改任何行为；新行有 sid，历史行没有（回放时按 null 归入"不可判"）。
+          sid: sessionId ?? null,
           scope: lastResolvedScope(session?.id)?.scope ?? null,
           scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
           action: result.action ?? 'skip',
