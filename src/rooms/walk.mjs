@@ -238,11 +238,31 @@ function minComparableLength(text) {
 }
 
 /** 词面重叠（机械包含匹配，两侧都过最小长度闸，防通用短词满图乱连）。 */
+// T393：**英文虚词表** —— 它们在任何长串里都会撞上（`are` ⊂ `magpie-agent-tare`），
+// 所以只允许"完全相等"，不许做子串重叠。只收虚词，不收名词/标识符。
+const ASCII_FUNC_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'if', 'so', 'as', 'at', 'by', 'to', 'of', 'in', 'on', 'up',
+  'is', 'am', 'are', 'was', 'were', 'be', 'been', 'being', 'do', 'does', 'did', 'has', 'have', 'had',
+  'not', 'no', 'yes', 'ok', 'all', 'any', 'can', 'may', 'will', 'would', 'should', 'could', 'must',
+  'this', 'that', 'these', 'those', 'it', 'its', 'he', 'she', 'they', 'them', 'we', 'you', 'us', 'me',
+  'my', 'our', 'your', 'his', 'her', 'their', 'what', 'when', 'where', 'which', 'who', 'why', 'how',
+  'there', 'here', 'then', 'than', 'now', 'just', 'very', 'also', 'too', 'only', 'some', 'more', 'most',
+  'such', 'over', 'into', 'about', 'after', 'before', 'both', 'each', 'few', 'other', 'own', 'same',
+  'under', 'until', 'while', 'with', 'from', 'for', 'out', 'off', 'let', 'get', 'got', 'see', 'said',
+  'hello', 'thanks', 'thank', 'think', 'know', 'want', 'need', 'make', 'made', 'take', 'took', 'going',
+]);
+
 function overlaps(needle, key) {
   const x = String(needle ?? '').toLowerCase();
   const y = String(key ?? '').toLowerCase();
   if (x === '' || y === '') return false;
   if (x.length < minComparableLength(x) || y.length < minComparableLength(y)) return false;
+  // T393（2026-11-19）：**短 ASCII 词不许做子串重叠**。
+  // 真机实测：`hello there how are you` 命中 **99** 个主题（全是 repo 类）——
+  // 因为 `are` ⊂ `lmy414/magpie-agent-tare`、`you`/`how` 之类同理。
+  // 三个字母的英文虚词、两三个字母的缩写在任何长串里都会撞上，子串判定必须要求它们**完全相等**。
+  const asciiFuncWord = (v) => v.length <= 7 && /^[a-z]+$/.test(v) && ASCII_FUNC_WORDS.has(v);
+  if (asciiFuncWord(x) || asciiFuncWord(y)) return x === y;
   return x.includes(y) || y.includes(x);
 }
 
