@@ -17,6 +17,22 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.131（2026-11-19）
+
+### T389 · 给 T388 补 tombstone：启动期不许留下等待服务的子插件
+
+**版本说明**：只加测试 + evidence ⇒ **patch**。
+
+`test/t388-no-waiting-entries.test.mjs`（3/3）：把 `ctx.inject(...)` 加回 `src/plugin.mjs` 就红。
+
+- ① 没有 `tools` / `webServer`：`apply` **一次都不许** `ctx.inject`（不许留等待项）
+- ② 只缺 `webServer`（web 侧最常见）：同上
+- ③ 服务都在：同样不派生等待项
+
+**改动量实证**（注释行不计）：`v0.8.129` 里真实的 `ctx.inject(['…'])` 调用 **3 处**，当前 main **0 处**。
+
+全量 **1302 条 / 1296 通过 / 0 失败 / 6 跳过**；`check.mjs` PASS。
+
 ## 0.8.130（2026-11-18）
 
 ### T388 · **修复**：`ctx.inject(...)` 留下 PENDING 子插件 ⇒ DSH web boot 整树起不来
