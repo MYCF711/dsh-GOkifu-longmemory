@@ -38,25 +38,20 @@ test('T375 ①: 老路优先 —— ctx.tools.register 在就直接注册（一�
   });
 });
 
-test('T375 ②: 读不到工具面但宿主给 ctx.inject ⇒ 延迟注册，且**不在当场**报 0 就完事', () => {
+test('T388 ②: 读不到工具面时**不许**登记 waiting 子插件（会把"注册不上"升级成"启动失败"）', () => {
   withHome((store) => {
-    let cb = null;
+    let injectCalls = 0;
     const ctx = {
       logger: { warn: () => {} },
-      inject: (deps, fn) => { assert.deepEqual(deps, ['tools'], '必须按工具面服务登记'); cb = fn; },
+      inject: () => { injectCalls += 1; },   // 若被调用 ⇒ 派生一个等待 tools 的子插件
     };
     const out = apply(ctx);
-    assert.equal(out.deferred, true);
-    assert.equal(typeof cb, 'function', '必须真的登记了 inject 回调');
-
-    // 服务就绪：回调拿到带 tools.register 的 ctx
-    const names = [];
-    cb({ tools: { register: (t) => names.push(t.name) }, logger: { warn: () => {} } });
-    assert.equal(names.length, 7, '延迟路径也要把 7 个工具都注册上');
+    assert.equal(injectCalls, 0, '没有 tools 服务时绝不能 ctx.inject —— 那会留下永远 PENDING 的 entry');
+    assert.equal(out.registered, 0);
     const cred = credOf(store);
-    assert.equal(cred.count, 7);
-    assert.equal(cred.via, 'tools-plugin-deferred');
-    assert.equal(cred.ctxHasRegister, true, '凭据必须反映"延迟那一刻真的拿到了工具面"');
+    assert.equal(cred.count, 0);
+    assert.equal(cred.via, 'tools-plugin-none');
+    assert.equal(cred.ctxHasRegister, false);
   });
 });
 
