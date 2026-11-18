@@ -263,6 +263,15 @@ function overlaps(needle, key) {
   // 三个字母的英文虚词、两三个字母的缩写在任何长串里都会撞上，子串判定必须要求它们**完全相等**。
   const asciiFuncWord = (v) => v.length <= 7 && /^[a-z]+$/.test(v) && ASCII_FUNC_WORDS.has(v);
   if (asciiFuncWord(x) || asciiFuncWord(y)) return x === y;
+  // T394（2026-11-19）：**短标识符必须整词出现**，不许"钻"进长串中间。
+  // 真机实测：`ui api db` 命中 **247** 个主题、`add a button` 命中 **33** 个（`add` ⊂ `add-account.test.mjs`）。
+  // 规则：短的一侧是纯 ASCII 且 ≤5 字符 ⇒ 只能作为**整段**出现在长的一侧（按非字母数字切段）。
+  // 中文不走这条（中文没有分隔符，子串匹配本来就是对的；中文噪声由 T392 的停用词挡）。
+  const shorter = x.length <= y.length ? x : y;
+  const longer = x.length <= y.length ? y : x;
+  if (shorter.length <= 5 && /^[a-z0-9][a-z0-9_.-]*$/.test(shorter)) {
+    return longer.split(/[^a-z0-9]+/).includes(shorter);
+  }
   return x.includes(y) || y.includes(x);
 }
 
