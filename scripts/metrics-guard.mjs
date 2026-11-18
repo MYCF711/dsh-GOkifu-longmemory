@@ -341,6 +341,10 @@ if (invokedDirectly) {
     const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
     console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'}`);
     console.log(`  主判据 · A2b 召回相关度（sampleSource=${out.values.sampleSource}，n=${out.values.a2bN}）：严格=${pct(out.values.a2bStrict)} 覆盖=${pct(out.values.a2bCover)}`);
+    // T362：**把分母的来源写出来** —— 本闸的 A2b 与 `scripts/eval.mjs` 的 A2b **分母不同源，跨口径不可比**：
+    //   本闸 = holdout 抽样（n 见上）；eval.mjs = 按"有失败签名"筛（2026-11-19 实测 episodes 298 / evaluated 231 / rate 22.02%）。
+    // 两者都能用，但用途不同：本闸看"门禁是否退化"，eval 看"时间趋势"。混着比会得出错误结论。
+    console.log(`    分母来源：holdout 抽样（非全量）· 与 scripts/eval.mjs 的按签名口径**不可比**（详见 evidence/T362-eval-stratification.md）`);
     console.log(`  约束条件 · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A4.p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
     // T7：A1 的两条并列轴（stale 在上面那一行，opposite 在这里）。"未通电"必须显式打出来 —— 别把 0/0 当通过。
     console.log(`  A1 三轴 · A1.stale=${pct(out.values.a1)} A1.opposite=${pct(out.values.a1Opposite)}（可判率 ${pct(out.values.a1OppositeDecidability)}，n=${out.values.a1OppositeN ?? 'null'}，${out.values.a1OppositeDecisionGrade ? '已通电·参与 exit code' : '未通电·不参与 exit code（0 次触发 ≠ 无反向记忆）'}）`);
