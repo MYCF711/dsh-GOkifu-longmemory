@@ -67,6 +67,10 @@ import { createWalkCache } from './rooms/walk.mjs';
 
 /** 插件名（宿主用来标识这个插件）。 */
 export const name = 'dsh-gokifu-longmemory';
+
+// T390：预热规模闸 —— 超过就不预热（避免在大库上把宿主卡死十几秒）
+export const WARMUP_MAX_EPISODES = 1200;
+export const WARMUP_MAX_LINKS = 8000;
 /** 配置/消息格式的版本号（改消息形状时 +1，便于事后认账）。 */
 export const PLUGIN_VERSION = 1;
 /** 注入消息的 source 标识（宿主里一眼能认出是棋院写的）。 */
@@ -1561,17 +1565,41 @@ export function apply(ctx, rawConfig = {}) {
     return makeEffect(false);
   }
 
-  // 预热：把 walk 需要的四类记录读进内存一次（~0.7s），把成本挪到插件加载，而不是首轮注入。
-  // 未开 enabled/shadow 或库不存在时跳过；失败静默（首轮退回冷路径，仍不影响会话）。
-  try {
-    if (config.enabled || config.shadow) {
+  // 预热 —— T390（2026-11-19）：**绝不在 apply 里同步做**，也绝不无条件做。
+  //
+  // 真机事故：用户在 UI 里一开插件，DSH 直接卡死、切会话一直"加载中"、只能重启。
+  // 冷启动实测（清空 `.cache` 后 apply）：
+  //     apply 完成 **14179 ms** · 事件循环最长阻塞 **14080 ms**
+  // 原因就是这里：`walkCacheFor` 会把 episodes(4377) / links(26346) / claims(3921) / topics(6593)
+  // 一次性读进内存并解析 bundle —— 全程在主线程同步跑，宿主在这 14 秒里什么都不能做。
+  // 库越大越久，会话/子代理/废弃会话越多越久 ⇒ 用户看到的就是"开完就卡死"。
+  //
+  // 现在：① 推到 apply 之后（`setTimeout 0`），② 先按 manifest 的规模闸判断，
+  // 大库直接跳过预热（宁可首轮冷一次，也不要卡住宿主），③ 失败静默。
+  const scheduleWarmUp = () => {
+    try {
       const root = resolveStoreRoot(config);
-      if (root && fs.existsSync(root)) {
-        walkCacheFor(root, createStore({ root, bundle: true }), { createWalkCache });
+      if (!root || !fs.existsSync(root)) return;
+      const manifestPath = path.join(root, 'manifest.json');
+      let counts = null;
+      try { counts = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))?.counts ?? null; } catch { counts = null; }
+      const episodes = Number(counts?.episodes ?? 0);
+      const links = Number(counts?.links ?? 0);
+      // 规模闸：超过这个量级，预热的收益远小于"卡住宿主"的代价
+      const tooBig = episodes > WARMUP_MAX_EPISODES || links > WARMUP_MAX_LINKS;
+      if (tooBig) {
+        warn(ctx, `跳过预热：库规模过大（episodes=${episodes} links=${links}）——首轮走冷路径，避免阻塞宿主`);
+        return;
       }
+      walkCacheFor(root, createStore({ root, bundle: true }), { createWalkCache });
+    } catch (error) {
+      warn(ctx, `预热失败（首轮可能变慢）：${String(error?.message ?? error)}`);
     }
-  } catch (error) {
-    warn(ctx, `预热失败（首轮可能变慢）：${String(error?.message ?? error)}`);
+  };
+  if (config.enabled || config.shadow) {
+    const timer = setTimeout(scheduleWarmUp, 0);
+    if (typeof timer?.unref === 'function') timer.unref();
+    disposers.push(() => { try { clearTimeout(timer); } catch { /* 已触发 */ } });
   }
 
   // 2026-11-04（S17）：把记忆查询注册成**工具** —— PTC / run_code 模式下宿主会据此生成 SDK 绑定，
