@@ -48,7 +48,21 @@ export function audit({ store, home = defaultHome(), sample = 10 } = {}) {
   }
   const counts = episodes.map((ep) => byEp.get(ep.id) ?? 0);
   const withClaims = counts.filter((n) => n > 0).length;
-  const zero = episodes.filter((ep) => (byEp.get(ep.id) ?? 0) === 0);
+  // T360（2026-11-19）：**按 delegationDepth 分层报**。
+  // 真库实测：根局 298 / 子代理局 4079 —— 子代理局按契约**不该有自己的 claim**
+  // （`AGENTS.md` §4.1：只收 depth=0；子代理归并到父局）。
+  // 所以把两类混在一个分母里算覆盖率，数字天生被压低，而且会误导归因
+  // （曾据此以为"归并没实现导致覆盖率低"，实测 105/105 有失败子局的父局**都已经有 claim** ⇒ 归并收益为 0）。
+  const isRoot = (ep) => (Number(ep?.delegationDepth ?? 0) === 0);
+  const roots = episodes.filter(isRoot);
+  const subagents = episodes.filter((ep) => !isRoot(ep));
+  const rootWithClaims = roots.filter((ep) => (byEp.get(ep.id) ?? 0) > 0).length;
+  const byDepth = {
+    root: { episodes: roots.length, withClaims: rootWithClaims, rate: roots.length ? rootWithClaims / roots.length : 0 },
+    subagent: { episodes: subagents.length, withClaims: subagents.filter((ep) => (byEp.get(ep.id) ?? 0) > 0).length },
+  };
+  // 无 claim 抽样只在**根局**里抽：子代理局无 claim 是设计如此，不该出现在"缺口"样本里
+  const zero = roots.filter((ep) => (byEp.get(ep.id) ?? 0) === 0);
   // 按 scope
   const byScope = new Map();
   for (const ep of episodes) {
@@ -72,7 +86,7 @@ export function audit({ store, home = defaultHome(), sample = 10 } = {}) {
     withClaims, coverage: episodes.length ? withClaims / episodes.length : null,
     zero, zeroIds: zero.map((e) => e.id),
     dist: { median: median(counts), p90: quantile(counts, 0.9), max: Math.max(0, ...counts), mean: counts.length ? counts.reduce((a, b) => a + b, 0) / counts.length : 0 },
-    scopes: scopeRows, samples, reasonAgg,
+    byDepth, scopes: scopeRows, samples, reasonAgg,
   };
 }
 
@@ -83,6 +97,12 @@ export async function main(argv = process.argv.slice(2)) {
   const r = audit({ store, home, sample: Number(opt('sample', '10')) });
   if (argv.includes('--json')) { console.log(JSON.stringify(r, null, 2)); return 0; }
   console.log(`T291 · 全库覆盖率 · 局 ${r.episodes} · claim ${r.claims}`);
+  // T360：**分层报** —— 子代理局按契约不该有 claim，混在一起会把覆盖率算低
+  if (r.byDepth) {
+    const { root, subagent } = r.byDepth;
+    console.log(`  **根局 ${root.episodes} · 有 claim ${root.withClaims} = ${(root.rate * 100).toFixed(2)}%（这才是产品口径）**`);
+    console.log(`  子代理局 ${subagent.episodes} · 有 claim ${subagent.withClaims}（按契约不该有，不进分母）`);
+  }
   console.log(`有 claim 的局 ${r.withClaims}/${r.episodes} = **${pct(r.withClaims, r.episodes)}** · 为 0 的局 ${r.zero.length}`);
   console.log(`每局 claim 数：median ${r.dist.median} · p90 ${r.dist.p90} · max ${r.dist.max} · mean ${r.dist.mean.toFixed(2)}`);
   console.log('\n按 scope（top 15）：');
