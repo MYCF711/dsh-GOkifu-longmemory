@@ -60,21 +60,15 @@ export function apply(ctx, config = {}) {
     return { name, registered: directNames.length, via: 'tools-plugin' };
   }
 
-  if (typeof ctx?.inject === 'function') {
-    let deferredNames = null;
-    try {
-      ctx.inject(['tools'], (serviceCtx) => {
-        const names = registerMemoryTools(serviceCtx, { createSdk, warn });
-        deferredNames = names;
-        record(names, serviceCtx, { via: names.length ? 'tools-plugin-deferred' : 'tools-plugin-none' });
-        return false; // 不注册 disposer：工具随插件卸载由宿主管
-      });
-      return { name, registered: 0, deferred: true };
-    } catch (error) {
-      warn(ctx, `延迟注册登记失败（回退到"无工具面"）：${String(error?.message ?? error)}`);
-      void deferredNames;
-    }
-  }
+  // T388（2026-11-18）：**不再用 `ctx.inject(['tools'], …)` 等一个可能永远不来的服务**。
+  //
+  // 同一个事故：`web boot: 1 entry did not activate / dsh-gokifu-longmemory: failed`。
+  // `ctx.inject(deps, cb)` 会派生一个等待该服务的子插件；服务不来它就永远 PENDING，
+  // 宿主在 web 启动时按「未激活 entry」处理 ⇒ 整个 Web GUI 起不来。
+  // T375 原本想靠这条修「读不到 ctx.tools」，但它把「注册不上」升级成了「启动失败」——代价大得多。
+  // 现在：服务此刻在就已经在上面直接注册过；不在就如实记 none，绝不留等待中的子插件。
+  const servicePresent = Boolean(ctx && typeof ctx === 'object' && ctx.tools !== undefined);
+  if (servicePresent) warn(ctx, 'tools 服务存在但没有 register（宿主接口变了）');
 
   // 最后：如实记一条"没拿到工具面"的凭据（`names: []` 本身就是证据）
   record([], ctx);

@@ -1583,20 +1583,15 @@ export function apply(ctx, rawConfig = {}) {
     const ctxHasRegister = typeof ctx?.tools?.register === 'function';
     let names = registerMemoryTools(ctx, { createSdk, warn });
     let via = names.length ? 'direct' : 'none';
-    // 2026-11-04（重启后实测：凭据文件没出现 ⇒ 直接访问 ctx.tools 没拿到）：宿主可能要求先声明服务依赖。
-    // 与 webServer 同一条路子：ctx.inject(['tools'], host => …)。两条都试，结果如实写进凭据。
-    if (!names.length && typeof ctx?.inject === 'function') {
-      try {
-        ctx.inject(['tools'], (host) => {
-          const got = registerMemoryTools(host, { createSdk, warn });
-          if (storeRoot) recordToolRegistration(storeRoot, got, { host: 'dsh', via: 'inject', ctxHasRegister });
-        });
-        via = 'inject';
-      } catch (error) {
-        warn(ctx, `ctx.inject(['tools']) 失败：${String(error?.message ?? error)}`);
-        via = 'inject-failed';
-      }
-    }
+    // T388（2026-11-18）：**不再用 `ctx.inject(['tools'])` 去等一个可能永远不来的服务**。
+    //
+    // 真机事故 `crash-2026-11-09T19-46-33-220Z-web-boot.log`：
+    //   Error: web boot: 1 entry did not activate
+    //   dsh-gokifu-longmemory: failed
+    // `ctx.inject(deps, cb)` 在 Cordis 里等价于**派生一个等待这些服务的子插件**：服务不来，
+    // 子插件就一直 PENDING；宿主在 web 启动时统计"未激活的 entry"，**一个**就足以让整个 Web GUI 起不来。
+    // 现在：服务此刻在就已经在上面直接注册过；不在就如实记 none，绝不留下等待中的子插件。
+    if (!names.length) via = 'none';
     // 凭据**无论成没成都写**：文件里没有工具名本身就是"没注册上"的证据（否则只能靠猜）。
     if (storeRoot) recordToolRegistration(storeRoot, names, { host: 'dsh', via, ctxHasRegister });
   } catch (error) {
@@ -1605,9 +1600,12 @@ export function apply(ctx, rawConfig = {}) {
 
   // 设置页的读写接口（只在本机 webServer 上注册；没有该服务就跳过）。
   try {
-    if (typeof ctx?.inject === 'function') {
-      ctx.inject(['webServer'], (host) => {
-        if (typeof host?.webServer?.register !== 'function') return;
+    // T388：只有 `webServer` **此刻就在**才注册；不在就整段跳过。
+    // 旧写法 `ctx.inject(['webServer'], …)` 在没有该服务的组合里会留下一个永远 PENDING 的子插件，
+    // 宿主 web 启动时按"未激活 entry"处理 ⇒ 整个 Web GUI 起不来（事故日志见上面 tools 那段）。
+    if (typeof ctx?.webServer?.register === 'function') {
+      {
+        const host = ctx;
         host.webServer.register({
           kind: 'exact',
           path: CONFIG_ROUTE,
@@ -1636,7 +1634,7 @@ export function apply(ctx, rawConfig = {}) {
             });
           },
         });
-      });
+      }
     }
   } catch (error) {
     warn(ctx, `设置接口没注册上：${String(error?.message ?? error)}`);

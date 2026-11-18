@@ -17,6 +17,33 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.130（2026-11-18）
+
+### T388 · **修复**：`ctx.inject(...)` 留下 PENDING 子插件 ⇒ DSH web boot 整树起不来
+
+**版本说明**：改 `src/plugin.mjs` / `src/tools-plugin.mjs` 的**行为**（启动期不再派生子插件）⇒ 按 semver 应 minor；
+但 `v0.9.0` 被旧版本线占用 ⇒ 落 **patch**。
+
+**报错原文**（宿主崩溃日志 `crash-2026-11-09T19-46-33-220Z-web-boot.log`）：
+
+```
+Error: web boot: 1 entry did not activate
+dsh-gokifu-longmemory: failed
+```
+
+**根因**：`apply` 里用 `ctx.inject(['tools'], …)` / `ctx.inject(['webServer'], …)`。
+Cordis 的 `inject(deps, cb)` **等价于派生一个等待这些服务的子插件**；服务不来，子插件永远 PENDING，
+宿主在 web 启动阶段统计「未激活 entry」，**一个就足以让整个 Web GUI 起不来**。
+`cli.js` 宿主服务齐全所以看不出来，web 侧必然踩中；凭据里的 `via: "inject"` 就是这条路径的指纹。
+
+**修复**：服务**此刻就在**就直接注册（行为不变）；不在就跳过并如实记录，**不再派生子插件**。
+`src/tools-plugin.mjs` 里 T375 引入的延迟路径同样删除。
+
+**验证**：`test/t375-tools-deferred.test.mjs` 3/3（② 改为钉「无 tools 服务时 `injectCalls` 必须为 0」）；
+全量 1299 条 / 1293 通过 / 0 失败 / 6 跳过。证据 `evidence/T388-web-boot-entry-not-activated.md`。
+
+**边界**：不会再把 DSH 拖到起不来；但读不到 `ctx.tools` 时 `kifu_*` 仍注册不上（如实记 `via: none`）。
+
 ## 0.8.129（2026-11-10）
 
 ### T377 · rc1 验收探针收编进仓库，并在当前宿主上跑通
