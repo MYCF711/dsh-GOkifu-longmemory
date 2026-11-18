@@ -17,6 +17,30 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.138（2026-11-19）
+
+### T362 · 讲清两套 A2b 的口径差（`metrics-guard` 打印分母来源）
+
+**版本说明**：只改报表输出（不改判据阈值、不改产品行为）⇒ **patch**。
+
+`metrics-guard` 现在在 A2b 那一行下面多打一行**分母来源**：
+
+```
+主判据 · A2b 召回相关度（sampleSource=holdout，n=118）：严格=46.6% 覆盖=79.7%
+  分母来源：holdout 抽样（非全量）· 与 scripts/eval.mjs 的按签名口径不可比
+```
+
+两套口径的实测差值（2026-11-19）：
+
+| 口径 | 分母 | 读数 |
+|---|---|---|
+| `metrics-guard`（门禁） | holdout 抽样 **118** | 严格 46.6% / 覆盖 79.7% |
+| `scripts/eval.mjs`（趋势） | 按有失败签名筛，**231**（298 局里 67 局 signatures=0 被排除） | rate 22.02% / errorOnly 27.93% |
+
+**两者都对，但用途不同**：门禁看"有没有退化"，eval 看"时间趋势"。混着比会得出错误结论。
+
+证据 `evidence/T362-eval-stratification.md`。
+
 ## 0.8.137（2026-11-19）
 
 ### T360c · T360 收尾：66 个无 claim 根局里 **64 个是「没有可记的事」**
