@@ -234,7 +234,26 @@ export function estimateTokens(text) {
 
 /** 单侧最小可比较长度：CJK 2 字（"记忆"算词），ASCII 3 字（避免 `ls`/`sh` 这种噪声）。 */
 function minComparableLength(text) {
-  return /[^\x00-\x7f]/.test(text) ? 2 : 3;
+  // T376（2026-11-20）：改成 charCode 扫描 —— 这函数在 `matchTopics` 嵌套循环里被调用
+  // (主题数 × term 数) 次，正则开销直接进 A4（profile 实测该正则在热点里）。
+  for (let k = 0; k < text.length; k += 1) if (text.charCodeAt(k) > 0x7f) return 2;
+  return 3;
+}
+
+
+/** T376：复用正则（每次调用重新编译太贵）；`longer.split()` 结果按字符串缓存。 */
+const ASCII_WORD_RE = /^[a-z]+$/;
+const ASCII_TOKEN_RE = /^[a-z0-9][a-z0-9_.-]*$/;
+const NON_ALNUM_SPLIT_RE = /[^a-z0-9]+/;
+const SEGMENT_CACHE = new Map();
+const SEGMENT_CACHE_MAX = 4096;
+function segmentsOf(text) {
+  const hit = SEGMENT_CACHE.get(text);
+  if (hit !== undefined) return hit;
+  const segs = text.split(NON_ALNUM_SPLIT_RE);
+  if (SEGMENT_CACHE.size >= SEGMENT_CACHE_MAX) SEGMENT_CACHE.clear();
+  SEGMENT_CACHE.set(text, segs);
+  return segs;
 }
 
 /** 词面重叠（机械包含匹配，两侧都过最小长度闸，防通用短词满图乱连）。 */
@@ -261,7 +280,8 @@ function overlaps(needle, key) {
   // 真机实测：`hello there how are you` 命中 **99** 个主题（全是 repo 类）——
   // 因为 `are` ⊂ `lmy414/magpie-agent-tare`、`you`/`how` 之类同理。
   // 三个字母的英文虚词、两三个字母的缩写在任何长串里都会撞上，子串判定必须要求它们**完全相等**。
-  const asciiFuncWord = (v) => v.length <= 7 && /^[a-z]+$/.test(v) && ASCII_FUNC_WORDS.has(v);
+  // T376：先查长度与集合，再做正则（顺序反了这函数就是热点）
+  const asciiFuncWord = (v) => v.length >= 1 && v.length <= 7 && ASCII_FUNC_WORDS.has(v) && ASCII_WORD_RE.test(v);
   if (asciiFuncWord(x) || asciiFuncWord(y)) return x === y;
   // T394（2026-11-19）：**短标识符必须整词出现**，不许"钻"进长串中间。
   // 真机实测：`ui api db` 命中 **247** 个主题、`add a button` 命中 **33** 个（`add` ⊂ `add-account.test.mjs`）。
@@ -269,8 +289,8 @@ function overlaps(needle, key) {
   // 中文不走这条（中文没有分隔符，子串匹配本来就是对的；中文噪声由 T392 的停用词挡）。
   const shorter = x.length <= y.length ? x : y;
   const longer = x.length <= y.length ? y : x;
-  if (shorter.length <= 5 && /^[a-z0-9][a-z0-9_.-]*$/.test(shorter)) {
-    return longer.split(/[^a-z0-9]+/).includes(shorter);
+  if (shorter.length <= 5 && ASCII_TOKEN_RE.test(shorter)) {
+    return segmentsOf(longer).includes(shorter);
   }
   return x.includes(y) || y.includes(x);
 }
