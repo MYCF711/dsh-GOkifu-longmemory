@@ -12,6 +12,7 @@ const LIVE = [
 ].join(String.fromCharCode(10));
 
 const AUDIT_OK = [
+  '样本 26 张 · 引用 67 条 · A6 分母 65（= 引用 − unreadable 1 − unresolved 1 − pointer 0）',
   '样本 26 张 · 引用 67 条 · at-seq 67 · elsewhere 0 · missing 0 · joined 0 · 日期一致 67/67 （--current ⇒ 宿主 pid=4532）',
   '（引用层：可回溯 67/67（100.0%，弱判据）· 同作用域 67 · 跨作用域 0 · window=±10）',
 ].join(String.fromCharCode(10));
@@ -25,6 +26,14 @@ test('patrol: 心跳解析 —— gates-failed 在「原因」行（踩过：写
   assert.equal(s.inject, 12);
   assert.equal(s.skip, 88);
   assert.equal(s.gatesFailed, 3);
+});
+
+test('patrol: **A6 真分母必须被解析到**（T365b）—— 抓不到就会静默退回「引用数」，重现「四桶全 0 却 ok 3/4」的假矛盾', () => {
+  const a = parseAudit(AUDIT_OK);
+  assert.equal(a.a6Denominator, 65, '必须从「A6 分母 N」抓到真分母；抓不到 ⇒ null ⇒ 报表分母退回引用数');
+  // tombstone：把「A6 分母」那行从夹具里拿掉，解析结果必须是 null —— 证明这条断言真的靠它
+  const noDen = parseAudit(AUDIT_OK.split(String.fromCharCode(10)).filter((l) => !l.includes('A6 分母')).join(String.fromCharCode(10)));
+  assert.equal(noDen.a6Denominator, null);
 });
 
 test('patrol: 审计摘要解析 —— 七项都取到，pid 也取到', () => {
