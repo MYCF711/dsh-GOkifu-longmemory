@@ -634,7 +634,10 @@ export function measureA1Redundant({ dataRoot = null, now = Date.now(), sinceAt 
       unit: 'rate',
       n: 0,
       status: 'not-consumed',
-      caveat: '没给数据根（dataRoot=null）⇒ 读不到会话日志；会话级冗余只能从会话日志的 session.id+source.digest 算（live-stats 没有 session id），不写 0',
+      // T364（2026-11-19）：live-stats **从 0.8.140 起也带 `sid`**，所以旧注释那句已过期。
+      // 主口径仍是会话日志（能拿到 source.digest 与 session.id 的原始对，更完整）；
+      // live-stats 可用于近期窗口的交叉核验；历史行没有 sid ⇒ 按 scope 回放只能得到上界，不硬造数。
+      caveat: '没给数据根（dataRoot=null）⇒ 读不到会话日志；主口径仍是会话日志的 session.id+source.digest（live-stats 自 0.8.140 起也带 sid，可作近期窗口交叉核验；历史行无 sid ⇒ 按 scope 回放只是上界）',
       detail: { ...baseDetail, powered: false, missingDataRoot: true },
     });
   }
