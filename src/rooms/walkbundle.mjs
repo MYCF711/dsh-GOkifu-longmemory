@@ -21,6 +21,17 @@ export const KIND_BUNDLE_VERSION = 1;
 export const WALK_BUNDLE_KINDS = Object.freeze(['topics', 'episodes', 'links', 'claims']);
 export const KIND_BUNDLE_DIR = '.cache';
 
+// T374（2026-11-19）：**episodes 的精简 bundle**。
+// 为什么：episodes.bundle.json 真库 51MB（单条 10KB，大头是 `closure` 的 nodeIds/edgeIds 数组）。
+// 热路径（kifu_stats / kifu_recent_failures）只需要少量字段，却要整份解析 51MB ⇒ A4 p50 从 15ms 涨到 50ms+。
+// 做法：写全量 bundle 时**顺带**写一份只含热字段的 `<kind>.slim.json`（同 stamp），
+// 读侧要 slim 就优先读它；读不到再回落到全量并在内存里投影（绝不因此改变读数）。
+export const SLIM_FIELDS = Object.freeze({
+  episodes: Object.freeze(['id', 'sessionId', 'scopeKey', 'startedAt', 'endedAt', 'firstEventAt', 'lastEventAt', 'signals', 'state', 'delegationDepth', '_store']),
+});
+
+const slimFile = (storeRoot, kind) => path.join(String(storeRoot ?? ''), KIND_BUNDLE_DIR, `${kind}.slim.json`);
+
 const bundleFile = (storeRoot, kind) => path.join(String(storeRoot ?? ''), KIND_BUNDLE_DIR, `${kind}.bundle.json`);
 
 /** 该 kind 的失效判据（1 次 stat + 1 次 readdir）。没有 manifest ⇒ null（不启用）。 */
@@ -65,6 +76,22 @@ export function writeKindBundle(storeRoot, kind, records, { stamp = kindBundleSt
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify({ version: KIND_BUNDLE_VERSION, kind, stamp, records }), 'utf8');
     fs.renameSync(tmp, file);
+    // T374：顺带写精简版（只有定义了 SLIM_FIELDS 的 kind）。失败不影响全量 bundle。
+    const slimFields = SLIM_FIELDS[kind];
+    if (slimFields) {
+      try {
+        const slim = records.map((r) => {
+          if (!r || typeof r !== 'object') return r;
+          const out = {};
+          for (const f of slimFields) if (r[f] !== undefined) out[f] = r[f];
+          return out;
+        });
+        const slimPath = slimFile(storeRoot, kind);
+        const slimTmp = `${slimPath}.${process.pid}.tmp`;
+        fs.writeFileSync(slimTmp, JSON.stringify({ version: KIND_BUNDLE_VERSION, kind, slim: true, stamp, records: slim }), 'utf8');
+        fs.renameSync(slimTmp, slimPath);
+      } catch { /* slim 写失败就随它：读侧会回落到全量 */ }
+    }
     return true;
   } catch {
     try { fs.rmSync(tmp, { force: true }); } catch { /* 清理失败就随它 */ }
@@ -115,8 +142,41 @@ function scheduleMemoSweep() {
 }
 
 /** 读 bundle 的**带 memo** 版本（stamp 一致且未过期 ⇒ 直接返回内存数组）。 */
-export function readKindBundleCached(storeRoot, kind, { stamp = kindBundleStamp(storeRoot, kind), now = Date.now() } = {}) {
+/** 读精简 bundle（stamp 必须一致；否则返回 null 让调用方回落全量）。 */
+export function readSlimBundle(storeRoot, kind, { stamp = kindBundleStamp(storeRoot, kind) } = {}) {
   if (!stamp) return null;
+  try {
+    const raw = fs.readFileSync(slimFile(storeRoot, kind), 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== KIND_BUNDLE_VERSION || parsed.kind !== kind || parsed.stamp !== stamp) return null;
+    if (!Array.isArray(parsed.records)) return null;
+    return parsed.records;
+  } catch { return null; }
+}
+
+export function readKindBundleCached(storeRoot, kind, { stamp = kindBundleStamp(storeRoot, kind), now = Date.now(), slim = false } = {}) {
+  if (!stamp) return null;
+  // T374：要 slim 且该 kind 有 slim 定义 ⇒ 先读精简文件（小得多，解析快）。
+  //   · 没有 slim 文件 / stamp 不匹配 ⇒ 回落全量，**在内存里投影**成精简形状（读数不变，只是慢）。
+  if (slim && SLIM_FIELDS[kind]) {
+    const project = (records) => records.map((r) => {
+      if (!r || typeof r !== 'object') return r;
+      const out = {};
+      for (const f of SLIM_FIELDS[kind]) if (r[f] !== undefined) out[f] = r[f];
+      return out;
+    });
+    const slimKey = `${storeRoot}|${kind}|slim`;
+    const slimHit = KIND_MEMO.get(slimKey);
+    if (slimHit && slimHit.stamp === stamp && (now - slimHit.at) < KIND_MEMO_MS) return slimHit.records;
+    const slimRecords = readSlimBundle(storeRoot, kind, { stamp });
+    if (slimRecords) { KIND_MEMO.set(slimKey, { stamp, records: slimRecords, at: now }); scheduleMemoSweep(); return slimRecords; }
+    const full = readKindBundleCached(storeRoot, kind, { stamp, now });
+    if (!full) return null;
+    const projected = project(full);
+    KIND_MEMO.set(slimKey, { stamp, records: projected, at: now });
+    scheduleMemoSweep();
+    return projected;
+  }
   const key = `${storeRoot}|${kind}`;
   const hit = KIND_MEMO.get(key);
   if (hit && hit.stamp === stamp && (now - hit.at) < KIND_MEMO_MS) return hit.records;

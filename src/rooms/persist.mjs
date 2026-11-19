@@ -866,7 +866,8 @@ export function createStore(opts = {}) {
     // T62：bundle 命中就直接返回（真库 6.9 秒 → 不到 1 秒）。只在**生产 store** 上启用。
     const bundleOn = useBundle && !listOpts.strict && WALK_BUNDLE_KINDS.includes(kind);
     if (bundleOn) {
-      const hit = readKindBundleCached(root, kind);
+      // T374：`slim: true` ⇒ 只读精简字段（热路径用：stats / recent_failures 不需要 closure 数组）。
+      const hit = readKindBundleCached(root, kind, { slim: listOpts.slim === true });
       if (hit) return hit.map((record) => ({ id: record?.id ?? null, path: `${kind}/${record?.id ?? ''}.json`, record }));
     }
     const dir = path.join(root, kind);
