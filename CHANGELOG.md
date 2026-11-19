@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.145（2026-11-19）
+
+### T368 · 钉住 `a6Denominator` 的解析（抓不到就静默退回错分母）
+
+**版本说明**：只加测试 ⇒ **patch**。
+
+T365b 修了「`ok 3/4` 而四桶全 0」的假矛盾，靠的是 `patrol.mjs` 从审计 stdout 里正则抓 `A6 分母 N`。
+**但这行字一改，patrol 就会静默退回「引用数」当分母** —— 假矛盾立刻复发，而且没有任何测试会响。
+
+本轮补上断言 + tombstone：
+
+```js
+assert.equal(parseAudit(AUDIT_OK).a6Denominator, 65);   // 必须抓到真分母
+assert.equal(parseAudit(去掉那行的同样文本).a6Denominator, null);  // 证明它真的靠那一行
+```
+
+**红灯验证（真做了一次）**：把 `scripts/patrol.mjs` 里 `a6Denominator: num(/A6 分母 (\d+)/)` 删掉 ⇒
+本断言 **变红（18/19）**；恢复后 19/19。
+
 ## 0.8.144（2026-11-19）
 
 ### T367 · 给 T364 的 `sid` 补 tombstone（删掉 `sid` ⇒ 测试红）
