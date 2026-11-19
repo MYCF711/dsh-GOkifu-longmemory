@@ -49,7 +49,14 @@ export function renderSection(index) {
 const isMain = process.argv[1] && process.argv[1].endsWith('plan-dupe-index.mjs');
 if (isMain) {
   const file = path.resolve(FILE);
-  const text = fs.readFileSync(file, 'utf8');
+  const raw = fs.readFileSync(file, 'utf8');
+  // T375（2026-11-19）：**先把自己那份索引剥掉再统计**。
+  // 否则索引表格里的 `| T188 | 225 | ...` 这些行会被当成计划表正文一起计数，
+  // 于是每跑一次 `--write`，行数就虚增一轮（实测累计到 396，而正文只有 312）——
+  // 这正是"重号索引"该防的漂移，却由它自己制造。
+  const b = raw.indexOf(BEGIN);
+  const e = raw.indexOf(END);
+  const text = (b !== -1 && e !== -1) ? (raw.slice(0, b) + raw.slice(e + END.length)) : raw;
   const index = buildIndex(text);
   const section = renderSection(index);
   if (process.argv.includes('--write')) {
