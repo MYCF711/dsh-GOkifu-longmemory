@@ -19,6 +19,22 @@
 
 ## 0.8.149（2026-11-19）
 
+### T374 · episodes 精简 bundle：**51MB → 2.5MB**（热路径不再整份解析）
+
+**做了什么**：`episodes.bundle.json` 真库 51MB（单条 10KB，大头是 `closure` 的 nodeIds/edgeIds 数组）。
+写全量 bundle 时**顺带**写一份只含热字段的 `<kind>.slim.json`（同 stamp），
+`store.list(kind, {slim:true})` 优先读它；读不到则回落全量并在内存里投影（**读数不变**，只是慢）。
+
+热字段：`id / sessionId / scopeKey / startedAt / endedAt / firstEventAt / lastEventAt / signals / state / delegationDepth / _store`。
+
+实测：`episodes.slim.json` **2,532,415 字节** vs 全量 **50,979,399 字节**（**20 倍**）。
+`kifu_stats` 改用 slim（它只需要 `endedAt` 这类轻字段）。
+
+**诚实边界**：A4 p50 没有因此立刻回落 —— 注入热路径读的是 `topics / claims / links` 三个 bundle
+（3.7MB / 10.4MB / 10.9MB），不是 episodes。本次只解决了「stats 类查询拖整份 51MB」这一块，
+**下一个目标就是那三个**。A4 现读数在 44–56ms 间波动（门槛 50ms），属**临界**。
+
+
 ### T369 · `renderSummary` 抽出来，用测试**逐字**钉住「分母来源 … 不可比」
 
 **版本说明**：`metrics-guard` 的汇总输出从内联 `console.log` 抽成导出函数 `renderSummary(out, verdict)`

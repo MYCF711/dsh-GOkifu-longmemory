@@ -169,10 +169,11 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
     return cache;
   };
 
-  const listSafe = (kind) => {
+  // T374：`slim:true` ⇒ 只要精简字段（热路径用；避免整份解析 51MB 的 episodes bundle）。
+  const listSafe = (kind, opts = {}) => {
     const st = ensure();
     if (!st) return [];
-    try { return st.list(kind).map((x) => x?.record).filter(Boolean); } catch (error) {
+    try { return st.list(kind, opts.slim ? { slim: true } : undefined).map((x) => x?.record).filter(Boolean); } catch (error) {
       if (error instanceof SdkError) throw error;
       throw new SdkError('store-unreadable', `列 ${kind} 失败：${String(error?.message ?? error)}`);
     }
@@ -265,7 +266,8 @@ export function createMemorySdk({ dshHome = null, scope = null, now = null } = {
       const rawCounts = st ? st.counts() : {};
       const counts = {};
       for (const kind of KINDS) counts[kind] = Number(rawCounts[kind] ?? 0);
-      const episodes = listSafe('episodes');
+      // 只要 endedAt / counters 这类轻字段 ⇒ slim（不解析 closure 数组）
+      const episodes = listSafe('episodes', { slim: true });
       const claims = listSafe('claims');
       const maxOf = (records, key) => records.reduce((acc, r) => (Number.isFinite(r?.[key]) && r[key] > acc ? r[key] : acc), 0);
       const n = Object.values(counts).reduce((a, b) => a + b, 0);
