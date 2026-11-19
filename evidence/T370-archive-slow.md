@@ -122,3 +122,28 @@ node --test "test/*.test.mjs"      → 1304 / 1298 通过 / 0 失败 / 6 跳过
 判据：连跑两次，第二次 **≤ 5 秒**；第三次再跑仍 ≤5 秒且 manifest 逐字节不变。
 再进一步：把两次 `deriveStore` 合并成一次（若第二次只是校验，可换成抽样校验）。
 
+
+---
+
+## 八、零变更早退试过了：**在真实环境不触发**（宿主一直在写会话）
+
+想法：`--incremental` 且一个会话都没选中时，直接跳过 derive/写盘/verify。
+
+实测：`timeout 900 node scripts/archive.mjs --incremental --json` **仍然超时（exit 124）** ——
+因为**宿主进程一直在写新会话**，`pairList` 几乎不可能为 0（总有几条 log/graph 的 mtime 刚变过）。
+
+⇒ 这条路只在"机器完全空闲"时有效，**不是可依赖的修复**，已回滚。
+
+## 九、真正的结构问题：`deriveStore` 不管变几个会话，都全量重算
+
+```
+scripts/archive.mjs  line 742  deriveStore({ episodes })   ← 全量重建 topics/links/threads/index
+scripts/archive.mjs  line 842  deriveStore({ episodes })   ← 写完再算一遍做校验（同一份输入）
+```
+
+4489 个 episode 的派生数据每次重建两遍 —— 这才是"归档跑不完"的主因。
+
+**正确方向**（下一刀，工作量较大）：
+1. 派生只针对**受影响的 episode 子集**重算，其余沿用已有记录；
+2. 第二次 `deriveStore` 若只是校验，换成**抽样校验**或直接省掉（幂等已有测试兜底）；
+3. 判据：1 个新会话入档时，全链 ≤60 秒；连跑两次第二次 ≤60 秒且 manifest 不变。
