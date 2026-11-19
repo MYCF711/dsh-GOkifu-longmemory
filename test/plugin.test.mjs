@@ -408,6 +408,11 @@ test('T52: 被 oncePerSession 拦下时留一条墓碑行（否则"被限流静�
     assert.equal(tombstones[0].kind, 'pre-step');
     const injects = rows.filter((r) => r.action === 'inject');
     assert.equal(injects.length, 1, '第一次的心跳照旧');
+    // T364 tombstone：**注入行必须带 `sid`**。
+    // 没有它，A1.redundant 只能按 scope 判 ⇒ 把「跨会话必要重注」与「同会话浪费」混算
+    // （回放实测 430 次 / 23.86% 是上界，真值不可判）。删掉 plugin 里的 `sid: sessionId ?? null` ⇒ 本条红。
+    assert.equal(typeof injects[0].sid === 'string' && injects[0].sid.length > 0, true,
+      'pre-step 注入行必须带会话 id，否则 A1.redundant 不可判');
   } finally {
     cleanup();
   }
