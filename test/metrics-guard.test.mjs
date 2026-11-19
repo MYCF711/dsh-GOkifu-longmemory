@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { HOLDOUT_BASELINE, judge, loadHoldout } from '../scripts/metrics-guard.mjs';
+import { HOLDOUT_BASELINE, judge, loadHoldout, renderSummary } from '../scripts/metrics-guard.mjs';
 
 const base = () => ({
   axes: {
@@ -10,6 +10,30 @@ const base = () => ({
     A6: { value: 1 },
     A2: { detail: { injectionRecall: { recall: 1, recallSpecific: 0.842 } } },
   },
+});
+
+test('T369: 汇总输出里**必须有**「分母来源 … 不可比」这行（删掉即红）', () => {
+  // 这条钉住的是"口径说明不许悄悄消失"：T362 加的那行如果被删/改写，
+  // 下一个人会再次拿 metrics-guard 的 46.6% 和 eval.mjs 的 22.02% 直接比。
+  const out = {
+    values: {
+      sampleSource: 'holdout', a2bN: 118, a2bStrict: 0.466, a2bCover: 0.797,
+      a1: 0, a1Vacuous: false, a5: 0, a6: 1, p50: 22.8,
+      a1Opposite: 0, a1OppositeDecidability: 0.2245, a1OppositeN: 1586, a1OppositeDecisionGrade: false,
+      a1Redundant: null, a1RedundantNecessary: null, a1RedundantN: null, a1RedundantPowered: false,
+      repeatFailureRate: 0.146,
+    },
+  };
+  const lines = renderSummary(out, { ok: true, fails: [] });
+  const joined = lines.join(String.fromCharCode(10));
+  // **逐字**断言，不是 includes：改写措辞也要让人知道（改口径说明必须是有意为之）
+  const denom = lines.find((l) => l.includes('分母来源'));
+  assert.ok(denom, '必须打印分母来源');
+  assert.equal(denom,
+    '    分母来源：holdout 抽样（非全量）· 与 scripts/eval.mjs 的按签名口径**不可比**（详见 evidence/T362-eval-stratification.md）',
+    '分母来源那行的措辞变了（改口径说明必须是有意为之，不能顺手改）');
+  assert.equal(lines[0], 'metrics-guard PASS');
+  assert.equal(lines.length, 7, '汇总行数固定；加行/删行都要让这条红（避免悄悄改输出契约）');
 });
 
 test('metrics-guard: 全部达标 ⇒ PASS', () => {
