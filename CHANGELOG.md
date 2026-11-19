@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.144（2026-11-19）
+
+### T367 · 给 T364 的 `sid` 补 tombstone（删掉 `sid` ⇒ 测试红）
+
+**版本说明**：只加测试断言 ⇒ **patch**。
+
+T364 给 pre-step 的 live-stats 行加了 `sid`，但**没有测试盯着它**——
+按本仓纪律（每个房间要有 tombstone），补上：
+
+```js
+assert.equal(typeof injects[0].sid === 'string' && injects[0].sid.length > 0, true,
+  'pre-step 注入行必须带会话 id，否则 A1.redundant 不可判');
+```
+
+**红灯验证（真做了一次）**：把 `src/plugin.mjs` 里的 `sid: sessionId ?? null,` 删掉后跑测试 ⇒
+`T52: 被 oncePerSession 拦下时留一条墓碑行` **变红（85/86）**，恢复后 86/86。
+说明这条断言真的挂在线上路径上，不是自己跟自己过。
+
+**全量**：1302 条 / 1296 通过 / 0 失败 / 6 跳过。
+
 ## 0.8.143（2026-11-19）
 
 ### T366 · A1.redundant 的 caveat 已过期：live-stats 自 0.8.140 起**也带 `sid`**
