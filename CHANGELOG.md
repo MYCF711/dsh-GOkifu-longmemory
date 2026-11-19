@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.148（2026-11-19）
+
+### T370b · **更正**：增量归档只省了读，真跑仍 >900 秒（瓶颈是 deriveStore）
+
+**版本说明**：只更正 evidence + CHANGELOG 的说法（无代码改动）⇒ **patch**。
+
+上一版（0.8.147）写的「读+算 216 秒 → 14.7 秒」**只对 `--dry-run` 成立**。真跑实测：
+
+| 跑法 | 处理会话 | 耗时 |
+|---|---|---|
+| `--incremental --dry-run` | 119 | 14.7 秒 |
+| `--incremental` 真跑（有变更） | 125 | **760 秒** |
+| `--incremental` 真跑（**零变更**） | 0 | **>900 秒（超时）** |
+
+**零变更也要 900 秒** ⇒ 瓶颈不在读日志，而在 `deriveStore()` **被调用两次**、每次都基于全部 4489 个 episode
+重建 topics/links/threads/index，再加 diff + 写盘 + verify。
+
+**下一步**：零变更早退（`plannedDiff` 全 0 ⇒ 跳过 derive/写盘/verify），判据「连跑两次第二次 ≤5 秒且 manifest 不变」。
+
 ## 0.8.147（2026-11-19）
 
 ### T370 · **增量归档**：读+算 216 秒 → **14.7 秒**（默认关，`--incremental` 开）
