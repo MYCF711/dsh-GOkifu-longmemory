@@ -390,6 +390,7 @@ export async function runArchive(opts = {}) {
   const storeRoot = path.resolve(opts.storeRoot ?? path.join(dataRoot, 'memory-context'));
   const dryRun = Boolean(opts.dryRun);
   const includeSubagents = Boolean(opts.includeSubagents);
+  const incrementalOpt = Boolean(opts.incremental);
   const sessionPrefix = typeof opts.sessionPrefix === 'string' && opts.sessionPrefix !== '' ? opts.sessionPrefix : null;
 
   if (!opts.dataRoot && !process.env.DSH_HOME) {
@@ -422,12 +423,50 @@ export async function runArchive(opts = {}) {
   }
   pairs.sort((a, b) => (a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0));
 
+  // ---- 1b. 增量筛选（T370，默认关：--incremental 才开） ----
+  // 为什么：归档每次都把 4586 个日志 / 338 万事件从头解一遍（dry-run 实测 206 秒，全量 >900 秒）。
+  // 会话只增不减 ⇒ 成本线性增长。这里按「log/graph 的 mtime + 字节数」做水位：
+  //   - 与上次归档时**完全一致**，且库里**已有该局的 episode** ⇒ 跳过；
+  //   - 任何一项对不上（或无 episode）⇒ 照常重算（宁可慢一点，不漏档）。
+  const incremental = incrementalOpt;
+  const watermarkPath = path.join(storeRoot, 'archive-watermark.json');
+  let watermark = { version: 1, sessions: {} };
+  if (incremental) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(watermarkPath, 'utf8'));
+      if (raw && raw.version === 1 && raw.sessions && typeof raw.sessions === 'object') watermark = raw;
+    } catch { /* 没有水位 = 第一次跑，全量 */ }
+  }
+  let skippedIncremental = 0;
+  let pairList = pairs;
+  if (incremental) {
+    const archived = new Set();
+    // 注意：**不能**用后面的 `store` 常量 —— 它在这之后才初始化（TDZ），
+    // 访问会抛 ReferenceError 并被 catch 吞掉，于是 archived 恒为空、一条都跳不掉
+    // （2026-11-19 实测踩过：看起来"跑了增量"，实际全量重算了 4601 局）。
+    try {
+      const storeForWatermark = createStore({ root: storeRoot });
+      for (const entry of storeForWatermark.list('episodes')) if (entry.record?.sessionId) archived.add(entry.record.sessionId);
+    } catch { /* 读不到就当没有 */ }
+    pairList = pairs.filter((p) => {
+      const w = watermark.sessions[p.sessionId];
+      if (!w) return true;
+      if (!archived.has(p.sessionId)) return true;
+      const log = logs.find((l) => l.sessionId === p.sessionId);
+      const graph = graphBySession.get(p.sessionId) ?? null;
+      const logSame = !log || (w.logMtimeMs === log.mtimeMs && w.logBytes === log.bytes);
+      const graphSame = !graph || (w.graphMtimeMs === graph.mtimeMs && w.graphBytes === graph.bytes);
+      if (logSame && graphSame) { skippedIncremental += 1; return false; }
+      return true;
+    });
+  }
+
   // ---- 2. 逐局：读 → 棋谱 → 主题 → 信号（只读上游） ----
   const built = [];
-  const readStats = { total: pairs.length, headers: 0, eventsParsed: 0, truncated: 0, badLines: 0, noLog: 0, unreadable: 0 };
+  const readStats = { total: pairList.length, incrementalSkipped: skippedIncremental, headers: 0, eventsParsed: 0, truncated: 0, badLines: 0, noLog: 0, unreadable: 0 };
   const graphStats = { total: graphs.length, loaded: 0, failed: 0, nodes: 0, edges: 0, deltaFrames: 0, truncated: 0 };
 
-  for (const pair of pairs) {
+  for (const pair of pairList) {
     let header = null;
     let events = [];
     let truncated = false;
@@ -703,6 +742,24 @@ export async function runArchive(opts = {}) {
   const derived = await deriveStore({ episodes, derive: opts.derive ?? null, at: now });
   for (const note of derived.skipped) skipped.push(note);
 
+  // T370：写增量水位（只写非 dry-run）。记录**本次参与归档**的每个会话的 log/graph 指纹。
+  if (!dryRun && incremental) {
+    try {
+      const sessions = {};
+      for (const p of pairList) {
+        const log = logs.find((l) => l.sessionId === p.sessionId) ?? null;
+        const graph = graphBySession.get(p.sessionId) ?? null;
+        sessions[p.sessionId] = {
+          logMtimeMs: log?.mtimeMs ?? 0,
+          logBytes: log?.bytes ?? 0,
+          graphMtimeMs: graph?.mtimeMs ?? 0,
+          graphBytes: graph?.bytes ?? 0,
+        };
+      }
+      fs.writeFileSync(watermarkPath, JSON.stringify({ version: 1, updatedAt: new Date(now).toISOString(), sessions }, null, 2) + String.fromCharCode(10));
+    } catch { /* 水位写失败不影响归档结果，下次会全量 */ }
+  }
+
   const store = createStore({ root: storeRoot, user: opts.user ?? 'owner' });
   const summary = {
     dryRun,
@@ -711,7 +768,8 @@ export async function runArchive(opts = {}) {
     elapsedMs: 0,
     logs: {
       total: logs.length,
-      sessions: pairs.length,
+      sessions: pairList.length,
+      incrementalSkipped: readStats.incrementalSkipped,
       headers: readStats.headers,
       events: readStats.eventsParsed,
       truncated: readStats.truncated,
@@ -909,6 +967,7 @@ export async function runCli(argv = []) {
       storeRoot: flags.store ? path.resolve(flags.store) : path.join(dataRoot, 'memory-context'),
       dryRun: Boolean(flags.dryRun),
       includeSubagents: Boolean(flags.includeSubagents),
+      incremental: Boolean(flags.incremental),
       sessionPrefix: flags.session ?? null,
     });
     const stdout = flags.json ? JSON.stringify(summary, null, 2) : formatSummary(summary);

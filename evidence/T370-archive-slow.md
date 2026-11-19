@@ -54,3 +54,43 @@ elapsedMs       206005
 我之前在 T360 evidence 里写「子代理归并只写在文档、代码未实现」**说过头了**：
 准确说法是「**episode 层的 folded-into 有实现；claim 层没有把子代理的失败并进父局**」。
 那不影响当时的结论（归并的覆盖率收益实测为 0），但结论的措辞要更正。
+
+---
+
+## 五、增量归档已实现（`--incremental`）——实测 216 秒 → **14.7 秒**
+
+### 实现
+
+1. `src/rooms/cli.mjs`：`listSessionLogs` / `listGraphs` 增加 `mtimeMs`（只比 bytes 不够：重写可能等长）。
+2. `scripts/archive.mjs`：新增 `--incremental`（**默认关**，行为不变）：
+   - 水位文件 `<storeRoot>/archive-watermark.json`，记录每个会话的「log mtime+bytes / graph mtime+bytes」；
+   - 跳过条件：**四项指纹全等** 且 **库里已有该局的 episode**；
+   - 任何一项对不上（或无 episode）⇒ 照常重算（宁可慢，不漏档）；
+   - 只在非 dry-run 时写水位。
+
+### 实测（同一命令对比）
+
+| 跑法 | 事件数 | 耗时 |
+|---|---|---|
+| `runArchive({dryRun:true})`（全量） | 3,440,859 | **216,591 ms** |
+| `runArchive({dryRun:true, incremental:true})` | **149,904**（−95.6%） | **14,774 ms**（−93.2%） |
+
+处理会话数：4601 → **119**（跳过 4482）。
+
+### 踩到的坑（值得记）
+
+第一版把 `store` 用在它自己的声明之前（TDZ）⇒ 访问抛 `ReferenceError` 被 `catch` 吞掉 ⇒
+`archived` 恒为空 ⇒ **一条都跳不掉，看起来"跑了增量"其实全量重算了 4601 局**。
+教训：**catch 里的静默失败会让"优化没生效"伪装成"优化生效了"**。已改为在筛选块内单独 `createStore`，并把这个坑写进代码注释。
+
+### 门禁
+
+```
+node --test test/archive.test.mjs  → 11/11（含新增的 --incremental 解析断言）
+node --test "test/*.test.mjs"      → 1304 / 1298 通过 / 0 失败 / 6 跳过
+```
+
+### 还没做的（下一步）
+
+- 全量归档（含写盘）仍会慢：本次只优化了**读+算**这段；写盘段（15750 条 diff）未动。
+- 默认关：等 `--incremental` 再跑几次确认不漏档，再考虑翻默认。

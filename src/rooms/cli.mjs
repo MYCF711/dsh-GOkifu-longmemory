@@ -133,6 +133,8 @@ export function listSessionLogs(root) {
       sessionId: sessionDir,
       scope: path.basename(path.dirname(path.dirname(p))),
       bytes: safeSize(p),
+      // T370：mtime 是**增量归档**的变更信号（只比 bytes 不够：gzip 重写可能等长）
+      mtimeMs: safeMtime(p),
     };
   }).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
@@ -149,6 +151,7 @@ export function listGraphs(root) {
       graphPath,
       deltaPath: path.join(dir, 'graph.json.delta.jsonl'),
       bytes: safeSize(graphPath),
+      mtimeMs: safeMtime(graphPath),
     });
   }
   return out.sort((a, b) => (a.sessionId < b.sessionId ? -1 : 1));
@@ -156,6 +159,12 @@ export function listGraphs(root) {
 
 function safeSize(p) {
   try { return fs.statSync(p).size; } catch { return 0; }
+}
+
+// T370：文件修改时间（毫秒）。读不到就返回 0 —— 让调用方把该文件当作"需要重算"，
+// 而不是当成"没变化"（fail-open 到重算，宁可慢一点也不漏档）。
+function safeMtime(p) {
+  try { return fs.statSync(p).mtimeMs; } catch { return 0; }
 }
 
 function safeReadDir(dir) {

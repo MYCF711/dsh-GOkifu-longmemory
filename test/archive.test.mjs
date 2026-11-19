@@ -190,6 +190,11 @@ test.after(() => {
 // 1 · 首次入档
 // ---------------------------------------------------------------------------
 
+test('T370: --incremental 被解析（默认关，flag 才开）', () => {
+  assert.equal(parseArgs(['--incremental']).flags.incremental, true);
+  assert.equal(parseArgs([]).flags.incremental, undefined);
+});
+
 test('archive: 首次入档 —— 只读上游、写 sidecar、manifest 可校验', async () => {
   const before = hashTree(path.join(fixture.root, 'sessions')) + hashTree(path.join(fixture.root, 'chess-context'));
 
