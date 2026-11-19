@@ -387,7 +387,31 @@ const GENERIC_TIME_KEYS = new Set([
   '有时', '偶尔', '经常', '通常', '还行', '不错', '好吧',
 ]);
 
-export function matchTopics({ signal, topics = [], index = null } = {}) {
+/**
+ * T381：从 gram/len 索引里取「可能与 `needle` 重叠」的主题候选（**超集**，不是判定）。
+ * 只用于剪枝 —— 真正的判定仍然是 `overlaps`，所以不会改变任何结果。
+ */
+function overlapCandidates(needleRaw, { gramIndex, lenIndex }) {
+  if (!(gramIndex instanceof Map) || !(lenIndex instanceof Map)) return null;
+  const needle = String(needleRaw ?? '').toLowerCase();
+  if (needle === '') return null;
+  const out = new Set();
+  // ① needle ⊂ key ⇒ key 必含 needle 的每个 2-gram
+  let bucket = null;
+  let missing = false;
+  for (let i = 0; i + 1 < needle.length; i += 1) {
+    const hit = gramIndex.get(needle.slice(i, i + 2));
+    if (!hit) { missing = true; break; }
+    if (bucket === null) bucket = new Set(hit);
+    else for (const t of [...bucket]) if (!hit.includes(t)) bucket.delete(t);
+  }
+  if (!missing && bucket) for (const t of bucket) out.add(t);
+  // ② key ⊂ needle ⇒ key 的长度 ≤ needle 长度
+  for (const [len, arr] of lenIndex) if (len <= needle.length) for (const t of arr) out.add(t);
+  return out;
+}
+
+export function matchTopics({ signal, topics = [], index = null, prune = null } = {}) {
   const sig = normalizeSignal(signal);
   // T392（2026-11-19）：**命中面收窄** —— 通用时间/寒暄词不参与主题匹配。
   // 真库实测：「今天天气不错」原样命中主题 `今天`（历史抽取把通用时间词收进了 topics），
@@ -424,7 +448,25 @@ export function matchTopics({ signal, topics = [], index = null } = {}) {
   // 这里只做**纯缓存**，不改任何判定分支：`entityLower[i]` / `termLower[i]` 与原来的就地转换完全等价。
   const entityLower = sig.entities.map((e) => String(e.key ?? '').toLowerCase());
   const termLower = sig.terms.map((t) => String(t).toLowerCase());
-  for (const topic of list) {
+  // T381：`prune` 给了 gram/len 索引 ⇒ 只遍历「可能重叠」的候选（超集），判定仍走 `overlaps`。
+  // 没给（旧调用方/测试）⇒ 行为与以前**逐字节相同**（全表遍历）。
+  const pruneOn = prune && prune.gramIndex instanceof Map && prune.lenIndex instanceof Map;
+  const candidateCache = pruneOn ? new Map() : null;
+  const iterList = (() => {
+    if (!pruneOn) return list;
+    const keep = new Set();
+    for (const e of sig.entities) {
+      const c = overlapCandidates(e.key, prune);
+      if (c) for (const t of c) keep.add(t);
+    }
+    for (const te of sig.terms) {
+      const c = overlapCandidates(te, prune);
+      if (c) for (const t of c) keep.add(t);
+    }
+    // 精确键命中的主题已由 index 处理；其余候选才需要走 overlaps
+    return list.filter((t) => keep.has(t));
+  })();
+  for (const topic of iterList) {
     if (seenExact.has(topic.id)) continue;
     const topicKey = String(topic.key ?? '').toLowerCase();
     for (let ei = 0; ei < sig.entities.length; ei += 1) {
@@ -710,6 +752,31 @@ export function createWalkCache(store, { records = null } = {}) {
     if (!topicsByKey.has(k)) topicsByKey.set(k, []);
     topicsByKey.get(k).push(t);
   }
+  // T381（2026-11-20）：**给 `overlaps` 的候选剪枝建索引**（与 cache 同生命周期，不随查询变）。
+  //
+  // 现状：`matchTopics` 对全表主题逐个试每个 term（真库 13212 主题 × 数十 term）。
+  // `overlaps(a,b)` 的真假只可能是两种情形之一：
+  //   ① `a ⊂ b`（term 被主题键包含）⇒ **b 必然含 a 的每个 2-gram** ⇒ 用 gram 倒排取候选；
+  //   ② `b ⊂ a`（主题键被 term 包含）⇒ **b 的长度必然 ≤ a** ⇒ 用按长度分桶取候选。
+  // 两种都只是"**超集**"（宁可多给候选，绝不漏），真正判定仍走原来的 `overlaps` ⇒ **语义完全不变**。
+  const topicsByGram = new Map();   // 2-gram -> topic[]
+  const topicsByLen = new Map();    // key 长度 -> topic[]
+  const gramsOf = (key) => {
+    const out = [];
+    for (let i = 0; i + 1 < key.length; i += 1) out.push(key.slice(i, i + 2));
+    return out;
+  };
+  for (const t of topics) {
+    if (!t || typeof t.key !== 'string' || t.key === '') continue;
+    const k = t.key.toLowerCase();
+    const len = k.length;
+    if (!topicsByLen.has(len)) topicsByLen.set(len, []);
+    topicsByLen.get(len).push(t);
+    for (const g of new Set(gramsOf(k))) {
+      if (!topicsByGram.has(g)) topicsByGram.set(g, []);
+      topicsByGram.get(g).push(t);
+    }
+  }
   const episodes = readKind('episodes');
   const links = readKind('links');
   const claims = readKind('claims');
@@ -783,6 +850,8 @@ export function createWalkCache(store, { records = null } = {}) {
     episodes,
     topics,
     topicsByKey,
+    topicsByGram,
+    topicsByLen,
     links,
     claims,
     holdersByTopic: holdersByTopicSorted,
@@ -939,7 +1008,17 @@ export function walkFromSignals(opts = {}) {
   // S9（2026-11-02 自裁，依据 evidence/M4-precision.md）：泛工具主题不做"起跳种子"。
   // 30 个 df 最高 key 里 19 个是 kind=tool（echo/grep/bash/ls/git），tool 种子命中行仅 17.65% 有用；
   // 过滤后 hopPrecision 50.38% → 87.38%（零注入 14.29% → 34.29%）。显式实体（用户点名某工具）仍可起跳。
-  const matches = matchTopics({ signal: sig, topics })
+  // T381（2026-11-20）：**把 cache 里已有的精确键索引接上**。
+  // `matchTopics` 早就支持 `index` 参数（命中即记 `seenExact`，主循环直接跳过这些主题），
+  // 但 walk 这里一直没传 ⇒ 每个 `topic × term` 都白跑一遍 `overlaps`。
+  // 这是**纯等价**改动：索引里的键就是 `topicsByKey`（`key.toLowerCase()` → 主题数组），
+  // 与主循环里 `termLower === topicKey` 的判定完全一致，不多不少。
+  const matches = matchTopics({
+    signal: sig,
+    topics,
+    index: cache?.topicsByKey ?? null,
+    prune: cache ? { gramIndex: cache.topicsByGram ?? null, lenIndex: cache.topicsByLen ?? null } : null,
+  })
     .filter((m) => m.topic.kind !== 'tool' || m.matchedBy === 'entity');
   dropped.topicsOverCap = Math.max(0, matches.length - maxTopics);
   const picked = matches.slice(0, maxTopics);
