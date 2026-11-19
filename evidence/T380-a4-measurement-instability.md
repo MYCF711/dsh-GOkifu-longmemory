@@ -40,3 +40,30 @@ node scripts/metrics-guard.mjs                     # 门槛口径（p50）
 node tmp/measure3.mjs                              # 3 批 × 9 次的 median/max
 powershell -c "Get-Process | Sort-Object CPU -Desc | Select -First 6 Name,CPU,WS"
 ```
+
+---
+
+## 五、再更正：成本不在"每次重复读 bundle"，而在 per-run 的图计算本身
+
+上一节我猜"`buildMemoryCard`/`runGates` 内部各自触发读盘"。**核实后不成立**：
+
+```
+inject.mjs:438  cache?.claims  ? 用 cache : store.list('claims')      ← 有 cache 就完全不读盘
+inject.mjs:467  cache?.episodes? 用 cache : store.list('episodes')
+inject.mjs:1757 cache?.topics  ? 用 cache : store.list('topics')
+gates.mjs       没有任何 store.list
+```
+
+热路径四处读**全部**先看 cache；`readKindBundle`/`createWalkCache` 的开销属于 cache 建立的**一次性**成本，
+`metrics-guard` 每次跑只建一次 cache ⇒ 它们不进 A4 的 per-run 计时。
+
+**所以 per-run 的 40–80ms 是纯图计算**：13212 主题 × 每次命中的 term 数（`overlaps` 仍占 ~19ms/run）、
+29293 条 links 的邻域展开、5396 条 claims 的闸检查。
+
+## 六、T381 剪枝的有效性（如实）
+
+- **语义**：349 信号 × 13212 主题差分 `diff: 0`，等价性成立；
+- **性能**：**没有收益**（多轮 median 反而 67–84ms），已回滚到未剪枝版本。
+- 原因：候选集仍然大（常见 2-gram 在数千主题里出现），剪枝的构建成本 > 省下的遍历。
+
+⇒ 结论：**在这个语料规模下，`matchTopics` 的进一步优化空间已很小；A4 想稳定 ≤50ms 需要换算法（D6）而不是继续微调。**
