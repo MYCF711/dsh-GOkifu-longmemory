@@ -61,6 +61,10 @@ export function parseAudit(text) {
   return {
     samples: num(/样本 (\d+) 张/),
     refs: num(/引用 (\d+) 条/),
+    // T365：**A6 的真分母**是 `引用 − unreadable − unresolved − pointer`，审计自己会打出来。
+    // 原来 patrol 只解析 stdout（没有结构化字段），于是分母退回 `引用`，
+    // 于是出现「ok 3/4 但四个桶全 0」这种看着算错的读数 —— 差的这 1 条就是被排除在分母外的。
+    a6Denominator: num(/A6 分母 (\d+)/),
     atSeq: num(/at-seq (\d+)/) ?? num(/(?:^|\s)ok (\d+)/m),
     elsewhere: num(/elsewhere (\d+)/) ?? num(/offset (\d+)/),
     missing: num(/missing (\d+)/) ?? num(/notFound (\d+)/),
@@ -199,7 +203,7 @@ const lines = [
   // 改动前：`ok 3/4 · offset 0 · notFound 0 · unreadable 0` —— 四个桶全 0 但 ok 只有 3/4，
   // 看上去自相矛盾（真机实测就是这个形状）。缺的是 `joined`：引文跨两条事件、拼起来才substring。
   // 它不是失败，但也**不是 at-seq**，所以既不在 ok 也不在 notFound 里。补上这一桶，数字才闭合。
-  `| A6 文字层 | ok ${audit.textAtSeq ?? audit.atSeq ?? '?'}/${audit.a6Denominator ?? audit.refs ?? '?'} · joined ${audit.textJoined ?? 0} · offset ${audit.elsewhere ?? 0} · notFound ${audit.missing ?? '?'} · unreadable ${audit.unreadable ?? 0} · 日期 ${audit.dateOk ?? '?'}/${audit.a6Denominator ?? audit.refs ?? '?'}（未进分母：unresolved ${audit.textUnresolved ?? 0} · pointer ${audit.textPointer ?? 0}） | ${verdict.unverified ? '**未验证**（当前宿主无卡样本，不算通过）' : (verdict.ok ? '通过' : '**要看**')} |`,
+  `| A6 文字层 | ok ${audit.textAtSeq ?? audit.atSeq ?? '?'}/${audit.a6Denominator ?? audit.refs ?? '?'} · joined ${audit.textJoined ?? 0} · offset ${audit.elsewhere ?? 0} · notFound ${audit.missing ?? '?'} · unreadable ${audit.unreadable ?? 0} · 日期 ${audit.dateOk ?? '?'}/${audit.refs ?? '?'}（未进分母：unresolved ${audit.textUnresolved ?? 0} · pointer ${audit.textPointer ?? 0}） | ${verdict.unverified ? '**未验证**（当前宿主无卡样本，不算通过）' : (verdict.ok ? '通过' : '**要看**')} |`,
   semantic.text, // T269：语义不变量（SI-1/2/4/5），紧接 A6 之后
   merge.text, // T296：子代理归并率（门槛 mergeRate ≥ 90% + 恒等式闭合）
   `| 样本 | ${audit.samples ?? '?'} 张（当前宿主 pid=${audit.pid ?? '?'}） | — |`,

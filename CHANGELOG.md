@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.142（2026-11-19）
+
+### T365b · A6 那行彻底闭合：分母是 `引用 − unreadable − unresolved − pointer`，patrol 原来解析不到
+
+**版本说明**：只改 patrol 的解析与报表（不改审计逻辑、不改判据）⇒ **patch**。
+
+**上一版遗留**：`ok 3/4 · 四个桶全 0` —— 换算下来分母用错了。
+
+**根因（终于查清）**：`patrol.mjs` 拿到的审计结果是**从 stdout 正则解析出来的**，不是结构化字段。
+审计自己会打 `A6 分母 N（= 引用 − unreadable − unresolved − pointer）`，但 patrol 的正则里**没有这一项**，
+于是分母退回「引用」（4），而分子只有 3 ⇒ 看起来像算错。
+
+**修复**：patrol 增加解析 `A6 分母 (\d+)`，并用它作 A6 的分子分母基准；日期仍按「引用」口径（两项不同源，写清即可）。
+
+**闭合后的读数**：
+
+```
+| A6 文字层 | ok 3/3 · joined 0 · offset 0 · notFound 0 · unreadable 0 · 日期 4/4（未进分母：unresolved 0 / pointer 0） | 通过 |
+```
+
+分子分母终于自洽：**A6 = 3/3 = 100%**，与 metrics-guard 的 `A6=1` 口径一致。
+
 ## 0.8.141（2026-11-19）
 
 ### T365 · A6 那行自相矛盾：四个桶全 0 但 ok 只有 3/4
