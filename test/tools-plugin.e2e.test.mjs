@@ -91,10 +91,17 @@ test('T213: 真库只读 —— 每个工具都真调一次，返回非空且结
   const scope = claimEntry.record?.scopeKey ?? null; // 真作用域（不猜）
   assert.ok(episodeId && claimId, '真库必须至少各有一条 episode / claim');
 
+  // T371（2026-11-19）：**搜索词从真库里取，不写死**。
+  // 原来写死 `'stale'` —— 一旦库里的老词被归档/替换掉，这个"真库只读"用例就会红，
+  // 而红的原因跟工具没关系（是数据变了）。改成从第一条 claim 的正文里取一小段当探针。
+  const probe = (() => {
+    const t = String(claimEntry.record?.text ?? '').replace(/\s+/g, ' ').trim();
+    return t.length >= 2 ? t.slice(0, Math.min(8, t.length)) : 'stale';
+  })();
   const calls = [
     ['kifu_stats', {}],
-    ['kifu_search', { text: 'stale', limit: 3, scope }],
-    ['kifu_card', { text: 'stale', limit: 3, scope }],
+    ['kifu_search', { text: probe, limit: 3, scope }],
+    ['kifu_card', { text: probe, limit: 3, scope }],
     ['kifu_recent_failures', { limit: 3 }],
     ['kifu_view', { kind: 'episode', id: episodeId, maxNodes: 20 }],
     ['kifu_consolidate', { limit: 3, previewChars: 80, scope }],
@@ -107,7 +114,14 @@ test('T213: 真库只读 —— 每个工具都真调一次，返回非空且结
     const value = await tool.execute(args);
     assert.ok(value !== null && value !== undefined, `${name} 返回了空值`);
     assert.equal(typeof value, 'object');
-    assert.notEqual(value?.ok, false, `${name} 失败：${truncate(value?.error ?? value)}`);
+    // T371（2026-11-19）：`ok:false` **不一定是工具坏了** —— `kifu_consolidate` 的 ok 是
+    // 「质量闸全过」（t1..t5），其中 t5 是"压缩比 ≤25%"，**随语料变化**。
+    // 真库实测：把 101 条真 stale 标掉后 t5 翻红（ok:false），但工具本身正常返回 measured。
+    // 所以这里区分两件事：**有 error ⇒ 失败**；**只有 quality 未过 ⇒ 记录，不判红**。
+    if (value?.ok === false) {
+      assert.ok(value?.quality && typeof value.quality === 'object',
+        `${name} 返回 ok:false 但没有 quality 明细（像是真失败）：${truncate(value?.error ?? value)}`);
+    }
     assert.ok(!value?.error, `${name} 返回了结构化错误：${truncate(value?.error)}`);
     const text = JSON.stringify(value);
     assert.ok(text && text !== '{}', `${name} 返回了空对象`);
