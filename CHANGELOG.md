@@ -17,6 +17,26 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.149（2026-11-19）
+
+### T369 · `renderSummary` 抽出来，用测试**逐字**钉住「分母来源 … 不可比」
+
+**版本说明**：`metrics-guard` 的汇总输出从内联 `console.log` 抽成导出函数 `renderSummary(out, verdict)`
+（输出逐字不变）+ 新增契约测试 ⇒ **patch**。
+
+**为什么**：T362 加的「分母来源：holdout 抽样（非全量）· 与 `scripts/eval.mjs` 的按签名口径**不可比**」
+原来直接 `console.log`，测试抓不到。有人删掉或顺手改写它，**两套 A2b 不可比**这个关键事实就会悄悄消失，
+下一个人又会拿 46.6% 和 22.02% 直接比。
+
+**做法**：
+- `scripts/metrics-guard.mjs` 导出 `renderSummary(out, verdict) → string[]`，`invokedDirectly` 分支只负责打印；
+- 测试**逐字断言**那一行（不是 `includes`），并断言总行数 = 7 —— 加行/删行/改措辞都会红。
+
+**红灯验证（真做了）**：把那一行从源码删掉 ⇒ 测试 **12/13（红）**；恢复后 13/13。
+（顺带发现：第一版用 `includes('分母来源')` 太弱，把「分母来源」改成「分母来源X」测不出来 ⇒ 改成整行 `equal`。）
+
+**门禁**：`metrics-guard.test.mjs` 13/13 · 全量 1305 / 1299 通过 / 0 失败 / 6 跳过。
+
 ## 0.8.148（2026-11-19）
 
 ### T370b · **更正**：增量归档只省了读，真跑仍 >900 秒（瓶颈是 deriveStore）

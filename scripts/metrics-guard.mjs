@@ -254,6 +254,27 @@ export function loadHoldout(filePath = DEFAULT_HOLDOUT_PATH, { fsImpl = fs } = {
 
 const invokedDirectly = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 
+/**
+ * T369：把汇总输出抽成**可断言的纯函数**。
+ *
+ * 为什么：T362 加的「分母来源 … 不可比」原来直接 `console.log` —— 测试抓不到。
+ * 有人删掉/改写它，**两套 A2b 不可比**这个关键事实就会悄悄消失，
+ * 下一个人又会拿 46.6% 和 22.02% 直接比。抽出来后测试可以逐字断言。
+ */
+export function renderSummary(out, verdict) {
+  const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
+  return [
+    `metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'}`,
+    `  主判据 · A2b 召回相关度（sampleSource=${out.values.sampleSource}，n=${out.values.a2bN}）：严格=${pct(out.values.a2bStrict)} 覆盖=${pct(out.values.a2bCover)}`,
+    // T362：分母不同源、跨口径不可比 —— 这行是给下一个人看的，不许悄悄消失（T369 用测试钉住）
+    '    分母来源：holdout 抽样（非全量）· 与 scripts/eval.mjs 的按签名口径**不可比**（详见 evidence/T362-eval-stratification.md）',
+    `  约束条件 · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A4.p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`,
+    `  A1 三轴 · A1.stale=${pct(out.values.a1)} A1.opposite=${pct(out.values.a1Opposite)}（可判率 ${pct(out.values.a1OppositeDecidability)}，n=${out.values.a1OppositeN ?? 'null'}，${out.values.a1OppositeDecisionGrade ? '已通电·参与 exit code' : '未通电·不参与 exit code（0 次触发 ≠ 无反向记忆）'}）`,
+    `    A1.redundant=浪费 ${pct(out.values.a1Redundant)} · 必要重注 ${pct(out.values.a1RedundantNecessary)}（会话级同卡再投；n=${out.values.a1RedundantN ?? 'null'}，${out.values.a1RedundantPowered ? '已通电·参与 exit code（浪费 > 1% 才红）' : '未通电·不参与 exit code（窗口样本不足）'}）`,
+    `  下游参考 · repeatFailureRate=${pct(out.values.repeatFailureRate)}（V1 · 不参与 exit code）`,
+  ];
+}
+
 if (invokedDirectly) {
   const argv = process.argv.slice(2);
   const strictIdx = argv.indexOf('--strict');
@@ -337,20 +358,8 @@ if (invokedDirectly) {
   } catch { /* 证据写失败不影响判定 */ }
   if (json) console.log(JSON.stringify(out, null, 2));
   else {
-    // 输出顺序 = 层级（T236b）：主判据 → 约束条件 → 下游参考。
-    const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
-    console.log(`metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'}`);
-    console.log(`  主判据 · A2b 召回相关度（sampleSource=${out.values.sampleSource}，n=${out.values.a2bN}）：严格=${pct(out.values.a2bStrict)} 覆盖=${pct(out.values.a2bCover)}`);
-    // T362：**把分母的来源写出来** —— 本闸的 A2b 与 `scripts/eval.mjs` 的 A2b **分母不同源，跨口径不可比**：
-    //   本闸 = holdout 抽样（n 见上）；eval.mjs = 按"有失败签名"筛（2026-11-19 实测 episodes 298 / evaluated 231 / rate 22.02%）。
-    // 两者都能用，但用途不同：本闸看"门禁是否退化"，eval 看"时间趋势"。混着比会得出错误结论。
-    console.log(`    分母来源：holdout 抽样（非全量）· 与 scripts/eval.mjs 的按签名口径**不可比**（详见 evidence/T362-eval-stratification.md）`);
-    console.log(`  约束条件 · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A4.p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`);
-    // T7：A1 的两条并列轴（stale 在上面那一行，opposite 在这里）。"未通电"必须显式打出来 —— 别把 0/0 当通过。
-    console.log(`  A1 三轴 · A1.stale=${pct(out.values.a1)} A1.opposite=${pct(out.values.a1Opposite)}（可判率 ${pct(out.values.a1OppositeDecidability)}，n=${out.values.a1OppositeN ?? 'null'}，${out.values.a1OppositeDecisionGrade ? '已通电·参与 exit code' : '未通电·不参与 exit code（0 次触发 ≠ 无反向记忆）'}）`);
-    // T27：A1.redundant（会话级冗余）。两个子指标分开打印；"未通电"必须显式打出来，别把 0/0 当通过。
-    console.log(`    A1.redundant=浪费 ${pct(out.values.a1Redundant)} · 必要重注 ${pct(out.values.a1RedundantNecessary)}（会话级同卡再投；n=${out.values.a1RedundantN ?? 'null'}，${out.values.a1RedundantPowered ? '已通电·参与 exit code（浪费 > 1% 才红）' : '未通电·不参与 exit code（窗口样本不足）'}）`);
-    console.log(`  下游参考 · repeatFailureRate=${pct(out.values.repeatFailureRate)}（V1 · 不参与 exit code）`);
+    // T369：汇总行抽进 renderSummary（测试可逐字断言），这里只负责打印。
+    for (const line of renderSummary(out, verdict)) console.log(line);
     for (const f of verdict.fails) console.error(`ERR ${f}`);
   }
   process.exit(verdict.ok ? 0 : 1);
