@@ -418,20 +418,28 @@ export function matchTopics({ signal, topics = [], index = null } = {}) {
       for (const topic of hit) { consider(topic, 1, 'term', term); seenExact.add(topic.id); }
     }
   }
+  // T377（2026-11-20）：**把「每次 topic×term 都要做一次」的重复计算提到循环外**。
+  // 原来内层对同一个 `term` 反复 `toLowerCase()`、对同一个 `topic.key` 反复 `toLowerCase()` ——
+  // 主题 6000+、term 数十 ⇒ 单次建卡就是几十万次字符串转换（profile 里 `overlaps` 是最大 self 项）。
+  // 这里只做**纯缓存**，不改任何判定分支：`entityLower[i]` / `termLower[i]` 与原来的就地转换完全等价。
+  const entityLower = sig.entities.map((e) => String(e.key ?? '').toLowerCase());
+  const termLower = sig.terms.map((t) => String(t).toLowerCase());
   for (const topic of list) {
     if (seenExact.has(topic.id)) continue;
-    const topicKey = topic.key.toLowerCase();
-    for (const entity of sig.entities) {
+    const topicKey = String(topic.key ?? '').toLowerCase();
+    for (let ei = 0; ei < sig.entities.length; ei += 1) {
+      const entity = sig.entities[ei];
       if (entity.key === topic.id) {
         consider(topic, 1, 'entity', entity.key);
         continue;
       }
       if (entity.kind && entity.kind !== topic.kind) continue;
-      if (entity.key.toLowerCase() === topicKey) consider(topic, 1, 'entity', entity.key);
+      if (entityLower[ei] === topicKey) consider(topic, 1, 'entity', entity.key);
       else if (overlaps(entity.key, topic.key)) consider(topic, 0.6, 'entity', entity.key);
     }
-    for (const term of sig.terms) {
-      if (term.toLowerCase() === topicKey) consider(topic, 1, 'term', term);
+    for (let ti = 0; ti < sig.terms.length; ti += 1) {
+      const term = sig.terms[ti];
+      if (termLower[ti] === topicKey) consider(topic, 1, 'term', term);
       else if (overlaps(term, topic.key)) consider(topic, 0.6, 'term', term);
     }
   }
