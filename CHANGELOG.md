@@ -17,6 +17,25 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.143（2026-11-19）
+
+### T366 · A1.redundant 的 caveat 已过期：live-stats 自 0.8.140 起**也带 `sid`**
+
+**版本说明**：只改说明文本（不改判据、不改测量逻辑）⇒ **patch**。
+
+`m5-report.mjs` 里 A1.redundant 的 caveat 原来写着：
+
+> 「会话级冗余只能从会话日志的 session.id+source.digest 算（**live-stats 没有 session id**）」
+
+但 T364 已经给 pre-step 的 live-stats 行加了 `sid` 字段 ⇒ **这句话从 0.8.140 起就不成立了**。
+
+**改为**（保留真实边界）：
+
+> 主口径仍是会话日志的 `session.id + source.digest`（更完整：能拿到原始对）；
+> live-stats 自 0.8.140 起也带 `sid`，可作**近期窗口的交叉核验**；
+> **历史行没有 sid** ⇒ 按 scope 回放只能得到**上界**，不硬造数。
+
+这条改动的价值：避免下一个人读到"live-stats 没有 session id"而重复我踩过的坑（回放拿不到会话 id）。
 ## 0.8.142（2026-11-19）
 
 ### T365b · A6 那行彻底闭合：分母是 `引用 − unreadable − unresolved − pointer`，patrol 原来解析不到
