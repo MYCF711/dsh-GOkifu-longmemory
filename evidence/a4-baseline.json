@@ -1,0 +1,27 @@
+{
+  "at": "2026-11-19T20:49:06.529Z",
+  "corpus": {
+    "episodes": 4494,
+    "links": 29293,
+    "claims": 5396,
+    "topics": 13212
+  },
+  "samples": [
+    {
+      "median": 77.27,
+      "min": 58.16,
+      "max": 214.61
+    },
+    {
+      "median": 64.06,
+      "min": 50.06,
+      "max": 129.28
+    },
+    {
+      "median": 76.17,
+      "min": 58.52,
+      "max": 174.51
+    }
+  ],
+  "medianOfMedians": 76.17
+}
