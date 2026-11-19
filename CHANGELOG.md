@@ -17,6 +17,34 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.141（2026-11-19）
+
+### T365 · A6 那行自相矛盾：四个桶全 0 但 ok 只有 3/4
+
+**版本说明**：只改 patrol 的报表输出（不改判据、不改审计逻辑）⇒ **patch**。
+
+**现象**：巡逻表原来打 `ok 3/4 · offset 0 · notFound 0 · unreadable 0` ——
+四个桶加起来是 0、却只 ok 3/4，看上去像审计算错了。
+
+**实际原因是漏了两个桶**：
+
+| 桶 | 含义 | 改动前 |
+|---|---|---|
+| `joined` | 引文跨两条事件、拼起来才 substring（不是失败，但也不是 at-seq） | 没打 |
+| `unresolved` / `pointer` | 不进 A6 分母的两类（分母 = refs − unreadable − unresolved − pointer） | 没打 |
+
+**改动**：这行现在打 `joined` 与「未进分母：unresolved · pointer」，分母也改用 `a6Denominator`。
+
+**现状读数**：
+
+```
+| A6 文字层 | ok 3/4 · joined 0 · offset 0 · notFound 0 · unreadable 0 · 日期 4/4（未进分母：unresolved 0 · pointer 0） | 通过 |
+```
+
+**还没闭合的那 1 条**：`at-seq 3` 而非 4，且 joined/offset/notFound/unreadable 全 0 ⇒
+说明它是 **textOk 但非 at-seq** 的一类（`textOk` 在 patrol 拿到的审计对象里没有暴露）。
+这一条定位到 `audit-card-samples` 的 `textOk` 计数口径，留作下一步——**本轮不猜着改**。
+
 ## 0.8.140（2026-11-19）
 
 ### T364 · A1.redundant 回放：23.86% 是**上界**，根因是 live-stats 缺会话 id（已补）

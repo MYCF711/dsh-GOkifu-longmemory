@@ -195,7 +195,11 @@ const lines = [
   a2b.text, // T250：主判据永远第一行
   `| A3 心跳 | inject=${stats.inject ?? '?'} · skip=${stats.skip ?? '?'} · gates-failed=${stats.gatesFailed ?? '?'} · dedupe=${stats.dedupeBlocked ?? '?'} · 限流静默=${stats.oncePerSessionSilenced ?? '?'} | ${stats.inject > 0 ? '通过' : '无注入（查是否没信号）'} |`,
   `| A5 跨作用域 | ${audit.crossScope ?? '?'} | ${audit.crossScope === 0 ? '通过' : '**最高优先级**'} |`,
-  `| A6 文字层 | ok ${audit.atSeq ?? '?'}/${audit.refs ?? '?'} · offset ${audit.elsewhere ?? 0} · notFound ${audit.missing ?? '?'} · unreadable ${audit.unreadable ?? 0} · 日期 ${audit.dateOk ?? '?'}/${audit.refs ?? '?'} | ${verdict.unverified ? '**未验证**（当前宿主无卡样本，不算通过）' : (verdict.ok ? '通过' : '**要看**')} |`,
+  // T365（2026-11-19）：**分母用 a6Denominator，不用 refs**。
+  // 改动前：`ok 3/4 · offset 0 · notFound 0 · unreadable 0` —— 四个桶全 0 但 ok 只有 3/4，
+  // 看上去自相矛盾（真机实测就是这个形状）。缺的是 `joined`：引文跨两条事件、拼起来才substring。
+  // 它不是失败，但也**不是 at-seq**，所以既不在 ok 也不在 notFound 里。补上这一桶，数字才闭合。
+  `| A6 文字层 | ok ${audit.textAtSeq ?? audit.atSeq ?? '?'}/${audit.a6Denominator ?? audit.refs ?? '?'} · joined ${audit.textJoined ?? 0} · offset ${audit.elsewhere ?? 0} · notFound ${audit.missing ?? '?'} · unreadable ${audit.unreadable ?? 0} · 日期 ${audit.dateOk ?? '?'}/${audit.a6Denominator ?? audit.refs ?? '?'}（未进分母：unresolved ${audit.textUnresolved ?? 0} · pointer ${audit.textPointer ?? 0}） | ${verdict.unverified ? '**未验证**（当前宿主无卡样本，不算通过）' : (verdict.ok ? '通过' : '**要看**')} |`,
   semantic.text, // T269：语义不变量（SI-1/2/4/5），紧接 A6 之后
   merge.text, // T296：子代理归并率（门槛 mergeRate ≥ 90% + 恒等式闭合）
   `| 样本 | ${audit.samples ?? '?'} 张（当前宿主 pid=${audit.pid ?? '?'}） | — |`,
