@@ -17,6 +17,35 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.160（2026-11-20）
+
+### T404 · 修栈溢出：`buildNeighborhood` 里 `push(...163,528 条 links)` 打爆调用栈
+
+**版本说明**：修真实故障 ⇒ **patch**。
+
+**故障**：真库 `kifu_view` 直接返回
+`{"code":"internal","message":"Maximum call stack size exceeded"}`，
+`tools-plugin.e2e` 的真库用例因此红（耗时 124 秒）。
+
+**根因**：`src/rooms/view.mjs` 里
+
+```js
+if (Array.isArray(view?.links)) linkRecords.push(...view.links);
+```
+
+真库 links 已增长到 **163,528 条** —— 展开成 16 万个实参 ⇒ 栈溢出。
+
+**修复**：改成 `for (const item of view.links) linkRecords.push(item);`（语义不变、无栈风险）。
+
+**回归测试**：`test/t404-large-links.test.mjs` 构造 **163,528 条 links** 调 `buildNeighborhood`。
+红灯验证：把修复回退成 `push(...arr)` ⇒ 该用例 **0/1 红**；恢复后 1/1。
+
+**门禁**：全量 1309 / 1303 通过 / 0 失败 / 6 跳过 · `check.mjs` PASS。
+
+**同时记录一个新风险（待裁定）**：真库 links 已达 **16.3 万条**，每轮归档要重写约 **9.9 万条**（实测 `putMany=177s`、`scanDelete=43s`）。
+links 数是随局数**超线性增长**的，这既是归档耗时大头，也是内存与工具的负担。
+是否给 links 设上限（按主题/局保留最强 k 条）会改召回，属有代价 ⇒ 见 D10。
+
 ## 0.8.159（2026-11-20）
 
 ### T402 · 修 0.8.158 的 OOM 回归：并发预读改为**按批次**

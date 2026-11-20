@@ -374,7 +374,12 @@ function buildGraph(view, centerScope, centerKind, centerId = '') {
 
   // ---- 3) 棋谱↔棋谱边（links / linksFromEpisode）----
   const linkRecords = [];
-  if (Array.isArray(view?.links)) linkRecords.push(...view.links);
+  // T404（2026-11-20）：**不能用 `push(...arr)`** —— 真库 links 已到 163,528 条，
+  // 展开成 16 万个实参会直接 "Maximum call stack size exceeded"，让 `kifu_view` 整个挂掉
+  // （实测：0.8.159 的真库 e2e 因此红）。改成循环推入，语义不变、无栈风险。
+  if (Array.isArray(view?.links)) {
+    for (const item of view.links) linkRecords.push(item);
+  }
   else if (view?.links && typeof view.links.forEach === 'function' && typeof view.links.get !== 'function') {
     for (const item of view.links) linkRecords.push(item);
   }
