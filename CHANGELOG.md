@@ -17,6 +17,42 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.156（2026-11-20）
+
+### 归档性能：**>900 秒跑不完 → 307 秒跑完**（其中写入侧 77 秒）
+
+主人已裁定 D8 / D9（并允许跳过中间版本直接发版）。本版含 T392–T398 共七刀：
+
+| 刀 | 改了什么 | 效果 |
+|---|---|---|
+| T392 | `readManifest` 按 `(mtime,size)` 记忆化 | 2000 条**不变**记录 53.5s → **1.2s**（46 倍）。根因：每次 `put` 都重读 4.53MB manifest |
+| T393 | journal 批次末一次 fsync（单条 put 仍即时落盘） | 396s → **138s** |
+| T394 | checksum 缓存（`.cache/checksums.json`，跨进程） | manifest 36.6s→8.5s、verify 32.1s→8.5s |
+| T395 | 定因：`topic.idfNorm` 随全库局数变 ⇒ 每轮全量重写 topics | （诊断，为 D8 铺路） |
+| T396 | 定因：每文件 fsync 占单条写入 75%（5.91 vs 1.46ms） | （诊断，为 D9 铺路） |
+| T398 | `writeAtomic` 的 mkdir 只做一次（带 ENOENT 自愈重试） | 写入少 9,000 次 mkdir |
+| **D8** | **`topic.idfNorm` 不再落盘**，读时用 `df` 与当前局数现算 | 写 topics 52s → **10.5s** |
+| **D9** | **记录文件不 fsync**（manifest / journal / index 仍 fsync） | 写 links 36s → **20.6s** |
+
+**逐阶段实测（本轮全量真跑，307 秒）**：
+
+```
+after-build-loop      +229.7s   ← 读 428 个会话（多帧 zstd 逐帧解），当前最大头
+after-claims          +241.1s
+before-derive-out     +251.0s   ← 权威写入 ~10s（原 255s）
+after-derive-out      +252.5s   ← derive 1.5s
+after-topics          +263.0s   ← 写 topics 10.5s（原 52s）
+after-links           +283.5s   ← 写 links 20.6s（原 36s）
+after-manifest        +291.3s   ← 7.8s
+after-verify          +304.5s   ← 13.2s
+```
+
+**结论**：写盘侧已从 ~290 秒压到 **77 秒**；现在最大头是**读会话日志**（230 秒，随"这期间变了多少会话"线性变化）。
+
+**下一步（已定位）**：按会话做增量读——只解 `seqFrom` 之后的新帧，而不是整份重解。
+
+**门禁**：全量 1308 / 1302 通过 / 0 失败 / 6 跳过 · `check.mjs` PASS。
+
 ## 0.8.155（2026-11-20）
 
 ### T383 · A4 **相对基线**工具（D7 选项③的地基，不改判据）
