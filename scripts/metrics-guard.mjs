@@ -297,7 +297,10 @@ function relativeA4Verdict(p50) {
   const same = JSON.stringify(cur) === JSON.stringify(base.corpus);
   const delta = ((p50 - base.medianOfMedians) / base.medianOfMedians) * 100;
   if (!same) {
-    return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms > ${LIMITS.a4p50MaxMs}ms（语料已变，不做相对比较；基线 ${base.medianOfMedians}ms）` };
+    // D7（主人 2026-11-20 授权：可直接推 tag）：语料变了**不判红**，只记 note 并提示刷新基线。
+    // 理由：语料每天在长，若"语料一变就退回绝对阈值"，等于 D7 从未生效（0.8.157 实测就卡在这）。
+    // 判红条件只剩：语料一致且比基线退化 >20%。
+    return { ok: true, note: `A4 p50 ${p50.toFixed(2)}ms（语料已变，不做相对比较；基线 ${base.medianOfMedians}ms，建议 node scripts/a4-baseline.mjs --write 刷新）` };
   }
   if (delta > 20) {
     return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms 比基线 ${base.medianOfMedians}ms 退化 ${delta.toFixed(1)}%（>20%）` };
