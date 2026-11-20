@@ -46,3 +46,32 @@ function replaceDerived(kind, records, opts) {
 ## 五、这条与 A4/D7 无关
 
 纯正向（不改判据），且是**当前唯一能让归档真正跑完的路径**。
+
+---
+
+## 六、更正（2026-11-20 复测）：派生 link 是 **40,919**，不是 215,410
+
+复测（同一 store、同一函数）：
+
+```
+derivedLinks 40919 · derivedUniqueIds 40919 · storedLinks 29293 · overlapStored 26008
+kinds = { shared-topic: 13777, same-error: 19879, same-file: 7263 }
+```
+
+⇒ 每次归档实际新增约 **14,911** 条、删除约 **3,285** 条。
+**之前那个 215,410 是一次异常读数**（很可能是归档正写到一半时的中间态，或含 subagent 未归并的口径）。
+本节之前的"21.5 万"说法以此处为准。
+
+## 七、40,919 条边也解释不了 >1200 秒 —— 说明还有别的重活
+
+本轮实测：`timeout 1200 node scripts/archive.mjs --incremental --json` **仍然超时（exit 124）**，
+连分阶段计时都来不及打出结果。
+
+候选（下一轮逐一排除，**先量再改**）：
+1. `store.verify()`：收官时对所有 kind 做 checksum 校验 —— 文件数 ≈ 29k(links)+13k(topics)+4.5k(episodes)+5k(claims)，**逐文件读+算 sha256**；
+2. `putMany`：对每条记录先 `readFileSync` 旧值比对 sha256（40k 次读）；
+3. `ids(kind)` + `unlink` 扫描；
+4. `stabilizeExisting` 对大数组的深比较。
+
+**下一步做法**：改用 `console.error` 在每阶段结束**立即输出**（而不是等 JSON 汇总），
+这样即使进程被 `timeout` 杀掉，也能看到"卡在哪一阶段"。
