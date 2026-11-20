@@ -746,8 +746,28 @@ export function createStore(opts = {}) {
     }
   }
 
-  function appendJournal(entry) {
+  // T393（2026-11-20）：**journal 批量落盘**。
+  // 原来每条记录都 open + write + fsyncSync + close —— 单次 fsync 在 Windows 上毫秒级，
+  // 上万条权威写入就是几十到上百秒。改为同批次内缓冲、批次结束一次写入 + 一次 fsync。
+  // 数据文件本身仍是逐条原子写；journal 只用于崩溃后定位重放。
+  let JOURNAL_BUF = [];
+  let JOURNAL_BATCH = 0; // >0 表示在 putMany/replaceDerived 批次内，批次末统一 flush
+  const JOURNAL_FLUSH_AT = 512;
+  function flushJournal() {
+    if (JOURNAL_BUF.length === 0) return;
+    const payload = JOURNAL_BUF.join('');
+    JOURNAL_BUF = [];
     fs.mkdirSync(path.dirname(journalPath), { recursive: true });
+    const fd = fs.openSync(journalPath, 'a');
+    try {
+      fs.writeSync(fd, Buffer.from(payload, 'utf8'));
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  function appendJournal(entry) {
     const line = JSON.stringify({
       v: 1,
       schema: STORE_SCHEMA,
@@ -759,14 +779,10 @@ export function createStore(opts = {}) {
       sha256: entry.sha256 ?? null,
       prevSha256: entry.prevSha256 ?? null,
     });
-    const fd = fs.openSync(journalPath, 'a');
-    try {
-      fs.writeSync(fd, Buffer.from(`${line}\n`, 'utf8'));
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    return { line };
+    JOURNAL_BUF.push(line + String.fromCharCode(10));
+    // T393：批次内先攒着（批次末一次 fsync）；不属于任何批次（单条 put）则立刻落盘，
+    // 保持"put 返回 = journal 已落盘"的原语义（R15 的幂等/截断恢复测试依赖这一点）。
+    if (JOURNAL_BATCH === 0 || JOURNAL_BUF.length >= JOURNAL_FLUSH_AT) flushJournal();
   }
 
   /**
@@ -865,7 +881,14 @@ export function createStore(opts = {}) {
   function putMany(kind, records, putOpts = {}) {
     const list = (Array.isArray(records) ? records : []).filter(Boolean);
     const ordered = [...list].sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
-    const results = ordered.map((record) => put(kind, record, putOpts));
+    JOURNAL_BATCH += 1;
+    let results;
+    try {
+      results = ordered.map((record) => put(kind, record, putOpts));
+    } finally {
+      JOURNAL_BATCH -= 1;
+      flushJournal(); // T393：批次末统一落盘（一次 fsync）
+    }
     return {
       kind,
       total: results.length,
@@ -950,7 +973,13 @@ export function createStore(opts = {}) {
     const at = Number.isFinite(opts.at) ? opts.at : clock();
     const list = (Array.isArray(records) ? records : []).filter(Boolean);
     const wanted = new Set(list.map((r) => String(r.id)));
-    const written = putMany(kind, list, { at });
+    JOURNAL_BATCH += 1;
+    let written;
+    try {
+      written = putMany(kind, list, { at });
+    } finally {
+      JOURNAL_BATCH -= 1;
+    }
     const removed = [];
     for (const id of ids(kind)) {
       if (wanted.has(id)) continue;
@@ -961,6 +990,7 @@ export function createStore(opts = {}) {
         removed.push(rel);
       } catch { /* 删不掉就留着，下次 rebuild 再来 */ }
     }
+    flushJournal(); // T393：删完再统一落盘
     return { kind, total: list.length, written: written.written, unchanged: written.unchanged, removed };
   }
 
