@@ -29,7 +29,7 @@ export const DEFAULT_LINK_OPTIONS = Object.freeze({
   // 边是"团"：N 局共享同一文件/同一报错 ⇒ N² 条边，而 walk 深度 ≤2、每层 limit 5，用不到这么多。
   // 做法：每局最多保留 `maxLinksPerEpisode` 条边（按 weight 降序、同重按 occurredAt 新的优先，再按 id 稳定排序）。
   // 这只是**截断候选**，不改任何判据；被截掉的邻居仍可由 `holdersByTopic`（walk cache 里已有）按需展开。
-  maxLinksPerEpisode: 32,
+  maxLinksPerEpisode: 16,
 });
 
 function clamp(x, lo, hi) {
