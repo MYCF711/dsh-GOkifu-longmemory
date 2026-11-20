@@ -24,6 +24,12 @@ export const DEFAULT_LINK_OPTIONS = Object.freeze({
   maxMentions: 20000,          // 全局上限，防单次全量跑爆内存
   sameError: true,
   sameFile: true,
+  // D10（2026-11-20，主人裁定走方案③）：**不再物化团边**。
+  // 真库实测：636 个局撑起 12.5 万条边（中位数每局 330 条），其中 97.4% 是 weight=1 的硬边。
+  // 边是"团"：N 局共享同一文件/同一报错 ⇒ N² 条边，而 walk 深度 ≤2、每层 limit 5，用不到这么多。
+  // 做法：每局最多保留 `maxLinksPerEpisode` 条边（按 weight 降序、同重按 occurredAt 新的优先，再按 id 稳定排序）。
+  // 这只是**截断候选**，不改任何判据；被截掉的邻居仍可由 `holdersByTopic`（walk cache 里已有）按需展开。
+  maxLinksPerEpisode: 32,
 });
 
 function clamp(x, lo, hi) {
@@ -105,6 +111,35 @@ function firstOccurrence(topic) {
  * @param {object} [p.options]
  * @returns {{mentions:Array, links:Array, stats:object}}
  */
+/**
+ * D10：把"团边"裁成"每局最多 k 条"（主人裁定方案③的第一步）。
+ * 排序键：weight 降序 → occurredAt 降序（新的优先）→ id 升序（稳定，保证幂等）。
+ * 对称裁剪：任一端已达上限就丢弃这条边，从而让**每个局的度数**都有上界。
+ */
+export function capLinksPerEpisode(links, k) {
+  const limit = Number.isFinite(k) && k > 0 ? Math.floor(k) : Infinity;
+  if (!Number.isFinite(limit)) return links;
+  const sorted = [...links].sort((x, y) => (
+    (Number(y.weight) || 0) - (Number(x.weight) || 0)
+    || (Number(y.occurredAt) || 0) - (Number(x.occurredAt) || 0)
+    || (String(x.id) < String(y.id) ? -1 : String(x.id) > String(y.id) ? 1 : 0)
+  ));
+  const degree = new Map();
+  const kept = [];
+  for (const link of sorted) {
+    const a = link?.a?.episode;
+    const b = link?.b?.episode;
+    if (typeof a !== 'string' || typeof b !== 'string') { kept.push(link); continue; }
+    const da = degree.get(a) ?? 0;
+    const db = degree.get(b) ?? 0;
+    if (da >= limit || db >= limit) continue;
+    degree.set(a, da + 1);
+    degree.set(b, db + 1);
+    kept.push(link);
+  }
+  return kept;
+}
+
 export function buildLinks({ episodes = [], topics = null, options = {} } = {}) {
   const opts = { ...DEFAULT_LINK_OPTIONS, ...options };
   const eps = (Array.isArray(episodes) ? episodes : []).filter((e) => e && e.id);
@@ -349,7 +384,13 @@ export function buildLinks({ episodes = [], topics = null, options = {} } = {}) 
     universalTopics: [...dfMap.entries()].filter(([, df]) => df >= N && N > 0).length,
   };
 
-  return { mentions, links, stats };
+  // D10：每局边数上限（对称保留 —— 一条边占两端各一个名额，按较紧的一端裁剪）。
+  // 幂等：同一输入两次跑结果完全相同（排序键含 id，无随机）。
+  const capped = capLinksPerEpisode(links, opts.maxLinksPerEpisode);
+  const finalStats = capped.length === links.length
+    ? stats
+    : { ...stats, linksBeforeCap: links.length, linksAfterCap: capped.length };
+  return { mentions, links: capped, stats: finalStats };
 }
 
 export default { buildLinks, idfNorm, LINK_KIND_ORDER };
