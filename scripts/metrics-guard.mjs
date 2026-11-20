@@ -96,6 +96,7 @@ const LIMITS = {
  *        T242：主判据的**样本来源**由调用方决定。给了 override 就用它（考卷口径），
  *        否则退回 m5 报告里的 injectionRecall（旧口径，只作对照）。
  */
+let a4RelativeNote = null;
 export function judge(report, limits = LIMITS, a2bOverride = null) {
   const axes = report?.axes ?? report ?? {};
   const fails = [];
@@ -180,7 +181,15 @@ export function judge(report, limits = LIMITS, a2bOverride = null) {
   // A1=0 但覆盖率 0 ⇒ 空转：不判失败，但必须显式标注（2026-11-02 审计 P1-5）
   if (!Number.isFinite(a5) || a5 > limits.a5Max) constraints.push(`A5 越界 ${a5} != 0`);
   if (!Number.isFinite(a6) || a6 < limits.a6Min) constraints.push(`A6 溯源 ${a6} < ${limits.a6Min}`);
-  if (Number.isFinite(p50) && p50 > limits.a4p50MaxMs) constraints.push(`A4 p50 ${p50.toFixed(2)}ms > ${limits.a4p50MaxMs}ms`);
+  // D7（2026-11-20，主人裁定）：A4 从**绝对阈值**改为**同语料下相对基线**判据。
+  // 为什么：语料每天在长（13,212 主题 / 29,293 links），绝对 50ms 抓到的是"数据变多"而不是"代码变慢"。
+  // 规则：语料指纹一致 ⇒ 与 `evidence/a4-baseline.json` 的 medianOfMedians 比，退化 >20% 才红；
+  //       语料变了或没有基线 ⇒ 退回绝对阈值（宁可严格，不放过）。
+  if (Number.isFinite(p50) && p50 > limits.a4p50MaxMs) {
+    const rel = relativeA4Verdict(p50);
+    if (rel.ok) a4RelativeNote = rel.note;
+    else constraints.push(rel.note);
+  }
 
   // ── 下游参考：repeatFailureRate（V1）—— 只算不红 ───────────────────────
   // 它是"记忆有没有被下游用起来"的证据，不是本仓的验收面（见文件头「指标不可归因」）。
@@ -261,6 +270,41 @@ const invokedDirectly = process.argv[1] ? import.meta.url === pathToFileURL(proc
  * 有人删掉/改写它，**两套 A2b 不可比**这个关键事实就会悄悄消失，
  * 下一个人又会拿 46.6% 和 22.02% 直接比。抽出来后测试可以逐字断言。
  */
+export 
+/** D7：语料指纹（各 kind 的文件数）—— 与 `evidence/a4-baseline.json` 的 corpus 同构。 */
+function corpusCounts(storeRoot) {
+  const out = {};
+  for (const kind of ['episodes', 'links', 'claims', 'topics']) {
+    try { out[kind] = fs.readdirSync(path.join(storeRoot, kind)).filter((n) => n.endsWith('.json')).length; } catch { out[kind] = null; }
+  }
+  return out;
+}
+
+/**
+ * D7：A4 的相对判据。
+ * @returns {{ok:boolean, note:string}} ok=true 表示"虽超绝对阈值，但同语料下未退化"。
+ */
+function relativeA4Verdict(p50) {
+  const storeRoot = process.env.DSH_HOME ? path.join(process.env.DSH_HOME, 'memory-context') : null;
+  const basePath = path.join(REPO, 'evidence/a4-baseline.json');
+  if (!storeRoot) return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms > ${LIMITS.a4p50MaxMs}ms（无 store root，按绝对阈值判）` };
+  let base = null;
+  try { base = JSON.parse(fs.readFileSync(basePath, 'utf8')); } catch { /* 没基线 */ }
+  if (!base || !Number.isFinite(base.medianOfMedians)) {
+    return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms > ${LIMITS.a4p50MaxMs}ms（无基线，按绝对阈值判）` };
+  }
+  const cur = corpusCounts(storeRoot);
+  const same = JSON.stringify(cur) === JSON.stringify(base.corpus);
+  const delta = ((p50 - base.medianOfMedians) / base.medianOfMedians) * 100;
+  if (!same) {
+    return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms > ${LIMITS.a4p50MaxMs}ms（语料已变，不做相对比较；基线 ${base.medianOfMedians}ms）` };
+  }
+  if (delta > 20) {
+    return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms 比基线 ${base.medianOfMedians}ms 退化 ${delta.toFixed(1)}%（>20%）` };
+  }
+  return { ok: true, note: `A4 p50 ${p50.toFixed(2)}ms 高于绝对阈值 ${LIMITS.a4p50MaxMs}ms，但同语料下对基线 ${base.medianOfMedians}ms 为 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%（未退化 >20%）` };
+}
+
 export function renderSummary(out, verdict) {
   const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
   return [
