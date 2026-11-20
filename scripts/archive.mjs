@@ -473,10 +473,14 @@ export async function runArchive(opts = {}) {
   // 实测：428 个会话串行读 = 230 秒，是当前归档最大头（多帧 zstd 逐帧解压 + 解析）。
   // 每个会话互不依赖 ⇒ 用固定并发（默认 6，可用 KIFU_ARCHIVE_CONCURRENCY 覆盖）并行读，
   // 主循环仍按 pairList 原顺序消费（结果表以 sessionId 为键）⇒ **输出与串行完全一致**。
-  const PRELOAD = new Map();
+  // T401b（2026-11-20）：**按批次预读**，不能把全部会话读进来——
+  // 第一版把 428 个会话的解压结果全留在 Map 里，真库直接 OOM（heap 3.9GB → exit 134）。
+  // 现在每批 N 个（默认 32，`KIFU_ARCHIVE_BATCH` 可覆盖）读完立刻消费、随后丢弃。
   const CONCURRENCY = Math.max(1, Number(process.env.KIFU_ARCHIVE_CONCURRENCY ?? 6) || 6);
-  {
-    const jobs = pairList.filter((p) => p.logPath);
+  const BATCH = Math.max(CONCURRENCY, Number(process.env.KIFU_ARCHIVE_BATCH ?? 32) || 32);
+  const preloadBatch = async (chunk) => {
+    const PRELOAD = new Map();
+    const jobs = chunk.filter((p) => p.logPath);
     let cursor = 0;
     const workers = Array.from({ length: Math.min(CONCURRENCY, jobs.length) }, async () => {
       for (;;) {
@@ -492,10 +496,14 @@ export async function runArchive(opts = {}) {
       }
     });
     await Promise.all(workers);
-  }
-  __t('after-preload');
+    return PRELOAD;
+  };
+  __t('after-preload-setup');
 
-  for (const pair of pairList) {
+  for (let batchStart = 0; batchStart < pairList.length; batchStart += BATCH) {
+  const batchChunk = pairList.slice(batchStart, batchStart + BATCH);
+  const PRELOAD = await preloadBatch(batchChunk);
+  for (const pair of batchChunk) {
     let header = null;
     let events = [];
     let truncated = false;
@@ -637,6 +645,7 @@ export async function runArchive(opts = {}) {
     built.push({ record, signals, graph, sessionId: pair.sessionId, hadLog: Boolean(pair.logPath), recoveryFacts });
   }
 
+  } // T401b：批次循环结束
   __t('after-build-loop');
   // ---- 3. 子代理归并：depth>0 且父局在语料里 ⇒ folded-into:<父局 id> ----
   const idBySession = new Map(built.map((b) => [b.record.sessionId, b.record.id]));
