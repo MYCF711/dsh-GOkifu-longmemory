@@ -538,20 +538,55 @@ export function createStore(opts = {}) {
 
   // ---- 原子写 ----
 
-  function writeAtomic(absTarget, text) {
-    const dir = path.dirname(absTarget);
+  // T398（2026-11-20）：**目录创建只做一次**。原来每条记录都 `mkdirSync(recursive)`，
+  // 归档一轮 9,000 条 topics 就是 9,000 次 mkdir 系统调用（外加递归 stat）。
+  // 目录集合在一次 store 生命周期内基本不变，记一下命中集合即可，语义不变
+  // （目录被外部删掉时会出现 ENOENT —— 那时 fallback 重试一次 mkdir）。
+  const DIRS_READY = new Set();
+  function ensureDir(dir) {
+    if (DIRS_READY.has(dir)) return;
     fs.mkdirSync(dir, { recursive: true });
+    DIRS_READY.add(dir);
+  }
+  /** T398：缓存可能过期（目录被别人删了 / 测试清了临时目录）⇒ 失败时重建并重试一次。 */
+  function withDir(dir, fn) {
+    try {
+      return fn();
+    } catch (err) {
+      if (err && (err.code === 'ENOENT' || err.code === 'EPERM')) {
+        DIRS_READY.delete(dir);
+        fs.mkdirSync(dir, { recursive: true });
+        DIRS_READY.add(dir);
+        return fn();
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * D9（2026-11-20，主人裁定）：**记录类写入不 fsync**（manifest / journal / index 仍 fsync）。
+   * 依据：微基准带 fsync 5.91ms/条、不带 1.46ms/条（4 倍）。
+   * 保证变化：进程崩溃无差别（OS 缓存仍落盘）；**断电**时记录文件可能"名字在、内容截断"——
+   * 由 `verify()` 的 sha256 检出、`rebuild` 修复。一致性根（manifest/journal）仍 fsync。
+   */
+  function writeAtomic(absTarget, text, opts = {}) {
+    const doFsync = opts.fsync !== false;
+    const dir = path.dirname(absTarget);
+    ensureDir(dir);
     tmpSeq += 1;
     const tmp = path.join(dir, `.tmp-${process.pid}-${tmpSeq}-${Date.now().toString(36)}`);
     const buf = Buffer.from(text, 'utf8');
-    const fd = fs.openSync(tmp, 'w');
-    try {
-      let offset = 0;
-      while (offset < buf.length) offset += fs.writeSync(fd, buf, offset, buf.length - offset);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
+    // T398：目录缓存命中时若目录已被外部删除 ⇒ 这里会 ENOENT，withDir 会重建并重试一次。
+    withDir(dir, () => {
+      const fd = fs.openSync(tmp, 'w');
+      try {
+        let offset = 0;
+        while (offset < buf.length) offset += fs.writeSync(fd, buf, offset, buf.length - offset);
+        if (doFsync) fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+    });
     try {
       fs.renameSync(tmp, absTarget);
     } catch (err) {
@@ -908,7 +943,8 @@ export function createStore(opts = {}) {
 
     const next = { ...rec, [META_KEY]: { ...meta, updatedAt: at } };
     const text = stableText(next);
-    writeAtomic(abs, text);
+    // D9：记录文件不 fsync（manifest/journal 仍 fsync）
+    writeAtomic(abs, text, { fsync: false });
     const hash = sha256(text);
     appendJournal({
       at,
@@ -1406,12 +1442,15 @@ export async function deriveStore({ episodes = [], derive = null, at = Date.now(
   const withTopics = active.map((e, i) => ({ ...e, topics: perEpisode[i].topics ?? [] }));
   const built = mods.link.buildLinks({ episodes: withTopics, topics: table });
 
+  // D8（2026-11-20，主人裁定）：**`idfNorm` 不再落盘**。
+  // 它是按全库局数归一化的派生值（`idfNorm = f(df, N)`），每新增一局全库 topic 都会变，
+  // 导致每轮归档把 9,000 个 topic 全量重写（实测约 52 秒）。
+  // 只存 `df`（真实计数），需要时用 `idfNormOf(df, N)` 现算 —— 读的地方见 `src/rooms/cli.mjs`。
   const topicRecords = table.topics.map((t) => ({
     id: t.id,
     kind: t.kind,
     key: t.key,
     df: t.df,
-    idfNorm: t.idfNorm,
     firstSeenAt: t.firstSeenAt,
     lastSeenAt: t.lastSeenAt,
     episodes: [...t.episodes].sort(),

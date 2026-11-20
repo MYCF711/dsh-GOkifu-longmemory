@@ -554,9 +554,15 @@ export function walkCorpus(corpus, term, { limit = 5 } = {}) {
   const needle = String(term ?? '').toLowerCase();
   if (!needle) return { term, topics: [], matches: [] };
   const byId = corpus.topics.byId;
+  // D8：`idfNorm` 不再落盘（会随全库局数变化），这里按 df 与当前局数现算。
+  const idfNormOf = (df) => {
+    const n = corpus.episodes.length;
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.max(0, Math.min(1, Math.log((n + 1) / (df + 0.5)) / Math.log(n + 2)));
+  };
   const matched = corpus.topics.topics
     .filter((t) => t.key.toLowerCase().includes(needle))
-    .sort((a, b) => (a.df - b.df) || (b.idfNorm - a.idfNorm) || (a.key < b.key ? -1 : 1));
+    .sort((a, b) => (a.df - b.df) || (idfNormOf(b.df) - idfNormOf(a.df)) || (a.key < b.key ? -1 : 1));
 
   const episodeById = new Map(corpus.episodes.map((e) => [e.episode.id, e]));
   const matches = [];
@@ -584,7 +590,7 @@ export function walkCorpus(corpus, term, { limit = 5 } = {}) {
       };
     });
     matches.push({
-      topic: { id: t.id, kind: t.kind, key: t.key, df: t.df, idfNorm: t.idfNorm },
+      topic: { id: t.id, kind: t.kind, key: t.key, df: t.df, idfNorm: idfNormOf(t.df) },
       count: holders.length,
       pointers,
     });
