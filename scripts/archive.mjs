@@ -739,8 +739,13 @@ export async function runArchive(opts = {}) {
   const recoveryIndexFacts = recoveryIndexFactsForClaims(authoritative.claims, recoveryFactsByEpisode);
 
   // ---- 5. 派生（R04/R05/R07/R06 重算；与 rebuild 共用同一函数 ⇒ 产物一致） ----
-  const derived = await deriveStore({ episodes, derive: opts.derive ?? null, at: now });
-  for (const note of derived.skipped) skipped.push(note);
+  // T388（2026-11-20）：**真跑时不再做第一次全量派生**。
+  // 读代码确认：`derived` 在非 dry-run 里只用于 ① `skipped` 提示 ② summary 数字；
+  // 真正写入库的 topics/links/threads 来自后面的 `derivedFromStore`（从 store 回读再派生）。
+  // 而一次 `deriveStore` 实测 **14.2 秒**（4572 局 → 21.5 万条 link）⇒ 白算一遍。
+  // dry-run 仍要算（它要出 `wouldWrite` 预估）。
+  const derived = dryRun ? await deriveStore({ episodes, derive: opts.derive ?? null, at: now }) : null;
+  if (derived) for (const note of derived.skipped) skipped.push(note);
 
   // T370：写增量水位（只写非 dry-run）。记录**本次参与归档**的每个会话的 log/graph 指纹。
   if (!dryRun && incremental) {
@@ -785,13 +790,16 @@ export async function runArchive(opts = {}) {
       mergedChildren, // T294：本次归档**自动归并**进父局的子局数（只增不改、幂等）
       skipped: pairs.length - built.length,
     },
-    derived: {
-      topics: derived.topics.length,
-      links: derived.links.length,
-      threads: Array.isArray(derived.threads) ? derived.threads.length : null,
-      mentions: derived.mentions.length,
-      indexBytes: derived.stats?.indexBytes ?? 0,
-    },
+    // dry-run 用第一次派生；真跑时留空，等 `derivedFromStore` 算完再回填（见下方 T388）
+    derived: derived
+      ? {
+        topics: derived.topics.length,
+        links: derived.links.length,
+        threads: Array.isArray(derived.threads) ? derived.threads.length : null,
+        mentions: derived.mentions.length,
+        indexBytes: derived.stats?.indexBytes ?? 0,
+      }
+      : { topics: null, links: null, threads: null, mentions: null, indexBytes: null },
     joseki: authoritative.joseki.length,
     claims: authoritative.claims.length,
     skipped,
@@ -840,6 +848,16 @@ export async function runArchive(opts = {}) {
     .filter((e) => e.record)
     .map((e) => e.record);
   const derivedFromStore = await deriveStore({ episodes: storedEpisodes, derive: opts.derive ?? null, at: now });
+  // T388：真跑时 summary 的派生数字从这里回填（与写入用的是同一份结果，数字不会跑偏）
+  if (!derived) {
+    summary.derived = {
+      topics: derivedFromStore.topics.length,
+      links: derivedFromStore.links.length,
+      threads: Array.isArray(derivedFromStore.threads) ? derivedFromStore.threads.length : null,
+      mentions: derivedFromStore.mentions?.length ?? 0,
+      indexBytes: derivedFromStore.stats?.indexBytes ?? 0,
+    };
+  }
   writes.topics = store.replaceDerived('topics', derivedFromStore.topics, { at: now });
   writes.links = store.replaceDerived('links', derivedFromStore.links, { at: now });
   writes.threads = Array.isArray(derivedFromStore.threads)
