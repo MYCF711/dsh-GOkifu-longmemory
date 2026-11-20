@@ -17,6 +17,35 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.158（2026-11-20）
+
+### T401 · 会话日志**并发预读**：归档 **307 秒 → 82 秒**
+
+**版本说明**：改 `scripts/archive.mjs` 的读取调度 ⇒ **patch**。
+
+**问题**：D8/D9 之后写盘侧已降到 77 秒，最大头变成**读会话日志 230 秒**——
+428 个会话串行读，每个都要把多帧 zstd 逐帧解压 + 解析。
+
+**做法**：会话之间互不依赖 ⇒ 固定并发（默认 6，可用 `KIFU_ARCHIVE_CONCURRENCY` 覆盖）预读，
+主循环仍按 `pairList` 原顺序消费（结果表以 `sessionId` 为键）⇒ **输出与串行完全一致**。
+
+**实测（逐阶段）**：
+
+```
+after-preload      +14.7s   ← 原来 230 秒
+after-build-loop   +20.4s
+after-claims       +20.7s
+after-links        +57.8s
+after-manifest     +64.9s
+after-verify       +80.8s
+```
+
+**总耗时 82 秒**（本会话起点是「>900 秒跑不完」）。
+
+**剩余大头**：写 links 37 秒 + verify 16 秒。
+
+**门禁**：全量 1308 / 1302 通过 / 0 失败 / 6 跳过 · `check.mjs` PASS · `archive.test` 11/11。
+
 ## 0.8.157（2026-11-20）
 
 ### D7 落地：A4 从**绝对 50ms** 改为**同语料下相对基线**判据

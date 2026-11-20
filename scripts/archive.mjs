@@ -469,13 +469,41 @@ export async function runArchive(opts = {}) {
   const readStats = { total: pairList.length, incrementalSkipped: skippedIncremental, headers: 0, eventsParsed: 0, truncated: 0, badLines: 0, noLog: 0, unreadable: 0 };
   const graphStats = { total: graphs.length, loaded: 0, failed: 0, nodes: 0, edges: 0, deltaFrames: 0, truncated: 0 };
 
+  // T401（2026-11-20）：**并发预读会话日志**。
+  // 实测：428 个会话串行读 = 230 秒，是当前归档最大头（多帧 zstd 逐帧解压 + 解析）。
+  // 每个会话互不依赖 ⇒ 用固定并发（默认 6，可用 KIFU_ARCHIVE_CONCURRENCY 覆盖）并行读，
+  // 主循环仍按 pairList 原顺序消费（结果表以 sessionId 为键）⇒ **输出与串行完全一致**。
+  const PRELOAD = new Map();
+  const CONCURRENCY = Math.max(1, Number(process.env.KIFU_ARCHIVE_CONCURRENCY ?? 6) || 6);
+  {
+    const jobs = pairList.filter((p) => p.logPath);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(CONCURRENCY, jobs.length) }, async () => {
+      for (;;) {
+        const idx = cursor;
+        cursor += 1;
+        if (idx >= jobs.length) return;
+        const pair = jobs[idx];
+        try {
+          PRELOAD.set(pair.sessionId, { read: await readSession(pair.logPath) });
+        } catch (err) {
+          PRELOAD.set(pair.sessionId, { error: err });
+        }
+      }
+    });
+    await Promise.all(workers);
+  }
+  __t('after-preload');
+
   for (const pair of pairList) {
     let header = null;
     let events = [];
     let truncated = false;
     if (pair.logPath) {
       try {
-        const read = await readSession(pair.logPath);
+        const pre = PRELOAD.get(pair.sessionId);
+        if (pre?.error) throw pre.error;
+        const read = pre?.read ?? (await readSession(pair.logPath));
         header = read.header;
         events = Array.isArray(read.events) ? read.events : [];
         truncated = Boolean(read.truncated);
