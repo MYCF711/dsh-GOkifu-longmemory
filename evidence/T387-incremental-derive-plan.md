@@ -39,3 +39,32 @@
 
 **先做第 1 步**（省 14 秒，几乎零风险），验证 `archive.test.mjs` + 幂等后再考虑第 2 步。
 第 2 步必须配"新旧派生逐条比对"的差分测试（与 T381 剪枝同法：差异必须为 0 才允许切换）。
+
+---
+
+## 五、更正（2026-11-20）：第 1 步的前提**搞错了**
+
+我写这份设计时以为「第二次 `deriveStore`（`archive.mjs:842`）只是核验，可以改抽样」。
+**读代码后确认不是**：
+
+```js
+// 回读 episodes 再算派生：保证"入档产物 == rebuild 产物"（同一份数据、同一函数）
+const storedEpisodes = store.list('episodes').filter(e => e.record).map(e => e.record);
+const derivedFromStore = await deriveStore({ episodes: storedEpisodes, ... });
+writes.topics = store.replaceDerived('topics', derivedFromStore.topics, ...);
+writes.links  = store.replaceDerived('links',  derivedFromStore.links,  ...);
+```
+
+**第二次才是"真正写入的那一份"**（从 store 回读，保证产物与 `rebuild` 一致）；
+第一次（`:742`）用的是**内存里本次构建的** episodes，供 claims/joseki 使用。
+
+⇒ 所以「改抽样校验」会把**唯一的写入源**降级，**不是零风险，绝对不能做**。
+
+### 修正后的第 1 步
+
+先量清楚**第一次 derive 的结果是否被复用**：若 `:742` 的派生结果只用于 claims/joseki，
+而 topics/links 由第二次派生写入，那么可以：
+1. 把 `:742` 那次**改成按需**（只在有 claims/joseki 变更时算）；
+2. 或让它与第二次共用同一份 episodes（避免两次全量）。
+
+**必须先做这一步测量（只读）才能动代码。** 在此之前，T387 的三步全部搁置。
