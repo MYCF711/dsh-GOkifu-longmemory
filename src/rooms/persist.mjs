@@ -577,18 +577,40 @@ export function createStore(opts = {}) {
 
   // ---- manifest ----
 
+  // T392（2026-11-20）：**manifest 读取记忆化** —— 这是归档跑不完的**真正元凶**。
+  //
+  // 实测：真库 `manifest.json` 4.53 MB；`ensureCompatible()` 在**每次 put** 里调用 `readManifest()`，
+  // 即每条记录都要 `readFileSync(4.5MB)` + `JSON.parse` ⇒ 单条 ~26ms。
+  // 2000 条「内容完全没变」的记录实测耗时 **53,478ms**（written=0, unchanged=2000），
+  // 26,238 条 topics 写入 242 秒 —— 全部对得上。
+  //
+  // 做法：按 `(mtimeMs, size)` 记忆化。manifest 每次写入都是原子替换（换 inode / 改 mtime），
+  // 所以这个戳能可靠失效；本进程自己写完 manifest 时也会主动清缓存。
+  let MANIFEST_MEMO = null; // { stamp, result }
+  const manifestStamp = () => {
+    try {
+      const st = fs.statSync(manifestPath);
+      return `${st.mtimeMs}:${st.size}`;
+    } catch { return null; }
+  };
+
   function readManifest() {
+    const stamp = manifestStamp();
+    if (stamp !== null && MANIFEST_MEMO && MANIFEST_MEMO.stamp === stamp) return MANIFEST_MEMO.result;
     let raw;
     try {
       raw = fs.readFileSync(manifestPath, 'utf8');
     } catch {
       return { manifest: null, error: 'missing' };
     }
+    let result;
     try {
-      return { manifest: JSON.parse(raw), error: null, raw };
+      result = { manifest: JSON.parse(raw), error: null, raw };
     } catch (err) {
-      return { manifest: null, error: 'invalid', message: String(err?.message ?? err), raw };
+      result = { manifest: null, error: 'invalid', message: String(err?.message ?? err), raw };
     }
+    if (stamp !== null) MANIFEST_MEMO = { stamp, result };
+    return result;
   }
 
   /** 写入侧的版本闸：不认识的版本必须明确报错，不许静默降级（契约 §7）。 */

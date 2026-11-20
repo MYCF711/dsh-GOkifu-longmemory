@@ -391,6 +391,9 @@ export async function runArchive(opts = {}) {
   const dryRun = Boolean(opts.dryRun);
   const includeSubagents = Boolean(opts.includeSubagents);
   const incrementalOpt = Boolean(opts.incremental);
+  // T391：**逐阶段即时打点**到 stderr（不改 summary 形状，避免打红 archive.test）。
+  // 进程被 timeout 杀掉时也能从 stderr 看出卡在哪一段。
+  const __t = (label) => { if (process.env.KIFU_ARCHIVE_TRACE === '1') console.error(`[archive] ${label} +${Date.now() - t0}ms`); };
   const sessionPrefix = typeof opts.sessionPrefix === 'string' && opts.sessionPrefix !== '' ? opts.sessionPrefix : null;
 
   if (!opts.dataRoot && !process.env.DSH_HOME) {
@@ -606,6 +609,7 @@ export async function runArchive(opts = {}) {
     built.push({ record, signals, graph, sessionId: pair.sessionId, hadLog: Boolean(pair.logPath), recoveryFacts });
   }
 
+  __t('after-build-loop');
   // ---- 3. 子代理归并：depth>0 且父局在语料里 ⇒ folded-into:<父局 id> ----
   const idBySession = new Map(built.map((b) => [b.record.sessionId, b.record.id]));
   let folded = 0;
@@ -636,6 +640,7 @@ export async function runArchive(opts = {}) {
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const archived = episodes.filter((e) => (e.state ?? 'archived') === 'archived');
 
+  __t('after-fold');
   // ---- 4. 定式 / claim（R08/R09；缺失或抛错 ⇒ 显式 skipped） ----
   const signalsByEpisode = new Map(built.map((b) => [b.record.id, b.signals]));
   const signalList = built.map((b) => ({ episode: b.record.id, sessionId: b.record.sessionId, signals: b.signals }));
@@ -701,6 +706,7 @@ export async function runArchive(opts = {}) {
     }
   }
 
+  __t('after-claims');
   const authoritative = {
     episodes,
     joseki: [...joseki, ...josekiReference].filter((r) => r && typeof r.id === 'string'),
@@ -738,6 +744,7 @@ export async function runArchive(opts = {}) {
   const recoveryFactsByEpisode = new Map(built.map((b) => [b.record.id, b.recoveryFacts ?? []]));
   const recoveryIndexFacts = recoveryIndexFactsForClaims(authoritative.claims, recoveryFactsByEpisode);
 
+  __t('after-recovery-index');
   // ---- 5. 派生（R04/R05/R07/R06 重算；与 rebuild 共用同一函数 ⇒ 产物一致） ----
   // T388（2026-11-20）：**真跑时不再做第一次全量派生**。
   // 读代码确认：`derived` 在非 dry-run 里只用于 ① `skipped` 提示 ② summary 数字；
@@ -847,7 +854,9 @@ export async function runArchive(opts = {}) {
     .list('episodes')
     .filter((e) => e.record)
     .map((e) => e.record);
+  __t('before-derive-out');
   const derivedFromStore = await deriveStore({ episodes: storedEpisodes, derive: opts.derive ?? null, at: now });
+  __t('after-derive-out');
   // T388：真跑时 summary 的派生数字从这里回填（与写入用的是同一份结果，数字不会跑偏）
   if (!derived) {
     summary.derived = {
@@ -859,7 +868,9 @@ export async function runArchive(opts = {}) {
     };
   }
   writes.topics = store.replaceDerived('topics', derivedFromStore.topics, { at: now });
+  __t('after-topics');
   writes.links = store.replaceDerived('links', derivedFromStore.links, { at: now });
+  __t('after-links');
   writes.threads = Array.isArray(derivedFromStore.threads)
     ? store.replaceDerived('threads', stabilizeExisting(store, 'threads', derivedFromStore.threads), { at: now })
     : { kind: 'threads', skipped: true, total: 0, written: 0, unchanged: 0, removed: [] };
@@ -867,8 +878,10 @@ export async function runArchive(opts = {}) {
     ? store.writeIndex(derivedFromStore.indexMd, { at: now })
     : { changed: false, skipped: true };
   writes.manifest = store.writeManifest(now);
+  __t('after-manifest');
 
   const verify = store.verify();
+  __t('after-verify');
   summary.writes = Object.fromEntries(
     Object.entries(writes).map(([kind, w]) => [kind, {
       total: w.total ?? 0,
