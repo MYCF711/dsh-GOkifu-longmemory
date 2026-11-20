@@ -79,3 +79,13 @@
 ## 六、给接手者的最短路径
 
 1. 读本文件 → 2. `git status` + `git log --oneline -5` → 3. 读 `AGENTS.md` §10/§11 → 4. 干活 → 5. `node scripts/check.mjs` + `node --test` → 6. 更新本文件 → 7. 分支/PR/合并/release。
+
+## 网络与本机绕行（2026-11-21 实测，写给接手者）
+
+| 现象 | 实测 | 绕行 |
+|---|---|---|
+| `git push` 报 `send-pack: unexpected disconnect`（但 `curl https://github.com` 返回 200） | 默认 HTTP/2 在该网络下被中断 | **`git config http.version HTTP/1.1`**（已写入本仓配置） |
+| `github.com:443` 完全不可达（curl v4/v6 都 000，DNS 正常） | 只封了这一个域名 | **全程走 GitHub API**：Contents API 提交文件 → PR → 合并 → Git Tags API 建 annotated tag → Releases API 发布（`v0.8.163` 就是这样发的） |
+| `api.github.com` / `ssh.github.com:443` | 均可达（后者无本仓私钥） | 用 API 代替 git 远端操作 |
+
+**教训**：`git push` 失败不等于「网络不通」——先分别测 `github.com`、`api.github.com`、`ssh.github.com:443`，再决定是改协议版本还是改通道。
