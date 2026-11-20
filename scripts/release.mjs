@@ -473,7 +473,15 @@ export async function performRelease(opts = {}) {
   // T168 硬要求：**打 tag 前 HEAD 的 CI 结论文本必须是 success**；拿不到结论就不打 tag。
   // （自愈提交之后 HEAD 已换成新提交，这一步查的就是**新 HEAD**。）
   // `--require-ci` 保留为兼容参数：现在默认就是 fail-closed，不再有"只告警"的分支。
+  // 2026-11-21（主人裁定：取消 GitHub 官方 CI，合并由主会话自己负责）：
+  // `--no-ci` 显式跳过这一步。**默认仍然 fail-closed**，只是多了一个**显式**出口，
+  // 且跳过时必须打印警告，避免以后有人以为"CI 绿了"。
+  const skipCi = process.argv.includes('--no-ci');
+  if (skipCi) {
+    console.warn('release: ⚠ 已按 --no-ci 跳过 GitHub CI 结论校验（主人裁定取消官方 CI）；本地 check/test 必须已过。');
+  }
   try {
+    if (skipCi) throw Object.assign(new Error('skip'), { __skip: true });
     const headSha = deps.out('git rev-parse HEAD');
     const runs = deps.ghRuns(headSha);
     const latest = Array.isArray(runs) ? runs[0] : null;
@@ -489,8 +497,12 @@ export async function performRelease(opts = {}) {
     }
     console.log(`release: CI 通过（${latest.workflowName}）${requireCi ? '' : ''}`);
   } catch (error) {
-    console.error(`release: 无法查询 CI（${String(error?.message ?? error).slice(0, 120)}）—— **不打 tag**。`);
-    return fail('ci-query-failed');
+    if (error?.__skip) {
+      // 已显式跳过，继续发版
+    } else {
+      console.error(`release: 无法查询 CI（${String(error?.message ?? error).slice(0, 120)}）—— **不打 tag**。`);
+      return fail('ci-query-failed');
+    }
   }
   if (deps.out(`git tag -l ${tag}`)) return fail('tag-exists', `release: tag ${tag} 已存在`);
 
