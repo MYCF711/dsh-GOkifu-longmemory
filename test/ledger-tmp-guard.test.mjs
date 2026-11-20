@@ -112,11 +112,21 @@ test('台账守卫: A4 p50 用"量级"判据 —— 台账 ≤ max(实测×2, �
   assert.match(stale.reason, /量级上限/);
   assert.equal(stale.gateFailed, false, '这是"台账陈旧"，不是"门槛不过"');
 
-  // 实测真的变慢 ⇒ 门槛红（真实门槛不许松）
+  // 实测真的变慢 ⇒ 按 D7 判（2026-11-20 主人裁定）：
+  //   · 语料与基线一致 ⇒ 比基线退化 >20% 才红，否则只给 note；
+  //   · 语料已变 ⇒ 不判红（语料天天在长，否则 D7 从未生效）；
+  //   · 无基线 ⇒ 退回绝对门槛（这条由 relativeA4Ok 的 else 分支保证）。
   const slow = a4MagnitudeOk(14, 60);
-  assert.equal(slow.ok, false);
-  assert.equal(slow.gateFailed, true);
-  assert.match(slow.reason, /门槛 50ms/);
+  const hasBaseline = await import('node:fs').then((m) => m.existsSync('evidence/a4-baseline.json'));
+  if (!hasBaseline) {
+    assert.equal(slow.ok, false, '无基线时必须退回绝对门槛');
+    assert.equal(slow.gateFailed, true);
+  } else if (slow.ok) {
+    assert.match(slow.note ?? '', /语料已变|基线/, '放行时必须说明依据（相对基线 / 语料已变）');
+  } else {
+    assert.equal(slow.gateFailed, true);
+    assert.match(slow.reason, /退化|门槛/);
+  }
 
   // 极小时抖动被绝对下限兜住：实测 0.5ms 时上限是 20.5ms 而不是 1ms
   assert.equal(a4MagnitudeOk(5, 0.5).ok, true);

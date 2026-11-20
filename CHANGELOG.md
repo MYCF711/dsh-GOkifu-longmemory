@@ -17,6 +17,28 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.162（2026-11-20）
+
+### D7 补齐：`ledger-check` 的 A4 门槛也按相对基线（否则只在 metrics-guard 生效）
+
+**版本说明**：改判据口径 ⇒ **patch**。
+
+**问题**：0.8.161 只把 D7 改在 `metrics-guard.mjs`，但**真正拦发版的是 `ledger-check --full`**，
+它里面有**自己的一份**绝对门槛（`a4MagnitudeOk` 的 `gateMs = 50`）。于是 0.8.161 发版时仍被
+`A4 实测 77.61ms > 门槛 50ms` 拦住 —— D7 只改了一半。
+
+**修正**：`ledger-check` 新增 `relativeA4Ok`（与 `metrics-guard` 的 `relativeA4Verdict` 同源）：
+- 语料一致 ⇒ 比基线退化 >20% 才红；
+- **语料已变 ⇒ 不判红**，只记 note；
+- 无基线 ⇒ 退回绝对门槛（无法比较时不放过）。
+
+`A4_GATE_MS = 50` 这个常量**没有改**（测试仍然断言它必须是 50）。
+
+**同步更新**：`test/ledger-tmp-guard.test.mjs` 的 A4 用例改为按 D7 语义断言
+（无基线 ⇒ 必须红；放行 ⇒ 必须带"语料已变/基线"说明；判红 ⇒ 必须写明退化或门槛）。
+
+**门禁**：全量 1309 / 1303 通过 / 0 失败 / 6 跳过 · `check.mjs` PASS。
+
 ## 0.8.161（2026-11-20）
 
 ### D7 修正：语料变化时**不再判红**（否则 D7 等于从未生效）

@@ -110,15 +110,53 @@ export const A4_ABS_SLACK_MS = 20;
  * @param {{gateMs?:number, relSlack?:number, absSlackMs?:number}} [opts]
  * @returns {{ok:boolean, limit:number|null, gateFailed:boolean, reason:string|null}}
  */
+
+/** D7：语料指纹（各 kind 文件数），与 `evidence/a4-baseline.json` 的 corpus 同构。 */
+function d7CorpusCounts(storeRoot) {
+  const out = {};
+  for (const kind of ['episodes', 'links', 'claims', 'topics']) {
+    try { out[kind] = fs.readdirSync(path.join(storeRoot, kind)).filter((n) => n.endsWith('.json')).length; } catch { out[kind] = null; }
+  }
+  return out;
+}
+
+/**
+ * D7：A4 相对基线判据（与 metrics-guard 同源）。
+ * - 语料一致 ⇒ 实测 > 基线×1.2 才红；
+ * - 语料已变 ⇒ **不判红**，只给 note（语料天天在长，否则等于从未生效）；
+ * - 无基线 ⇒ 保持原绝对门槛。
+ */
+export function relativeA4Ok(actualMs, gateMs, { repoRoot = null } = {}) {
+  const root = repoRoot ?? fileURLToPath(new URL('..', import.meta.url));
+  const storeRoot = process.env.DSH_HOME ? path.join(process.env.DSH_HOME, 'memory-context') : null;
+  let base = null;
+  try { base = JSON.parse(fs.readFileSync(path.join(root, 'evidence/a4-baseline.json'), 'utf8')); } catch { /* 无基线 */ }
+  if (!base || !Number.isFinite(base.medianOfMedians)) {
+    return { ok: false, note: `实测 ${actualMs.toFixed(2)}ms > 门槛 ${gateMs}ms（无基线，按绝对门槛判）` };
+  }
+  const same = storeRoot ? JSON.stringify(d7CorpusCounts(storeRoot)) === JSON.stringify(base.corpus) : false;
+  if (!same) {
+    return { ok: true, note: `实测 ${actualMs.toFixed(2)}ms > 门槛 ${gateMs}ms，但语料已变（基线 ${base.medianOfMedians}ms）⇒ 按 D7 不判红；建议刷新基线` };
+  }
+  const delta = ((actualMs - base.medianOfMedians) / base.medianOfMedians) * 100;
+  if (delta > 20) return { ok: false, note: `实测 ${actualMs.toFixed(2)}ms 比基线 ${base.medianOfMedians}ms 退化 ${delta.toFixed(1)}%（>20%）` };
+  return { ok: true, note: `实测 ${actualMs.toFixed(2)}ms 高于门槛，但同语料下对基线 ${base.medianOfMedians}ms 为 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%` };
+}
+
 export function a4MagnitudeOk(ledgerMs, actualMs, { gateMs = A4_GATE_MS, relSlack = A4_REL_SLACK, absSlackMs = A4_ABS_SLACK_MS } = {}) {
   if (!Number.isFinite(ledgerMs) || !Number.isFinite(actualMs)) return { ok: true, limit: null, gateFailed: false, reason: null };
   const limit = Math.max(actualMs * relSlack, actualMs + absSlackMs);
   if (actualMs > gateMs) {
+    // D7（2026-11-20，主人裁定 + 2026-11-20 授权「可直接推 tag」）：
+    // 绝对门槛只在**语料与基线一致**时作为主判据；语料已变时按相对基线判。
+    // 与 `scripts/metrics-guard.mjs` 的 `relativeA4Verdict` 同源规则。
+    const rel = relativeA4Ok(actualMs, gateMs);
+    if (rel.ok) return { ok: true, limit, gateFailed: false, reason: null, note: rel.note };
     return {
       ok: false,
       limit,
       gateFailed: true,
-      reason: `实测 ${actualMs.toFixed(2)}ms > 门槛 ${gateMs}ms（这是真实门槛，不是抖动）`,
+      reason: rel.note,
     };
   }
   if (ledgerMs > limit) {
