@@ -50,6 +50,7 @@ import { readKindBundleCached, writeKindBundle, WALK_BUNDLE_KINDS } from './walk
 export const MANIFEST_FILE = 'manifest.json';
 export const INDEX_FILE = 'index.md';
 export const JOURNAL_REL = 'journal/archive.jsonl';
+export const KIND_BUNDLE_DIR_T394 = '.cache';
 export const META_KEY = '_store';
 export const PATH_POLICY = 'relative';
 export const DEFAULT_USER = 'owner';
@@ -631,6 +632,47 @@ export function createStore(opts = {}) {
   }
 
   /** 全目录快照：每个条目文件的 sha256 + 各 kind 条目数（一次遍历）。 */
+  // T394（2026-11-20）：**checksum 缓存** —— manifest/verify 都对 6.3 万个文件重算 sha256，
+  // 实测 `writeManifest` 36.6 秒、`verify` 32.1 秒，两次都是全量读盘 + 哈希。
+  // 做法：按 `(mtimeMs, size)` 命中就复用上次的 sha256（内容没变 ⇒ sha 必然相同），
+  // 只对变化的文件重算。缓存落盘在 `<root>/.cache/checksums.json`，跨进程复用。
+  const CK_PATH = path.join(root, KIND_BUNDLE_DIR_T394, 'checksums.json');
+  let CK_MEMO = null; // Map<rel, [mtimeMs, size, sha]>
+  let CK_DIRTY = false;
+  function loadCk() {
+    if (CK_MEMO) return CK_MEMO;
+    try {
+      const raw = JSON.parse(fs.readFileSync(CK_PATH, 'utf8'));
+      const files = raw && raw.version === 1 && raw.files && typeof raw.files === 'object' ? raw.files : {};
+      CK_MEMO = new Map(Object.entries(files));
+    } catch {
+      CK_MEMO = new Map();
+    }
+    return CK_MEMO;
+  }
+  function saveCk() {
+    if (!CK_DIRTY) return;
+    try {
+      fs.mkdirSync(path.dirname(CK_PATH), { recursive: true });
+      const obj = Object.fromEntries(loadCk());
+      const tmp = `${CK_PATH}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify({ version: 1, files: obj }), 'utf8');
+      fs.renameSync(tmp, CK_PATH);
+      CK_DIRTY = false;
+    } catch { /* 缓存写失败不影响正确性 */ }
+  }
+  /** 读文件并算 sha256；命中缓存就跳过读盘。返回 { buf, sha, bytes }。 */
+  function checksumOf(abs, rel) {
+    const st = statSafe(abs);
+    const memo = loadCk();
+    const hit = st?.isFile() ? memo.get(rel) : null;
+    if (hit && hit[0] === st.mtimeMs && hit[1] === st.size) return { buf: null, sha: hit[2], bytes: st.size };
+    const buf = fs.readFileSync(abs);
+    const sha = sha256(buf);
+    if (st?.isFile()) { memo.set(rel, [st.mtimeMs, st.size, sha]); CK_DIRTY = true; }
+    return { buf, sha, bytes: buf.length };
+  }
+
   function snapshot() {
     const files = new Map();
     const counts = {};
@@ -649,19 +691,21 @@ export function createStore(opts = {}) {
           continue;
         }
         const abs = path.join(dir, name);
-        const buf = fs.readFileSync(abs);
-        bytes += buf.length;
-        files.set(`${kind}/${name}`, sha256(buf));
+        const rel = `${kind}/${name}`;
+        const ck = checksumOf(abs, rel);
+        bytes += ck.bytes;
+        files.set(rel, ck.sha);
         n += 1;
       }
       counts[kind] = n;
     }
     const indexStat = statSafe(indexPath);
     if (indexStat?.isFile()) {
-      const buf = fs.readFileSync(indexPath);
-      bytes += buf.length;
-      files.set(INDEX_FILE, sha256(buf));
+      const ck = checksumOf(indexPath, INDEX_FILE);
+      bytes += ck.bytes;
+      files.set(INDEX_FILE, ck.sha);
     }
+    saveCk(); // T394：把本次算过/命中过的指纹落盘，下次跨进程复用
     return { files, counts, issues, bytes };
   }
 
