@@ -538,9 +538,20 @@ export function createStore(opts = {}) {
 
   // ---- 原子写 ----
 
+  // T398（2026-11-20）：**目录创建只做一次**。原来每条记录都 `mkdirSync(recursive)`，
+  // 归档一轮 9,000 条 topics 就是 9,000 次 mkdir 系统调用（外加递归 stat）。
+  // 目录集合在一次 store 生命周期内基本不变，记一下命中集合即可，语义不变
+  // （目录被外部删掉时会出现 ENOENT —— 那时 fallback 重试一次 mkdir）。
+  const DIRS_READY = new Set();
+  function ensureDir(dir) {
+    if (DIRS_READY.has(dir)) return;
+    fs.mkdirSync(dir, { recursive: true });
+    DIRS_READY.add(dir);
+  }
+
   function writeAtomic(absTarget, text) {
     const dir = path.dirname(absTarget);
-    fs.mkdirSync(dir, { recursive: true });
+    ensureDir(dir);
     tmpSeq += 1;
     const tmp = path.join(dir, `.tmp-${process.pid}-${tmpSeq}-${Date.now().toString(36)}`);
     const buf = Buffer.from(text, 'utf8');
