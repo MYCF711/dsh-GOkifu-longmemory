@@ -1,100 +1,140 @@
-// src/plugin.mjs —— 棋院（Kifu-in）的**宿主插件入口**：`agent/pre-step` 上的记忆卡注入。
+// src/plugin.mjs —— 棋院（Kifu-in）宿主插件入口：**组合根 + 出口垫片**（重构 C 期 M1）。
 //
-// ── 这是什么 ────────────────────────────────────────────────────────────────
-// 真注入的唯一一刀。每轮每次进入 step 前，`agent/pre-step` 先拿下游默认 decision，
-// 只有 `decision.kind === "enter"` 时才考虑：拿本轮最后一条 user 文本当信号 → 走 R11 walk →
-// R12 buildMemoryCard → R13 runGates；闸全绿且**确实有内容**，才把一张记忆卡插进
-// `decision.messages`（插在"最后一条 claimed 消息"之后），并**每会话只插一次**。
+// 本文件只做三件事：
+//   ① **组合根**：`apply()` 解析配置 → 建运行时（lifecycle）→ 挂两个钩子（hooks）；
+//   ② **出口垫片**：原导出面（named + default）逐项不变 —— 宿主、脚本、测试只认这一层；
+//   ③ **诊断留痕写盘**：卡样本 / live-stats / 消息语料 / D5 遥测的**唯一写点**。
+//      为什么留在这里：T42 用**源扫描**钉住三个 64MB 上限的常量定义、T365 钉住
+//      `...cardSampleSignal(payload?.messages)` 这一行 —— 两条 tombstone 要求"写盘代码就长在这个文件里"，
+//      所以它们不随注入逻辑搬进 hooks.mjs（判据不许松，搬走就等于让那两条用例变成空转）。
 //
-// ── 接缝（上游 dsh-GOkifu-compact 已核实，src/engine.mjs 的 `ctx.on("agent/pre-step", …)`）──
-//   ctx.on("agent/pre-step", async (payload, next) => {
-//     const decision = await next();                       // waterfall：取下游默认
-//     if (decision.kind !== "enter") return decision;      // 非 enter 不动
-//     … 返回 { ...decision, messages: 新数组 } 才算替换入步消息
-//   })
-//   注入位置（与压缩插件同一套语义，两个替换**互不代管**）：
-//     const lastClaimed = decision.messages.findLastIndex((m) => payloadMessages.includes(m));
-//     const entered = decision.messages.toSpliced(Math.max(lastClaimed, 0) + 1, 0, message);
-//   消息形状：`createUserMessage({content:[{type:"text",text}], source:{kind,form,digest}})`
-//   —— 从 `@deepseek-ai/dsh-llm` **动态 import**（config 可注入替身；宿主没这个包时安静跳过）。
+// 其余职责按"删掉谁，哪条用例红"切开了：
+//   · `src/hooks.mjs`     —— 钩子注册与事件绑定 + pre-step 决策流水线（decidePreStep）
+//   · `src/lifecycle.mjs` —— 配置解析 / apply 运行时 / dispose 语义 / autoBuild 共享 record / 预热 / 工具面
+//   · `src/cache.mjs`     —— walk cache / bundle 读取 / 探针缓存 / 会话作用域缓存
+// 依赖方向：`plugin → hooks → lifecycle → cache`（**无环**；cache 是叶子，只 import 房间）。
 //
-// ── 边界（硬规则，逐条对应 docs/记忆的职责边界.md §2/§5）──────────────────
-//   · 只读：只读 sidecar（`<DSH_HOME>/memory-context`）与只写 `evidence/shadow/`（影子模式）。
-//   · **不写会话事件**、不 `session.append`、不改会话日志：唯一的输出就是返回的 decision。
-//   · **不阻塞会话**：store 缺失 / 构建抛错 / 闸门不过 / 消息造不出来 —— 一律 `ctx.logger?.warn` +
-//     原样返回下游 decision。这个函数没有"失败"分支，只有"少说一句"。
-//   · 注入内容只陈述事实：祈使句/许可/建议由 R13 边界闸判，`gates.ok === false` 就不注入。
-//   · 成本：默认预算 500 tokens（实测最坏 ~300），首轮那行 ~35 tokens；不命中零注入。
+// ── 接缝与边界（全文见 docs/记忆的职责边界.md）──────────────────────────────
+//   · `agent/pre-step` 是 waterfall：`next()` 取下游默认，返回 `{kind:'enter', messages}` 才替换入步消息；
+//     与压缩插件同点注入时两个替换**互不代管**。
+//   · 只读 sidecar；**不写会话事件**、不 append、不改会话日志；唯一的输出就是返回的 decision。
+//   · **不阻塞会话**：库缺失 / 构建抛错 / 闸门不过 / 消息造不出来 —— 一律 warn + 原样返回下游 decision。
+//   · 注入内容只陈述事实（祈使句/许可/建议由 R13 边界闸判，`gates.ok === false` 就不注入）。
 //
-// ── 配置（默认全关）──────────────────────────────────────────────────────
-//   enabled         false  —— 真注入总开关；**只有 true 才可能改 decision**
-//   shadow          true   —— 影子模式：只落 evidence/shadow/shadow.jsonl，永远返回原 decision
-//   storeRoot       null   —— 默认 `<DSH_HOME>/memory-context`
-//   shadowDir       null   —— 默认 `<repo>/evidence/shadow`（不得在 $DSH_HOME 内，硬守卫）
-//   budgetTokens    500    —— 卡片预算（口径 = indexLine + section）
-//   limit           5      —— 条数上限
-//   oncePerSession  true   —— 每会话只注入一次（WeakSet）
-//   now             null   —— 固定时钟（测试/回放用）
-//   createUserMessage null —— 消息构造替身（测试用；缺省动态 import 宿主包）
-//   probeValidity    true   —— 闸 3 真核验（true 才调 fs/git；false ⇒ 闸 3 记 unverified）
-//   deps             null  —— 依赖替身（测试用：createStore/walk/buildMemoryCard/runGates/writeShadow）
-
-import { createHash, randomUUID } from 'node:crypto';
-import { zstdDecompressSync } from 'node:zlib';
+// ── 配置：键与默认值见 `lifecycle.mjs` 的 `DEFAULT_CONFIG`（唯一一份）────────────
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { hasRelevantClaim, hasReliableHandle } from './rooms/abstain.mjs';
+
+// T3：`DEFAULT_CONFIG.pointerTier` 的默认值 = `POINTER_TIER_DEFAULT`（单一来源，与 R12 的默认参数同一份）。
+import { POINTER_TIER_DEFAULT } from './rooms/inject.mjs';
 
 import {
-  POINTER_TIER_DEFAULT,
-  buildMemoryCard,
-  defaultShadowDir,
-  filterHitsByScope,
-  scopeKeyFromPath,
-  signalFromText,
-  writeShadow,
-  // T33：注入时结算 trial（只写 sidecar，不改可见性/不退役）
-  recordInjectionTrials,
-} from './rooms/inject.mjs';
-// task-11 / P0-1：注入去重的**权威**从 `apply()` 内的内存集合搬到 sidecar 槽位账本。
-// 为什么必须搬：宿主 `session/end-seed` ⇒ 下一轮 agent 重建 ⇒ 插件**重新 apply** ⇒ 内存集合归零 ⇒
-// 同一张卡重投（会话 aa0b0da9 实测 10/10 次重复注入；对照会话 0 个 end-seed 只投 1 次）。
+  CARD_SOURCE_FORM,
+  CARD_SOURCE_KIND,
+  HOOK,
+  LLM_PACKAGE,
+  MESSAGE_ENTITY_PATTERNS,
+  PLUGIN_VERSION,
+  cardAlreadyInContext,
+  cardText,
+  classifyAbstainReason,
+  collectRepeatTrigger,
+  createPreStepHandler,
+  createTurnStoppingHandler,
+  digestOf,
+  gateClaimIdsFromGates,
+  gateCodesFromGates,
+  gateIdsFromGates,
+  insertAfterClaimed,
+  lastUserText,
+  makeUserMessageFallback,
+  messageEntities,
+  messageText,
+  name,
+  sessionIdOf,
+  signalFromMessages,
+} from './hooks.mjs';
 import {
-  INJECT_SLOT_ID,
-  recordSlot,
-  slotContentHash,
-  slotContentPresent,
-  slotIdempotencyEnabled,
-  slotSeen,
-} from './rooms/inject-slot.mjs';
-import { probeValidity, validityKeyOf, workspaceOf, runGates } from './rooms/gates.mjs';
-import { classifyErrorClass } from './rooms/claim.mjs';
-import { errorClassKeyOf } from './rooms/topic.mjs';
-import { registerMemoryTools, recordToolRegistration } from './tools.mjs';
-import { createMemorySdk } from './sdk.mjs';
-import { createStore } from './rooms/persist.mjs';
-import { createWalkCache } from './rooms/walk.mjs';
-// task-9 / P0-4：心跳摘要条数上限的唯一权威值（原为三处各写一份 5：两个 gate* 函数的默认参数 +
-// 一条 warn 的 slice(0, 5)）。
-import { DIGEST_GATE_CODES_LIMIT } from './rooms/limits.mjs';
+  CONFIG_ROUTE,
+  USER_CONFIG_FILE,
+  WARMUP_MAX_EPISODES,
+  WARMUP_MAX_LINKS,
+  createConfigApi,
+  createPluginRuntime,
+  enforceStoreRoot,
+  readUserConfig,
+  resolveShadowDir,
+  warn,
+  writeUserConfig,
+} from './lifecycle.mjs';
+import {
+  SESSION_MAP_MAX,
+  WALK_CACHE_IDLE_MS,
+  lastResolvedScope,
+  probeCacheSize,
+  probeCardValidity,
+  resolveSessionScope,
+  sessionLogScope,
+  sessionScopeIndex,
+  walkCacheEntries,
+  walkCacheSize,
+} from './cache.mjs';
 
-/** 插件名（宿主用来标识这个插件）。 */
-export const name = 'dsh-gokifu-longmemory';
+// ── 出口垫片：下面这四组 `export { … }` 就是"原导出面逐项相等"的清单 ──────────
+export {
+  CARD_SOURCE_FORM,
+  CARD_SOURCE_KIND,
+  HOOK,
+  LLM_PACKAGE,
+  MESSAGE_ENTITY_PATTERNS,
+  PLUGIN_VERSION,
+  cardAlreadyInContext,
+  cardText,
+  classifyAbstainReason,
+  collectRepeatTrigger,
+  digestOf,
+  gateClaimIdsFromGates,
+  gateCodesFromGates,
+  gateIdsFromGates,
+  insertAfterClaimed,
+  lastUserText,
+  makeUserMessageFallback,
+  messageEntities,
+  messageText,
+  name,
+  sessionIdOf,
+  signalFromMessages,
+};
+export {
+  CONFIG_ROUTE,
+  USER_CONFIG_FILE,
+  WARMUP_MAX_EPISODES,
+  WARMUP_MAX_LINKS,
+  enforceStoreRoot,
+  readUserConfig,
+  writeUserConfig,
+};
+export {
+  SESSION_MAP_MAX,
+  WALK_CACHE_IDLE_MS,
+  lastResolvedScope,
+  probeCacheSize,
+  probeCardValidity,
+  resolveSessionScope,
+  sessionLogScope,
+  sessionScopeIndex,
+  walkCacheEntries,
+  walkCacheSize,
+};
 
-// T390：预热规模闸 —— 超过就不预热（避免在大库上把宿主卡死十几秒）
-export const WARMUP_MAX_EPISODES = 1200;
-export const WARMUP_MAX_LINKS = 8000;
-/** 配置/消息格式的版本号（改消息形状时 +1，便于事后认账）。 */
-export const PLUGIN_VERSION = 1;
-/** 注入消息的 source 标识（宿主里一眼能认出是棋院写的）。 */
-export const CARD_SOURCE_KIND = 'dsh-gokifu-longmemory';
-export const CARD_SOURCE_FORM = 'memory-card';
-/** 挂的钩子名。 */
-export const HOOK = 'agent/pre-step';
-/** 宿主消息包的包名（动态 import；解析不到就安静跳过）。 */
-export const LLM_PACKAGE = '@deepseek-ai/dsh-llm';
-
+// ---------------------------------------------------------------------------
+// 配置默认值表：**唯一一份，必须逐字留在这里**
+//
+// `scripts/m5-report.mjs` 的 `readPluginFacts` 用**源扫描**读本文件的 `DEFAULT_CONFIG`（A3 轴的
+// 「零配置默认开启」事实）；T42 那一族 tombstone 用的是同一套「源即判据」写法。判据不许松 ⇒
+// 表留在入口，配置**逻辑**（sanitize / resolve / schema / 设置路由）在 `lifecycle.mjs` 的
+// `createConfigApi`，表以参数注入 ⇒ 依赖方向仍是 plugin → lifecycle（不成环）。
+// ---------------------------------------------------------------------------
 export const DEFAULT_CONFIG = Object.freeze({
   // 零配置（2026-11-02 主人裁定）：装完即用；库不存在时自动建库、本次沉默。
   enabled: true,
@@ -138,255 +178,10 @@ export const DEFAULT_CONFIG = Object.freeze({
   deps: null,
 });
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const configApi = createConfigApi(DEFAULT_CONFIG);
+const { sanitizeConfig, resolveConfig, Config, storeStatsOf, handleConfigRoute } = configApi;
+export { sanitizeConfig, resolveConfig, Config, storeStatsOf, handleConfigRoute };
 
-// ---------------------------------------------------------------------------
-// 用户配置（GUI 保存的「记忆库地址」等）落在 <DSH_HOME>/kifu-longmemory.json。
-// 优先级：profile 配置 > 用户文件 > 默认值。文件坏了只 warn，不阻塞。
-// ---------------------------------------------------------------------------
-export const USER_CONFIG_FILE = 'kifu-longmemory.json';
-
-function dshHomeOf() {
-  return typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME ? process.env.DSH_HOME : null;
-}
-
-export function readUserConfig({ dshHome = null } = {}) {
-  const home = dshHome ?? dshHomeOf();
-  if (!home) return {};
-  try {
-    const raw = fs.readFileSync(path.join(home, USER_CONFIG_FILE), 'utf8');
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-export function writeUserConfig(patch, { dshHome = null } = {}) {
-  const home = dshHome ?? dshHomeOf();
-  if (!home) throw new Error('没有 DSH_HOME，无法保存插件配置');
-  const current = readUserConfig({ dshHome: home });
-  const next = { ...current, ...patch };
-  const file = path.join(home, USER_CONFIG_FILE);
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, `${JSON.stringify(next, null, 2)}
-`, 'utf8');
-  fs.renameSync(tmp, file);
-  return next;
-}
-
-/** profile 配置覆盖用户文件；两者都不认识的值由 sanitizeConfig 兜底。 */
-export function resolveConfig(rawConfig = {}) {
-  return sanitizeConfig({ ...readUserConfig(), ...(rawConfig && typeof rawConfig === 'object' ? rawConfig : {}) });
-}
-
-// ---------------------------------------------------------------------------
-// 小工具（全部纯函数，单独导出便于单测）
-// ---------------------------------------------------------------------------
-
-function boolOf(value, fallback) {
-  if (typeof value === 'boolean') return value;
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  return fallback;
-}
-
-function positiveInt(value, fallback, max) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return fallback;
-  return Math.min(Math.floor(n), max);
-}
-
-/** 配置净化：只认已知键、类型不对就退回默认（不静默接受垃圾）。 */
-export function sanitizeConfig(raw = {}) {
-  const src = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
-  // T341 · ablation 实验开关：`GOKIFU_INJECT=off|false|0` ⇒ 完全静默（enabled=false 且 shadow=false）。
-  // 背景（precision-auditor 评审 evidence/ablation-设计评审.md）：旧 ablation 脚本写的 `GOKIFU_INJECT=off`
-  // 此前无人读取 ⇒ B 臂仍带注入、两臂等价 ⇒ "无差别"是假象。仅显式 off/false/0 才关；
-  // 不设/其他值 = 配置键为准（绝不误关生产注入）。进程级生效，不碰宿主配置/不触发热重载。
-  const injectEnv = String(process.env.GOKIFU_INJECT ?? '').trim().toLowerCase();
-  const injectOff = injectEnv === 'off' || injectEnv === 'false' || injectEnv === '0';
-  return {
-    enabled: injectOff ? false : boolOf(src.enabled, DEFAULT_CONFIG.enabled),
-    shadow: injectOff ? false : boolOf(src.shadow, DEFAULT_CONFIG.shadow),
-    storeRoot: typeof src.storeRoot === 'string' && src.storeRoot.trim() !== '' ? src.storeRoot.trim() : null,
-    sampleCards: typeof src.sampleCards === 'boolean' ? src.sampleCards : DEFAULT_CONFIG.sampleCards,
-    collectMessages: typeof src.collectMessages === 'boolean' ? src.collectMessages : DEFAULT_CONFIG.collectMessages,
-    shadowDir: typeof src.shadowDir === 'string' && src.shadowDir.trim() !== '' ? src.shadowDir.trim() : null,
-    budgetTokens: positiveInt(src.budgetTokens, DEFAULT_CONFIG.budgetTokens, 100000),
-    limit: positiveInt(src.limit, DEFAULT_CONFIG.limit, 100),
-    oncePerSession: boolOf(src.oncePerSession, DEFAULT_CONFIG.oncePerSession),
-    abstainIrrelevant: boolOf(src.abstainIrrelevant, DEFAULT_CONFIG.abstainIrrelevant),
-    now: Number.isFinite(src.now) ? Number(src.now) : (typeof src.now === 'function' ? src.now : null),
-    createUserMessage: typeof src.createUserMessage === 'function' ? src.createUserMessage : null,
-    probeValidity: boolOf(src.probeValidity, true),
-    autoBuild: boolOf(src.autoBuild, true),
-    autoArchive: boolOf(src.autoArchive, true),
-    autoArchiveMinutes: positiveInt(src.autoArchiveMinutes, 30, 24 * 60),
-    crossScopeClass: boolOf(src.crossScopeClass, false),
-    // T3：三级交付的第二级开关。**显式 false 才关**（`boolOf` 兜底 = DEFAULT_CONFIG 的值），
-    // 不用 `!== false` —— 那会把「未设置」当成「开启」，与 D5 踩过的坑同一个形状。
-    pointerTier: boolOf(src.pointerTier, DEFAULT_CONFIG.pointerTier),
-    preferenceHardOnly: boolOf(src.preferenceHardOnly, false),
-    liveStats: boolOf(src.liveStats, true),
-    repeatHint: boolOf(src.repeatHint, true),
-    repeatHintAfter: positiveInt(src.repeatHintAfter, 2, 20),
-    repeatHintMax: positiveInt(src.repeatHintMax, 1, 5),
-    deps: src.deps && typeof src.deps === 'object' && !Array.isArray(src.deps) ? src.deps : null,
-  };
-}
-
-/** 一条消息的纯文本（兼容 `content: "…"` / `[{type:"text",text}]` / `{text}` 三种形态）。 */
-export function messageText(message) {
-  if (!message || typeof message !== 'object') return typeof message === 'string' ? message : '';
-  const content = message.content;
-  if (typeof content === 'string') return content.trim();
-  if (Array.isArray(content)) {
-    const parts = [];
-    for (const block of content) {
-      if (!block || typeof block !== 'object') continue;
-      if (block.type !== undefined && block.type !== 'text') continue;
-      if (typeof block.text === 'string') parts.push(block.text);
-    }
-    return parts.join('\n').trim();
-  }
-  if (content && typeof content === 'object' && typeof content.text === 'string') return content.text.trim();
-  if (typeof message.text === 'string') return message.text.trim();
-  return '';
-}
-
-/** 本轮信号：`payload.messages` 里**最后一条有文本的 user 消息**。 */
-export function lastUserText(messages) {
-  const list = Array.isArray(messages) ? messages : [];
-  for (let i = list.length - 1; i >= 0; i -= 1) {
-    const message = list[i];
-    if (message && typeof message === 'object' && message.role && message.role !== 'user') continue;
-    const text = messageText(message);
-    if (text) return text;
-  }
-  return '';
-}
-
-// T267：硬实体（与 scripts/a2b-holdout.mjs 的 HARD_ENTITY_PATTERNS 同一套正则）
-export const MESSAGE_ENTITY_PATTERNS = Object.freeze([
-  // 文件路径：Windows 盘符 / POSIX 绝对路径
-  /[A-Za-z]:[\\/][\w./\\-]{3,}/g,
-  /(?:^|[\s"'(=])\/(?:[\w.-]+\/)*[\w.-]{3,}/g,
-  // 错误码 / 错误类
-  /\bclass:[a-z0-9-]+\b/gi,
-  /\b(?:ENOENT|EACCES|EPERM|EEXIST|ECONNREFUSED|ETIMEDOUT|MODULE_NOT_FOUND|ERR_[A-Z_]+)\b/g,
-  // 包名（scoped 或无 scope）
-  /(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]+\/[a-z0-9][a-z0-9._-]+/gi,
-  // 命令（git/node/npm/go/python/bash… + 少量参数）
-  /\b(?:git|node|npm|pnpm|yarn|go|python|bash|pwsh|powershell|curl|gh)\b(?:\s+[-\w./=:]{1,40}){0,4}/gi,
-]);
-
-/** 从一段文本抽硬实体（小写、去重、≥3 字符；路径额外保留 basename）。 */
-export function messageEntities(text) {
-  const raw = String(text ?? '');
-  const out = new Set();
-  for (const re of MESSAGE_ENTITY_PATTERNS) {
-    re.lastIndex = 0;
-    for (const m of raw.matchAll(re)) {
-      const value = String(m[0] ?? '').trim().replace(/^[\s"'(=]+|[\s"'),.]+$/g, '');
-      if (value.length < 3) continue;
-      out.add(value.toLowerCase());
-      const base = value.split(/[\/]/).pop();
-      if (base && base.length >= 6 && /[._-]/.test(base)) out.add(base.toLowerCase());
-    }
-  }
-  return [...out];
-}
-
-/**
- * T267：**合法信号扩展** —— 从 `payload.messages` **最近 N 条**（含 assistant / tool）抽硬实体。
- *
- * 为什么合法：这些实体在 `pre-step` 这一刻已经出现在上下文里，`availableAtSeq <= injectionSeq`；
- * **不是**从整局棋谱主题反推的事后信息（T264 已证明那是作弊）。
- *
- * 返回 `{ text, entities }`：
- *   · `text`     = 最后一条 user 消息（**行为与现状一致**，golden）；
- *   · `entities` = 最近 N 条消息里的硬实体（追加，不替换）。整段对话**只抽实体、不塞正文**（避免噪声）。
- */
-export function signalFromMessages(messages, { lastN = 12 } = {}) {
-  const list = Array.isArray(messages) ? messages : [];
-  const text = lastUserText(list);
-  const n = Number.isFinite(lastN) && lastN > 0 ? Math.floor(lastN) : 12;
-  const entities = new Set();
-  for (const message of list.slice(-n)) {
-    for (const entity of messageEntities(messageText(message))) entities.add(entity);
-  }
-  return { text, entities: [...entities] };
-}
-
-/** 卡片指纹：同 scope + 同文本 ⇒ 同 digest（可复算，不含时钟）。 */
-export function digestOf(scopeKey, text) {
-  return createHash('sha256').update(`${String(scopeKey ?? '')}\u0000${String(text ?? '')}`).digest('hex').slice(0, 16);
-}
-
-/**
- * 把消息插到"最后一条 claimed 消息"之后。
- * claimed = 本轮真正被喂给模型的那批消息（`payload.messages`），用**引用**判定。
- * 与上游压缩插件同一语义（`Math.max(lastClaimed, 0) + 1`）：找不到 claimed 就插在开头之后。
- */
-export function insertAfterClaimed(messages, claimed, message) {
-  // messages 不是数组 ⇒ 不予拼接（返回 null，调用方据此跳过注入，绝不重建一个空列表）
-  if (!Array.isArray(messages)) return null;
-  const list = messages;
-  if (typeof list.toSpliced !== 'function') return null;
-  const claimedSet = new Set(Array.isArray(claimed) ? claimed.filter((m) => m && typeof m === 'object') : []);
-  let lastClaimed = -1;
-  for (let i = 0; i < list.length; i += 1) {
-    if (claimedSet.has(list[i])) lastClaimed = i;
-  }
-  return list.toSpliced(Math.max(lastClaimed, 0) + 1, 0, message);
-}
-
-/** 注入文本：首轮那一行 + 命中展开（没有展开就只给那一行）。 */
-export function cardText(card) {
-  if (!card || typeof card !== 'object') return '';
-  const line = typeof card.indexLine === 'string' ? card.indexLine.trim() : '';
-  const section = typeof card.section === 'string' ? card.section.trim() : '';
-  return [line, section].filter(Boolean).join('\n');
-}
-
-/**
- * T49（2026-11-09）：**这张卡已经在本轮上下文里了** ⇒ 别再投一次（无状态去重）。
- *
- * 为什么 `oncePerSession` 不够：它是 `apply()` 内的内存 `Set`，宿主**重新 apply**（新 agent 作用域 /
- * 插件重载 / 会话再 seed）之后就空了。本机实测：`tools-registered.json` 只由 `apply` 写，
- * 它在宿主启动（01:52）之后 1.5 小时（03:22）又被重写 ⇒ 同一进程里 `apply` 跑了不止一次；
- * 于是同一张卡在**每个 `turn/start`** 又被投一遍，`A1.redundant` 浪费 **36 对 / 291 次 = 10.5%**（闸 1%）。
- *
- * 判据用**上下文事实**而不是内存状态：卡正文（`cardText(card)`，也就是注入那条消息的正文）逐字
- * 出现在 `messages` 里 ⇒ 再投一次必然是浪费。压缩把那条消息压掉之后正文不再在 ⇒ 自然恢复注入
- * （即 `A1.redundant` 分档里的「必要重注」，不误伤）。
- *
- * @param {unknown} messages `payload.messages`（宿主本轮上下文）
- * @param {object|null} card  `decidePreStep` 产出的卡
- * @returns {boolean} 卡正文是否已逐字出现在上下文里
- */
-export function cardAlreadyInContext(messages, card) {
-  const text = cardText(card);
-  if (!text) return false; // 没有正文可比 ⇒ 不去重（宁可多投一次，也不误判成"已在"）
-  const list = Array.isArray(messages) ? messages : [];
-  for (const message of list) {
-    if (messageText(message) === text) return true;
-  }
-  return false;
-}
-
-/**
- * T268：把**本轮真实消息**追加进语料（只本机、只追加）。
- *
- * 用途：T267 的收益（最近 N 条消息的硬实体）在现有考卷上**测不出来** —— 考卷只有根用户原话。
- * 这份语料补上 `messages`，让 `scripts/t267-replay.mjs` 能复算 A/B 两路。
- *
- * 纪律：
- *   · **只读注入链路之外**：不参与任何判定，失败一律吞掉（采集永远不许拖垮注入）；
- *   · **脱敏**：落盘前用 `scripts/privacy-scan.mjs` 的同一套规则扫一遍（本机语料也要同规则）；
- *   · **截断**：单条 `text` 只保留前 4000 字符，超长打 `truncated: true`。
- */
 // T282：**写入根收口到 sidecar** —— 相对 `<storeRoot>` 的路径，绝不写仓库。
 // 独立实例（DSH 0.2.2-rc.1）link 本源码时，数据必须落在**它自己的** store root 下，
 // 当前源码仓库保持只读（tombstone：仓库目录里不许出现新文件）。
@@ -468,692 +263,6 @@ export function traceMessageCorpusCap({ ctx = null, storeRoot = null, result = n
   return true;
 }
 
-function warn(ctx, line) {
-  try {
-    if (typeof ctx?.logger?.warn === 'function') ctx.logger.warn(`dsh-gokifu-longmemory: ${line}`);
-  } catch {
-    // 记日志本身失败也不许影响会话
-  }
-}
-
-/** 时钟：允许把 `now` 固定成数字或函数（测试/回放）。 */
-function clockOf(config) {
-  if (typeof config.now === 'function') {
-    const v = config.now();
-    if (Number.isFinite(v)) return Number(v);
-  }
-  if (Number.isFinite(config.now)) return Number(config.now);
-  return Date.now();
-}
-
-// ---------------------------------------------------------------------------
-// 依赖（默认真实现；`config.deps` 可注入替身，测试用）
-// ---------------------------------------------------------------------------
-
-async function resolveDeps(config) {
-  const injected = config.deps ?? {};
-  let walk = typeof injected.walk === 'function' ? injected.walk : null;
-  if (!walk) {
-    try {
-      const mod = await import('./rooms/walk.mjs');
-      walk = typeof mod.walkFromSignals === 'function' ? mod.walkFromSignals : null;
-    } catch {
-      walk = null; // R11 缺位：降级到 R12 的 degradedWalk（注入函数自己会兜）
-    }
-  }
-  return {
-    createStore: typeof injected.createStore === 'function' ? injected.createStore : createStore,
-    createWalkCache: typeof injected.createWalkCache === 'function' ? injected.createWalkCache : createWalkCache,
-    buildMemoryCard: typeof injected.buildMemoryCard === 'function' ? injected.buildMemoryCard : buildMemoryCard,
-    runGates: typeof injected.runGates === 'function' ? injected.runGates : runGates,
-    probeValidity: typeof injected.probeValidity === 'function' ? injected.probeValidity : probeValidity,
-    buildStore: typeof injected.buildStore === 'function' ? injected.buildStore : null,
-    writeShadow: typeof injected.writeShadow === 'function' ? injected.writeShadow : writeShadow,
-    walk,
-    createUserMessage: typeof injected.createUserMessage === 'function' ? injected.createUserMessage : null,
-  };
-}
-
-function expandHomePlaceholder(raw) {
-  const text = String(raw ?? '').trim();
-  if (!text) return null;
-  const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME !== '' ? process.env.DSH_HOME : '';
-  const hasPlaceholder = /^(<DSH_HOME>|\$DSH_HOME)([\/]|$)/i.test(text);
-  if (!hasPlaceholder) return text;
-  if (!home) return null; // 占位符解析不了就当作没有配置（宁可沉默，不去猜一个路径）
-  return text.replace(/^(<DSH_HOME>|\$DSH_HOME)/i, home);
-}
-
-function resolveStoreRoot(config) {
-  if (config.storeRoot) {
-    const expanded = expandHomePlaceholder(config.storeRoot);
-    return expanded ? path.resolve(expanded) : null;
-  }
-  const home = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME !== '' ? process.env.DSH_HOME : '';
-  if (!home) return null;
-  return path.resolve(home, 'memory-context');
-}
-
-function resolveShadowDir(config) {
-  if (config.shadowDir) {
-    const expanded = expandHomePlaceholder(config.shadowDir);
-    return expanded ? path.resolve(expanded) : null;
-  }
-  try {
-    return defaultShadowDir();
-  } catch {
-    return path.join(REPO_ROOT, 'evidence', 'shadow');
-  }
-}
-
-/** 造一条 user 消息（宿主包动态 import；config 可注入替身）。 */
-async function resolveCreateUserMessage(config, deps) {
-  if (config.createUserMessage) return config.createUserMessage;
-  if (deps.createUserMessage) return deps.createUserMessage;
-  try {
-    const mod = await import(LLM_PACKAGE);
-    if (typeof mod?.createUserMessage === 'function') return mod.createUserMessage;
-  } catch { /* 宿主包在 asar 里：外部插件按文件路径解析不到 —— 走本地等价实现 */ }
-  // 2026-11-04：本地等价实现。已核对宿主源码：createUserMessage(input) = createMessage({...input, role:'user'})，
-  // 而 createMessage = deepFreeze(structuredClone({...input, id: randomUUID()}))。这里逐字段对齐，不引入宿主依赖。
-  return makeUserMessageFallback;
-}
-
-// ---------------------------------------------------------------------------
-// 一次 pre-step 的决策（纯：不改入参、不写会话；返回值给 apply 用）
-// ---------------------------------------------------------------------------
-
-/**
- * 只为"这张卡里出现的条目"跑 validity 核验（闸 3 的输入）。
- * 为什么要限制范围：plugin 在每一步都会被调，扫全库太贵；卡片最多 `limit` 条。
- * 任何异常都吞成"没有结果"（⇒ 闸 3 记 unverified，而不是注入失败）。
- */
-const PROBE_CACHE = new Map();
-const PROBE_TTL_MS = 60_000;
-/**
- * T64（2026-11-09）：`PROBE_CACHE` 的 key 里带**时间桶**（`floor(now/60s)`）——
- * 旧实现从不删除过期桶 ⇒ 每个 60 秒都往 Map 里堆一代新 key，**永不释放**（宿主进程长驻）。
- * 现在我们只保留**当前桶**：桶一换就整份清掉（过期条目本来就没用）。
- * 上界 = 一个桶内的 (claim, workspace) 组合数，与运行时长无关。
- */
-let PROBE_BUCKET = null;
-/** 测试用：当前探针缓存条数（有界性判据）。 */
-export function probeCacheSize() { return PROBE_CACHE.size; }
-
-export function probeCardValidity({ card, store, deps, fallbackWorkspace = null, now = null }) {
-  const results = {};
-  const rows = Array.isArray(card?.claims) ? card.claims : [];
-  for (const row of rows) {
-    const claimId = typeof row?.claimId === 'string' ? row.claimId : '';
-    if (!claimId) continue;
-    const kind = claimId.startsWith('j-') ? 'joseki' : 'claims';
-    let record = null;
-    try {
-      record = store?.get ? store.get(kind, claimId) : null;
-    } catch {
-      record = null;
-    }
-    if (!record || typeof record !== 'object') continue;
-    const key = validityKeyOf(record) || `${kind}:${claimId}`;
-    // T198（audit-12 洞 2）：**以 claim 自己的 workspace 为准**（`scopeKey` 解出的路径），
-    // 会话 cwd 只作兜底 —— 与 `runValidityCheck`（gates-check）同口径。
-    // 之前直接传 cwd，同一批 claim 在两条口径下 53 条结论不同（cwd 有 package.json 时误判 version-mismatch ⇒ 闸 3 运行时误红）。
-    const recordWorkspace = workspaceOf(record, fallbackWorkspace);
-    const bucket = Math.floor((Number.isFinite(now) ? now : Date.now()) / PROBE_TTL_MS);
-    if (PROBE_BUCKET !== bucket) { PROBE_CACHE.clear(); PROBE_BUCKET = bucket; } // 过期桶一次性丢掉
-    const cacheKey = `${key}|${recordWorkspace ?? ''}|${bucket}`;
-    if (PROBE_CACHE.has(cacheKey)) {
-      results[key] = PROBE_CACHE.get(cacheKey);
-      continue;
-    }
-    try {
-      results[key] = deps.probeValidity(record, { workspace: recordWorkspace, now });
-      PROBE_CACHE.set(cacheKey, results[key]);
-    } catch (error) {
-      results[key] = { ok: false, reason: `probe-error:${String(error?.message ?? error)}`, checkedAt: now };
-    }
-  }
-  return results;
-}
-
-/**
- * @returns {{decision:object, action:string, reason:string|null, card?:object, gates?:object, digest?:string}}
- *   action: `inject` | `shadow` | `skip`
- */
-/**
- * 从 `runGates()` 的返回里取「被哪几道闸拦下」。
- * 2026-11-04（0.132.0）：之前只读 `gates.failed`，但 `runGates()` 返回的是 `{ok, errors, checks}` —— 没有 `failed`，
- * 于是线上两次 `gates-failed` 的心跳都是 `gateIds: null`，事后查不出原因。现在**两条来源都认**，并补错误码。
- * 只读闸 id / 错误码，不碰卡内容（心跳里不许写记忆）。
- */
-export function gateIdsFromGates(gates) {
-  if (Array.isArray(gates?.failed)) {
-    const ids = gates.failed.map((g) => (typeof g === 'string' ? g : g?.id)).filter(Boolean);
-    if (ids.length) return [...new Set(ids)];
-  }
-  const fromErrors = (Array.isArray(gates?.errors) ? gates.errors : []).map((e) => String(e?.gate ?? '')).filter(Boolean);
-  return [...new Set(fromErrors)];
-}
-
-export function gateCodesFromGates(gates, limit = DIGEST_GATE_CODES_LIMIT) {
-  const codes = (Array.isArray(gates?.errors) ? gates.errors : []).map((e) => String(e?.code ?? '')).filter(Boolean);
-  return [...new Set(codes)].slice(0, limit);
-}
-
-/**
- * T160：从 `runGates()` 的 `errors[].detail` 里取出**被点名的 claim id**。
- *
- * 为什么需要：被闸挡下的卡**不入** `card-samples.jsonl`，心跳行原来只有
- * `digest / tokens / gateIds / gateCodes` —— 事件过去后无法还原是哪几条 claim 被拦
- * （按 digest 回放也命中不了，因为库还在长）。这里补上 id，事后能直接去 store 里查。
- *
- * 取法（**能拿到就收集，拿不到就空数组，不猜**）：
- *   · `detail.ids`（数组，闸 4 的 byBody 组）
- *   · `detail.claimId`（闸 2 / 3 / 5 / 7 的条目级报错）
- *   · `detail.id`（有的闸只写 id）
- * 只收非空字符串；去重保序；最多 `limit` 个（默认 5，防止一行心跳被撑爆）。
- * **只读 id，不碰卡正文**（心跳里不许出现记忆内容）。
- */
-export function gateClaimIdsFromGates(gates, limit = DIGEST_GATE_CODES_LIMIT) {
-  const errors = Array.isArray(gates?.errors) ? gates.errors : [];
-  const ids = [];
-  const push = (value) => {
-    if (typeof value !== 'string') return;
-    const id = value.trim();
-    if (id) ids.push(id);
-  };
-  for (const error of errors) {
-    const detail = error?.detail;
-    if (!detail || typeof detail !== 'object') continue;
-    if (Array.isArray(detail.ids)) for (const id of detail.ids) push(id);
-    push(detail.claimId);
-    push(detail.id);
-  }
-  return [...new Set(ids)].slice(0, Math.max(1, Number(limit) || 5));
-}
-
-/**
- * T4：`abstain` 时**说出拒的是哪道门**（可解释的拒绝）。
- *
- * 为什么要有这个：单一 `reason: 'no-relevant-claim'` 让模型（和事后审计）**分不清**三种完全不同的处境 ——
- * 「库里根本没有」「库里有、但只有一局证据、拿不准」「库里有、但全被作用域/时效挡了」。
- * 这三种情况下该做的事不一样：放弃 / 去核实 / 去别的项目查。
- *
- * 判据**全机械**（AGENTS §2.3：计数不是打分，禁止模型评分），按**从具体到泛化**排序：
- *   ① `cross-scope`      —— walk 命中过，但全被作用域挡掉（库里有，只是不属于本项目）；
- *   ② `stale`            —— 卡上**每一行**的衰减权重都 < 0.5（全部超过半衰期没被调用）；
- *   ③ `low-confidence`   —— 卡上**每一行**都是单局 `[observed]`（只有 1 局支撑，拿不准）；
- *   ④ `no-relevant-claim` —— 兜底：卡上有行，但与信号没有可判别的重合。
- *
- * **不改默认行为**：只在 `abstain` **已触发**时细化 `reason` 字符串；
- * `action` 仍是 `'abstain'`，不注入、不改变任何决策（向后兼容）。
- */
-export function classifyAbstainReason({ card = null, walkResult = null } = {}) {
-  const claims = Array.isArray(card?.claims) ? card.claims : [];
-  // T12 修①：`cross-scope` 的口径是「**本次 walk 命中的条目全被作用域挡掉**」。
-  // 原判据把 `crossScopeWalk`（= 整库遍历里被作用域挡掉的命中**总数**，实测恒 200–1000）也加了进来，
-  // ⇒ `cross > 0` 恒真，33/33 全塌成 `cross-scope`，"卡上有行但与信号不相关"永远归因不出来（T11 §六）。
-  // 现在只认**本次**的丢弃数（`crossScope` / `unknownScope`，来自 `filterHitsByScope`），
-  // 且要求**没有一条活着进卡**（`hits` 为空）—— 卡里已经有行，就说明"库里有、只是不属于本项目"不成立。
-  // 调用方没给 `hits`（离线脚本 / 老单测）时保持旧语义，避免调用面悄悄变成"永不返回 cross-scope"。
-  const droppedByScope = Number(walkResult?.crossScope ?? 0) + Number(walkResult?.unknownScope ?? 0);
-  const noInScopeHit = Array.isArray(walkResult?.hits) ? walkResult.hits.length === 0 : true;
-  if (droppedByScope > 0 && noInScopeHit) return 'cross-scope';
-  // T12 修②：`stale` 读 `c.decay`，而 `buildMemoryCard` 的 `card.claims` 投影现在**带 decay**
-  // （`src/rooms/inject.mjs` 的 claims 投影）；此前投影不含该字段 ⇒ `Number(undefined ?? 1)` 恒 1 ⇒ 死码。
-  if (claims.length && claims.every((c) => Number(c?.decay ?? 1) < 0.5)) return 'stale';
-  if (claims.length && claims.every((c) => String(c?.state ?? '') === 'observed')) return 'low-confidence';
-  return 'no-relevant-claim';
-}
-
-async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }) {
-  const session = payload?.agent?.session ?? payload?.session ?? null;
-  const text = lastUserText(payload?.messages);
-  // T267：**合法信号扩展** —— 最近 N 条消息（含 assistant / tool）里的硬实体（文件路径/错误码/包名/命令）。
-  // 它们此刻已经在 payload.messages 里（availableAtSeq <= injectionSeq），不是整局统计的事后信息。
-  // T279 实测**净亏**：A（只用原话）97.53% vs B（+消息内实体）93.83%，**净 −3 条**，
-  // 且 B 新增的 2 条命中**全部落在"A 路完全无重合"的样本上**（negativeControl 2/2 = 100% ⇒ 造命中不是召回）。
-  // 处置（知识库 55「默认关」）：**代码保留、默认关**，`messageSignals: true` 才启用。
-  // 重开条件：用有命中的历史局语料复算，B 的 delta > 0 **且** negativeControl 率显著低于 A 基线。
-  const messageSignal = config.messageSignals === true
-    ? signalFromMessages(payload?.messages, { lastN: config.messageSignalLastN ?? 12 })
-    : { text, entities: [] };
-
-  // 既没开真注入也不是影子 ⇒ 什么都不做（默认配置走这条）
-  if (!config.enabled && !config.shadow) return { decision, action: 'skip', reason: 'disabled' };
-  if (!text) return { decision, action: 'skip', reason: 'no-signal' };
-
-  const storeRoot = resolveStoreRoot(config);
-  if (!storeRoot) return { decision, action: 'skip', reason: 'no-store-root' };
-  if (!fs.existsSync(storeRoot)) {
-    warn(ctx, `记忆库不存在：${storeRoot}（本次沉默；${config.autoBuild ? '后台建库中' : '未开 autoBuild'}）`);
-    if (config.autoBuild) scheduleAutoBuild({ ctx, storeRoot, deps, lifecycle });
-    return { decision, action: 'skip', reason: 'no-store' };
-  }
-
-  const at = clockOf(config);
-  const store = deps.createStore({ root: storeRoot, bundle: true }); // T62：热路径批量读走 bundle
-  const cwd = typeof session?.cwd === 'string' && session.cwd.trim() !== '' ? session.cwd : process.cwd();
-  const resolved = resolveSessionScope({ session, store, storeRoot });
-  const sid = sessionIdOf(session);
-  if (sid) capSessionMap(LAST_SCOPE.set(sid, resolved) && LAST_SCOPE);
-  const scope = resolved.scope;
-  // T332：**costIndex 接线** —— 读预计算 sidecar（`<store>/corpus/antipattern-cost.json`），
-  // 交给 `buildMemoryCard` 做 `cost: 0` 降级门。**只读、失败静默**（索引缺失 ⇒ 不过滤，行为不变）。
-  let costIndex = null;
-  try {
-    const costFile = path.join(storeRoot, 'corpus', 'antipattern-cost.json');
-    if (fs.existsSync(costFile)) {
-      const raw = JSON.parse(fs.readFileSync(costFile, 'utf8'));
-      if (raw && raw.costs && typeof raw.costs === 'object') costIndex = new Map(Object.entries(raw.costs));
-    }
-  } catch { costIndex = null; }
-
-  const signal = signalFromText(text, { at });
-  // T268：采集真实消息语料（**只写盘、不参与判定**；失败静默降级）
-  if (config.collectMessages === true) {
-    try {
-      const row = messageCorpusRow({
-        episode: null,
-        scopeKey: payload?.scopeKey ?? null,
-        messages: payload?.messages ?? [],
-        at,
-      });
-      if (row.messages.length) {
-        const corpusWrite = appendMessageCorpus(storeRoot, row);
-        if (corpusWrite.status === 'failed') warn(ctx, '语料采集写盘失败（已忽略）');
-        // T20：语料撞上限不许静默 —— 一次性 warn + live-stats 一条 kind=messages-corpus-cap。
-        traceMessageCorpusCap({ ctx, storeRoot, result: corpusWrite, notified: lifecycle?.corpusCapNotified ?? null });
-      }
-    } catch (error) {
-      warn(ctx, `语料采集失败（已忽略）：${String(error?.message ?? error)}`);
-    }
-  }
-  // T267：把最近消息里的硬实体**追加**进信号（不改 base 词；只加实体，不塞整段对话）。
-  if (messageSignal.entities.length) {
-    const seen = new Set((signal.entities ?? []).map((e) => String(e?.key ?? e)));
-    for (const key of messageSignal.entities) {
-      if (seen.has(key)) continue;
-      seen.add(key);
-      signal.entities.push({ kind: 'entity', key });
-    }
-  }
-  signal.scopeKey = scope;
-  // 首条消息里若直接贴着报错原文（很常见："又报这个错"），把类级错误作为实体信号，
-  // 让「同一类坑」的历史棋谱能被直接命中（D2 类主题的消费方，2026-11-02）。
-  const errClass = errorClassKeyOf(text);
-  if (errClass) {
-    signal.entities = Array.isArray(signal.entities) ? signal.entities : [];
-    if (!signal.entities.some((e) => String(e?.key ?? '') === errClass)) {
-      signal.entities.push({ kind: 'error', key: errClass });
-    }
-  }
-
-  const cache = deps.walk ? walkCacheFor(storeRoot, store, deps) : null;
-  let walk = null;
-  if (deps.walk) {
-    walk = deps.walk({ signal, store, scope, cache, depth: 2, limit: config.limit, budgetTokens: config.budgetTokens, allowCrossScopeClass: config.crossScopeClass === true }) ?? null;
-  }
-  if (!walk) {
-    const { degradedWalk } = await import('./rooms/inject.mjs');
-    walk = degradedWalk({ signal, store, limit: config.limit });
-  }
-  const scoped = filterHitsByScope(walk.hits ?? [], scope);
-  const walkResult = {
-    ...walk,
-    hitCount: Array.isArray(walk.hits) ? walk.hits.length : 0,
-    hits: scoped.hits,
-    crossScope: scoped.dropped,
-    unknownScope: scoped.droppedUnknown,
-    crossScopeWalk: (Number.isFinite(walk?.dropped?.crossScope) ? walk.dropped.crossScope : 0)
-      + (Number.isFinite(walk?.dropped?.scopeMissing) ? walk.dropped.scopeMissing : 0),
-  };
-
-  const card = deps.buildMemoryCard({
-    preferenceHardOnly: config.preferenceHardOnly === true,
-    cache,
-    signal,
-    walkResult,
-    store,
-    scope,
-    now: at,
-    limit: config.limit,
-    budgetTokens: config.budgetTokens,
-    droppedCrossScope: scoped.dropped,
-    droppedUnknownScope: scoped.droppedUnknown,
-    // T332：`cost: 0` 降级门（索引缺失 ⇒ null ⇒ 不过滤）
-    costIndex,
-    // T3：**三级交付接生产** —— 这一行是唯一接线点（删掉它，配置键就不再生效，T3 ⑩ 会红）。
-    // `true` ⇒ 没把握的条目只给指针（`episode + seq + occurredAt`），正文不渲染。
-    pointerTier: config.pointerTier === true,
-  });
-  // 闸 3 真核验：只核**这张卡里出现的**条目（≤ limit 条），够用且不会每步扫全库。
-  // 每条按它自己的 scopeKey 解析工作区（probeValidity 内部做），失败只记 reason、绝不抛。
-  const validityResults = config.probeValidity === false ? null : probeCardValidity({ card, store, deps, fallbackWorkspace: cwd, now: at });
-  const gates = deps.runGates({ card, walkResult, store, cache, scope, validityResults });
-  const text2 = cardText(card);
-  const digest = digestOf(scope, text2);
-
-  // 影子模式：只记录"本来会注入什么"，永远返回原 decision
-  if (config.shadow) {
-    try {
-      deps.writeShadow({ dir: resolveShadowDir(config), card, signal, at });
-      return { decision, action: 'shadow', reason: null, card, gates, digest };
-    } catch (error) {
-      warn(ctx, `影子记录写入失败（本轮不动）：${String(error?.message ?? error)}`);
-      return { decision, action: 'skip', reason: 'shadow-write-failed', card, gates, digest };
-    }
-  }
-
-  if (!config.enabled) return { decision, action: 'skip', reason: 'disabled', card, gates, digest };
-  if (!gates?.ok) {
-    warn(ctx, `闸门未通过（本轮不注入）：${(gates?.errors ?? []).map((e) => e.code).slice(0, DIGEST_GATE_CODES_LIMIT).join(', ')}`);
-    // 2026-11-04：记下是哪几道闸拦的（只写闸 id 与错误码，不写卡内容，避免把记忆写进心跳）。
-    // 修（0.132.0）：之前只读 `gates.failed`，但 `runGates()` 返回的是 `{ok, errors, checks}` —— 没有 `failed` 字段，
-    // 于是线上两次 `gates-failed` 的心跳都是 `gateIds: null`，事后根本查不出被哪道闸拦的（"红了但不知道是谁"的同类问题）。
-    const failedIds = gateIdsFromGates(gates);
-    const gateCodes = gateCodesFromGates(gates);
-    // T160：再补"被点名的 claim id"与"卡片渲染了多少行"—— 被闸挡下的卡不进 card-samples，
-    // 没有这两项就永远还原不出是哪几条记忆被拦（只记 id 与计数，**不记卡正文**）。
-    const gateClaimIds = gateClaimIdsFromGates(gates);
-    const gateLineCount = Array.isArray(card?.claims) ? card.claims.length : null;
-    return { decision, action: 'skip', reason: 'gates-failed', card, gates, digest, gateIds: failedIds, gateCodes, gateClaimIds, gateLineCount };
-  }
-  if (!card?.section || !text2) return { decision, action: 'skip', reason: 'no-hit', card, gates, digest };
-
-  // T366：**不相关时沉默**（abstention，知识库 79）。
-  // 卡**不为空**但**没有任何一行与信号相关** ⇒ **显式拒绝**，不注入。
-  // 此前这种情况会**照样注入**（只有"卡为空"才 no-hit），那就是噪声。
-  // 用独立的 `action: 'abstain'`（**不是** skip），让"我们该沉默的时候沉默了几次"**可计数**。
-  // ⚠ **默认关**：`abstainIrrelevant: true` 才启用。
-  // 实测判据边界太多（纯中文信号、单个共享的包名如 `yaml`、中英文混排），
-  // **误杀的代价高于收益** —— 在判据校准到"不误杀"之前，**不在生产里拒**（知识库 55「默认关」）。
-  // 重开条件：在真实考卷上证明「被拒的**全部**是不相关」且「注入率下降全部来自不相关」，
-  //           并给出「误杀率 = 0」的逐条证据。
-  // 知识库 87：**精化适用条件**（不是"全关"，是"只在判据可靠的输入上启用"）。
-  // 拉卡托斯：反例该让我们"精化适用条件"，不是"全关"。
-  // `hasReliableHandle(text)` = 信号里有硬实体（文件路径/错误码/包名）或 ≥2 英文判别词 ——
-  // **在这些输入上判据是可靠的**，不该被"默认关"一起埋掉；
-  // 短指令 / 纯通用中文 ⇒ 不可靠 ⇒ **不启用**（保守，不误杀）。
-  // 知识库 87 + T366e：**在判据可靠的输入上默认开启**（`abstainIrrelevant !== false`）。
-  // 依据：T366e 实测在判据可靠的输入上**误杀率 = 0**（2 条被拒全部正确拒绝），三条重开条件全满足。
-  // **"不相关时沉默"这条原则该真正生效了**，而不是永远躺在 latent code 里。
-  // 两层保护：
-  //   ① `hasReliableHandle(text)`：**只在判据可靠的输入上启用**（短指令/纯通用中文 ⇒ 不启用，保守）；
-  //   ② `abstainIrrelevant: false` 可显式关掉（回到旧行为，向后兼容）。
-  if (config.abstainIrrelevant === true && hasReliableHandle(text) && card?.section && !hasRelevantClaim(card, text)) {
-    // T4：**说出拒的是哪道门** —— 单一 reason 分不清「根本没有 / 拿不准 / 被作用域挡了」。
-    // 只细化 `reason` 字符串，`action` 不变 ⇒ 向后兼容（计数口径 `action === 'abstain'` 不动）。
-    const reason = classifyAbstainReason({ card, walkResult });
-    return { decision, action: 'abstain', reason, card, gates, digest };
-  }
-
-  const createUserMessage = await resolveCreateUserMessage(config, deps);
-  const message = createUserMessage({
-    content: [{ type: 'text', text: text2 }],
-    source: {
-      kind: CARD_SOURCE_KIND,
-      form: CARD_SOURCE_FORM,
-      digest,
-      pluginVersion: PLUGIN_VERSION,
-    },
-  });
-  const messages = insertAfterClaimed(decision.messages, payload?.messages, message);
-  if (!messages) {
-    warn(ctx, 'decision.messages 不是可拼接的数组（本轮不注入）');
-    return { decision, action: 'skip', reason: 'no-message-list', card, gates, digest };
-  }
-  // T33：**trial 记录** —— 只写 `<store>/trials.jsonl`（append-only），不改可见性/不退役。
-  // 失败静默（记 trial 失败不许影响本轮注入）；没有上一条 trial ⇒ 本次只开 trial、不写记录。
-  try {
-    const antipatterns = (Array.isArray(card?.claims) ? card.claims : []).filter((c) => c && c.kind === 'antipattern');
-    if (antipatterns.length) recordInjectionTrials({ storeRoot, claims: antipatterns, at });
-  } catch (error) {
-    warn(ctx, `trial 记录失败（已忽略）：${String(error?.message ?? error)}`);
-  }
-  return { decision: { ...decision, messages }, action: 'inject', reason: null, card, gates, digest };
-}
-
-// ---------------------------------------------------------------------------
-// 插件入口
-// ---------------------------------------------------------------------------
-
-/**
- * 挂载插件。**默认什么都不做**（`enabled:false, shadow:true`），失败绝不阻塞会话。
- *
- * @param {object} ctx  宿主上下文（用 `ctx.on`、`ctx.logger?.warn`；其余一概不碰）
- * @param {object} [rawConfig]
- * @returns {Function} Cordis disposer；旧诊断字段挂在函数属性上
- */
-/**
- * T61（2026-11-09）：walk cache 按 **storeRoot** 存一份，**换版本就替换、空闲就摘掉**。
- *
- * 旧实现把 `manifest.json` 的 mtime 拼进 key 却**从不删除**旧 key ⇒ 库每更新一次就多一份
- * 完整图（真库实测一份 ≈35MB 堆）留在宿主进程里，永不释放。这是"无意义内存占用"最典型的一种。
- * 现在：① 同 storeRoot 只留最新一代（旧的立刻失去引用）；② 闲置 `WALK_CACHE_IDLE_MS` 后自动摘掉。
- */
-const WALK_CACHES = new Map(); // storeRoot -> { stamp, cache, at, timer }
-export const WALK_CACHE_IDLE_MS = 10 * 60_000;
-
-const BUILDING = new Map();
-
-/** 零配置：库不存在时后台建一次（不阻塞本轮；失败只 warn，不重试风暴）。 */
-function scheduleAutoBuild({ ctx, storeRoot, deps = null, reason = 'missing', lifecycle }) {
-  if (!storeRoot || lifecycle.isDisposed()) return;
-
-  const existing = BUILDING.get(storeRoot);
-  if (existing) {
-    if (!existing.settled) {
-      existing.owners.add(lifecycle);
-      lifecycle.builds.add(existing);
-    }
-    return;
-  }
-
-  let resolveTask;
-  const record = {
-    timer: null,
-    owners: new Set([lifecycle]),
-    settled: false,
-    task: new Promise((resolve) => { resolveTask = resolve; }),
-    cancel: null,
-  };
-  BUILDING.set(storeRoot, record);
-  lifecycle.builds.add(record);
-
-  const activeOwner = () => [...record.owners].find((owner) => !owner.isDisposed()) ?? null;
-  const detach = (owner) => {
-    record.owners.delete(owner);
-    owner.builds.delete(record);
-  };
-  const deleteIfCurrent = () => {
-    if (BUILDING.get(storeRoot) === record) BUILDING.delete(storeRoot);
-  };
-  const settle = () => {
-    if (record.settled) return;
-    record.settled = true;
-    for (const owner of [...record.owners]) detach(owner);
-    resolveTask();
-  };
-
-  record.cancel = (owner) => {
-    detach(owner);
-    if (record.settled) return null;
-    if (record.timer === null) return record.task;
-    if (record.owners.size === 0) {
-      clearTimeout(record.timer);
-      record.timer = null;
-      deleteIfCurrent();
-      settle();
-    }
-    return null;
-  };
-
-  const run = async () => {
-    record.timer = null;
-    if (!activeOwner()) {
-      deleteIfCurrent();
-      settle();
-      return;
-    }
-    try {
-      const dataRoot = typeof process.env.DSH_HOME === 'string' && process.env.DSH_HOME ? process.env.DSH_HOME : null;
-      if (typeof deps?.buildStore === 'function') {
-        await deps.buildStore({ storeRoot, dataRoot });
-      } else {
-        const mod = await import('../scripts/archive.mjs');
-        if (typeof mod.runArchive !== 'function') throw new Error('archive.mjs 未导出 runArchive');
-        if (!dataRoot) throw new Error('没有 DSH_HOME，无法建库');
-        await mod.runArchive({ dataRoot, storeRoot, dryRun: false, user: 'owner' });
-      }
-      const owner = activeOwner();
-      if (owner) warn(owner.ctx, `记忆库已刷新（${reason}）：${storeRoot}`);
-    } catch (error) {
-      deleteIfCurrent();
-      const owner = activeOwner();
-      if (owner) warn(owner.ctx, `自动建库失败：${String(error?.message ?? error)}`);
-    } finally {
-      settle();
-    }
-  };
-
-  record.timer = setTimeout(() => { void run(); }, 0);
-}
-
-function dropWalkCache(storeRoot) {
-  const entry = WALK_CACHES.get(storeRoot);
-  if (entry?.timer) clearTimeout(entry.timer);
-  WALK_CACHES.delete(storeRoot);
-}
-
-/** 测试用：清空全部 walk cache。 */
-export function walkCacheEntries() {
-  for (const root of [...WALK_CACHES.keys()]) dropWalkCache(root);
-  return 0;
-}
-
-/** 测试用：当前保留的 walk cache 份数（**同库只该有 1 份**，T61 之前是"每换一次 manifest 多一份"）。 */
-export function walkCacheSize() {
-  return WALK_CACHES.size;
-}
-
-function scheduleIdleDrop(storeRoot, entry) {
-  if (entry.timer) clearTimeout(entry.timer);
-  entry.timer = setTimeout(() => {
-    const cur = WALK_CACHES.get(storeRoot);
-    if (cur === entry) dropWalkCache(storeRoot);
-  }, WALK_CACHE_IDLE_MS);
-  if (typeof entry.timer?.unref === 'function') entry.timer.unref(); // 不许因此拖住进程退出
-}
-
-function walkCacheFor(storeRoot, store, deps) {
-  try {
-    const mf = `${storeRoot}/manifest.json`;
-    const stamp = fs.existsSync(mf) ? fs.statSync(mf).mtimeMs : 0;
-    const hit = WALK_CACHES.get(storeRoot);
-    if (hit && hit.stamp === stamp) {
-      scheduleIdleDrop(storeRoot, hit); // 每次命中都把"闲置倒计时"推后
-      return hit.cache;
-    }
-    const build = typeof deps.createWalkCache === 'function' ? deps.createWalkCache : createWalkCache;
-    const cache = build(store);
-    // 替换而不是累积：旧世代在 set 之后立刻失去引用，可被回收
-    const entry = { stamp, cache, timer: null };
-    if (hit?.timer) clearTimeout(hit.timer);
-    WALK_CACHES.set(storeRoot, entry);
-    scheduleIdleDrop(storeRoot, entry);
-    return cache;
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 设置页 schema（2026-11-02）：让设置 UI 能展示/选择"记忆库地址"等配置。
-// 形状与 dsh-unlag 的 Config 一致：type/dict/meta + ~standard.validate（不引入 schemastery）。
-// ---------------------------------------------------------------------------
-export const Config = {
-  type: 'object',
-  dict: {
-    enabled: { type: 'boolean', meta: { default: true, description: '启用记忆注入（关掉 = 完全静默）' } },
-    shadow: { type: 'boolean', meta: { default: false, description: '影子模式：只记录本来会注入什么，不真注入' } },
-    storeRoot: { type: 'string', meta: { default: '', description: '记忆库地址；留空 = <DSH_HOME>/memory-context（推荐留空）' } },
-    autoBuild: { type: 'boolean', meta: { default: true, description: '库不存在时后台自动建库（本次沉默）' } },
-    autoArchive: { type: 'boolean', meta: { default: true, description: '轮次收尾时按时间阈值自动刷新记忆库' } },
-    autoArchiveMinutes: { type: 'number', meta: { default: 30, description: '自动刷新间隔（分钟）' } },
-    crossScopeClass: { type: 'boolean', meta: { default: false, description: '类级章节允许跨工作区先例（卡片标 [跨项目]；Q18 裁定前默认关）' } },
-    liveStats: { type: 'boolean', meta: { default: true, description: 'A3 心跳：每步往 sidecar/live-stats.jsonl 追加一行（可关）' } },
-    repeatHint: { type: 'boolean', meta: { default: true, description: '同一会话同类失败 ≥N 次时补一次事实卡（D5）' } },
-    repeatHintAfter: { type: 'number', meta: { default: 2, description: '同类失败达到几次才补卡' } },
-    budgetTokens: { type: 'number', meta: { default: 500, description: '每次注入的 token 预算' } },
-    limit: { type: 'number', meta: { default: 5, description: '每次最多注入几条' } },
-    oncePerSession: { type: 'boolean', meta: { default: true, description: '每会话只注入一次（首轮）' } },
-    pointerTier: { type: 'boolean', meta: { default: true, description: '三级交付：只有 1 局支撑（observed）的记忆只给指针（ep + seq + 日期），不给全文' } },
-  },
-  meta: { default: {} },
-  toJSON() {
-    return { type: 'object', dict: this.dict, meta: this.meta };
-  },
-  '~standard': {
-    version: 1,
-    vendor: 'dsh-gokifu-longmemory',
-    validate(value) {
-      const source = value !== null && typeof value === 'object' ? value : {};
-      return { value: sanitizeConfig(source) };
-    },
-  },
-};
-
-
-// ---------------------------------------------------------------------------
-// D5（2026-11-02，主人批准）：同一会话里同类失败反复出现 ⇒ 补一次事实卡。
-// 触发条件全机械：只看新增消息里的错误行，按 D2 的类归并；每会话最多 repeatHintMax 次。
-// 注入内容仍走 decidePreStep → 十道闸，因此仍是事实、带 provenance、无祈使句。
-// ---------------------------------------------------------------------------
-function repeatErrorLine(text) {
-  const lines = String(text ?? '').split(String.fromCharCode(10));
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (line === '') continue;
-    if (/^error[:：]/i.test(line)) return line;
-    if (/\[exit code: [1-9][0-9]*\]/.test(line)) return line;
-  }
-  return null;
-}
-
-export function collectRepeatTrigger(state, messages) {
-  if (!state || !Array.isArray(messages)) return null;
-  const fresh = messages.slice(state.seen ?? 0);
-  state.seen = messages.length;
-  let trigger = null;
-  for (const message of fresh) {
-    const text = messageText(message);
-    if (!text) continue;
-    const line = repeatErrorLine(text);
-    if (!line) continue;
-    const cls = classifyErrorClass(line);
-    if (!cls) continue;
-    const rec = state.counts.get(cls) ?? { count: 0, quote: line };
-    rec.count += 1;
-    rec.quote = line;
-    state.counts.set(cls, rec);
-    if (rec.count >= (state.after ?? 2)) trigger = { cls, quote: line, count: rec.count };
-  }
-  return trigger;
-}
-
-function repeatStateFor(map, session, after) {
-  const key = typeof session?.id === 'string' ? session.id : (typeof session === 'string' ? session : null);
-  if (!key) return null;
-  let state = map.get(key);
-  if (!state) {
-    state = { seen: 0, counts: new Map(), injected: 0, after };
-    map.set(key, state);
-  }
-  state.after = after;
-  return state;
-}
-
 /**
  * D5 遥测：每触发一次「同类失败补卡」记一行 JSONL。
  * 字段只放机械量：时间 / 类 / 本会话内同类失败次数 / 卡片 token / digest；不含会话内容与路径。
@@ -1163,94 +272,6 @@ function repeatStateFor(map, session, after) {
  * 用途：装了插件之后，`live-stats.jsonl` 里**出现行**本身就是"插件真的在宿主里跑过"的证据。
  * 只写 storeRoot 内（sidecar），失败一律吞掉，绝不影响本轮注入。
  */
-
-// 2026-11-03（N10）：会话 cwd 落在 DSH_HOME 里（profiles/desktop 等）时，scopeKeyFromPath 会得到
-// 一个没有棋谱的假作用域，导致永远 no-hit。用**本会话历史 episode 的 scopeKey**兜底（归档时读过会话
-// header 的真实 cwd），比猜目录名可靠。
-const SESSION_SCOPE_CACHE = new WeakMap();
-/**
- * T61：会话键的 Map 都要**有界**。宿主进程是长驻的，`session.id` 只会越积越多；
- * 每个值都很小（一个 scope 字符串），但没有上界就是"无意义增长"——按插入序淘汰最老的即可
- * （这些值都是可重算的缓存，丢了最多多算一次）。
- */
-export const SESSION_MAP_MAX = 2000;
-
-function capSessionMap(map) {
-  if (map.size <= SESSION_MAP_MAX) return map;
-  for (const key of map.keys()) {
-    if (map.size <= SESSION_MAP_MAX) break;
-    map.delete(key);
-  }
-  return map;
-}
-
-const LAST_SCOPE = new Map();
-export function lastResolvedScope(sessionId) { return sessionId ? (LAST_SCOPE.get(sessionId) ?? null) : null; }
-
-/**
- * T25：**稳定的会话标识** = `session.id`（宿主每个 pre-step 可能给一个新对象，但 id 不变）。
- *
- * 这是本仓一贯的会话键：`LAST_SCOPE`（`Map<session.id, scope>`）与 `repeatStateFor`（D5 状态）
- * 都用它 —— 这里沿用同一把 id，不引入第二个会话标识。无 `id`（或空串）⇒ `null`，调用方退回旧行为。
- */
-export function sessionIdOf(session) {
-  return typeof session?.id === 'string' && session.id.trim() !== '' ? session.id : null;
-}
-export function sessionScopeIndex(store) {
-  if (!store || typeof store.list !== 'function') return new Map();
-  const hit = SESSION_SCOPE_CACHE.get(store);
-  if (hit) return hit;
-  const map = new Map();
-  for (const row of store.list('episodes')) {
-    const rec = row?.record ?? row;
-    const sid = rec?.sessionId;
-    if (typeof sid !== 'string' || !sid) continue;
-    const at = Number.isFinite(rec?.lastEventAt) ? rec.lastEventAt : 0;
-    const prev = map.get(sid);
-    if (!prev || (prev.at ?? 0) < at) map.set(sid, { scope: rec.scopeKey, at });
-  }
-  const out = new Map([...map].map(([k, v]) => [k, v.scope]));
-  SESSION_SCOPE_CACHE.set(store, out);
-  return out;
-}
-
-const SESSION_LOG_SCOPE_CACHE = new Map();
-/** 从本会话日志的 header 里读真实 cwd（会话日志第一帧就是 header，单帧解压即可）。 */
-export function sessionLogScope(sessionId, home) {
-  if (!sessionId || !home) return null;
-  if (SESSION_LOG_SCOPE_CACHE.has(sessionId)) return SESSION_LOG_SCOPE_CACHE.get(sessionId);
-  let scope = null;
-  try {
-    const root = path.join(home, 'sessions');
-    for (const group of fs.readdirSync(root)) {
-      const file = path.join(root, group, sessionId, 'session.v4.jsonl.zstd');
-      if (!fs.existsSync(file)) continue;
-      const head = zstdDecompressSync(fs.readFileSync(file)).toString('utf8').split(String.fromCharCode(10))[0];
-      const parsed = JSON.parse(head);
-      if (typeof parsed?.cwd === 'string' && parsed.cwd) { scope = scopeKeyFromPath(parsed.cwd); break; }
-    }
-  } catch { scope = null; }
-  SESSION_LOG_SCOPE_CACHE.set(sessionId, scope);
-  capSessionMap(SESSION_LOG_SCOPE_CACHE);
-  return scope;
-}
-
-export function resolveSessionScope({ session = null, store = null, storeRoot = null } = {}) {
-  const cwd = typeof session?.cwd === 'string' && session.cwd.trim() !== '' ? session.cwd : process.cwd();
-  const direct = scopeKeyFromPath(cwd);
-  const home = storeRoot ? path.dirname(storeRoot) : null;
-  if (!home) return { scope: direct, from: 'session-cwd' };
-  const under = direct.replace(/^w:/, '').toLowerCase().startsWith(home.split(String.fromCharCode(92)).join('/').toLowerCase());
-  if (!under) return { scope: direct, from: 'session-cwd' };
-  const idx = sessionScopeIndex(store);
-  const sid = typeof session?.id === 'string' ? session.id : null;
-  const fallback = sid ? idx.get(sid) : null;
-  if (fallback) return { scope: fallback, from: 'episode-fallback' };
-  // 新会话还没归档过：直接读它的日志 header（第一帧 = session 元数据，含真实 cwd）。
-  const fromLog = sessionLogScope(sid, home);
-  if (fromLog) return { scope: fromLog, from: 'session-log' };
-  return { scope: direct, from: 'session-cwd' };
-}
 
 /**
  * T18（T16 遗留）：心跳台账 `live-stats.jsonl` 的**字节上限** —— 无上限 → **64 MB**。
@@ -1421,530 +442,81 @@ export function writeRepeatTelemetry({ config, trigger, card = null, digest = nu
 `, 'utf8');
 }
 
-export const CONFIG_ROUTE = '/kifu-longmemory/config';
+/**
+ * 注入成功后留样（T365/T10/T16）：**卡样本行的唯一组装点**。
+ *
+ * 为什么单独包一层：hooks.mjs 每步都可能要留样，但"卡样本长什么样"与三个 64MB 上限
+ * 必须留在这个文件里（T42 的源扫描 + T365 的 `...cardSampleSignal(payload?.messages)`）。
+ * hooks 只通过注入的 `telemetry.recordCardSample` 调它，不自己拼这行。
+ * 行内字段与拆分前**逐项一致**（顺序也一致：scope / scopeFrom / digest / tokens / section / 信号 / 指针自证）。
+ */
+function recordCardSample({ ctx = null, storeRoot = null, result = null, payload = null, scope = null, scopeFrom = null, notified = null }) {
+  if (!result || result.action !== 'inject' || !result.card?.section) return null;
+  const cardSample = appendCardSample(storeRoot, {
+    scope,
+    scopeFrom,
+    digest: result.digest ?? null,
+    tokens: result.card?.tokens ?? null,
+    section: String(result.card.section),
+    // T365：**留样必须带信号**，否则"这张卡是否该注入"无法审计。
+    // T10：从「只留前 160 字」改为**完整信号**（上限 4KB，另带 `signalPreviewTruncated` 明示截断）。
+    // 作用域必须是**外层**（没有 decidePreStep 的局部 text）⇒ 现取 `lastUserText`，与判定同一条。
+    ...cardSampleSignal(payload?.messages),
+    // T3：**指针行的自证字段** —— A6 文字层要把指针行排除出分子分母，排除前必须能核对数量。
+    tier: typeof result.card?.tier === 'string' ? result.card.tier : null,
+    pointerCount: Number.isFinite(result.card?.pointerCount) ? Number(result.card.pointerCount) : null,
+  });
+  // T16：撞上限不许静默 —— 一次性 warn（宿主日志）+ 一条 live-stats（kind=card-samples-cap）。
+  traceCardSampleCap({ ctx, storeRoot, sample: cardSample, notified });
+  return cardSample;
+}
 
 /**
- * 设置页用的纯处理函数（不碰 http 对象，便于单测）。
- * GET  → { config, effectiveStoreRoot, userConfigFile }
- * POST → 保存 { storeRoot } 到 <DSH_HOME>/kifu-longmemory.json
+ * 观测留痕的**注入面**：hooks.mjs 只调这些，不 import 本文件（依赖图保持无环）。
+ * 全部是"写 sidecar / 写影子台账"，**不参与任何注入判定**，失败一律静默。
  */
-/** 库状态（只读、失败静默）：设置页要显示"当前库有多大、什么时候更新的"。 */
-export function storeStatsOf(root) {
-  if (typeof root !== 'string' || root === '') return null;
-  const countJson = (dir) => {
-    try { return fs.readdirSync(dir).filter((f) => f.endsWith('.json')).length; } catch { return null; }
-  };
-  let updatedAt = null;
-  try { updatedAt = Number(JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8')).updatedAt) || null; } catch { updatedAt = null; }
-  return {
-    exists: fs.existsSync(root),
-    episodes: countJson(path.join(root, 'episodes')),
-    claims: countJson(path.join(root, 'claims')),
-    updatedAt,
-  };
-}
+const telemetry = Object.freeze({
+  messageCorpusRow,
+  appendMessageCorpus,
+  traceMessageCorpusCap,
+  appendLiveStats,
+  traceLiveStatsCap,
+  writeRepeatTelemetry,
+  recordCardSample,
+});
 
-export function handleConfigRoute({ method = 'GET', body = null, profileConfig = {}, dshHome = null } = {}) {
-  const home = dshHome ?? dshHomeOf();
-  const merged = resolveConfig({ ...readUserConfig({ dshHome: home }), ...profileConfig });
-  if (method === 'GET') {
-    return {
-      status: 200,
-      body: (() => {
-        const effective = merged.storeRoot ? resolveStoreRoot(merged) : (home ? path.join(home, 'memory-context') : resolveStoreRoot(merged));
-        return {
-          config: merged,
-          effectiveStoreRoot: effective,
-          stats: storeStatsOf(effective),
-          userConfigFile: home ? path.join(home, USER_CONFIG_FILE) : null,
-        };
-      })(),
-    };
-  }
-  if (method !== 'POST') return { status: 405, body: { error: 'method not allowed' } };
-  let patch;
-  try {
-    patch = typeof body === 'string' ? JSON.parse(body) : body;
-  } catch {
-    return { status: 400, body: { error: 'invalid JSON' } };
-  }
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return { status: 400, body: { error: 'body must be an object' } };
-  const next = {};
-  if (patch.storeRoot !== undefined) {
-    if (typeof patch.storeRoot !== 'string') return { status: 400, body: { error: 'storeRoot must be a string' } };
-    const trimmed = patch.storeRoot.trim();
-    if (trimmed !== '' && !/^[A-Za-z]:[\/]|^\//.test(trimmed)) return { status: 400, body: { error: 'storeRoot 必须是绝对路径或留空' } };
-    next.storeRoot = trimmed;
-  }
-  for (const key of ['enabled', 'shadow', 'autoBuild', 'oncePerSession', 'pointerTier']) {
-    if (patch[key] !== undefined) {
-      if (typeof patch[key] !== 'boolean') return { status: 400, body: { error: `${key} must be a boolean` } };
-      next[key] = patch[key];
-    }
-  }
-  for (const key of ['budgetTokens', 'limit']) {
-    if (patch[key] !== undefined) {
-      const n = Number(patch[key]);
-      if (!Number.isFinite(n) || n <= 0) return { status: 400, body: { error: `${key} must be a positive number` } };
-      next[key] = n;
-    }
-  }
-  try {
-    writeUserConfig(next, { dshHome: home });
-  } catch (error) {
-    return { status: 500, body: { error: String(error?.message ?? error) } };
-  }
-  return { status: 200, body: { ok: true, saved: next, file: home ? path.join(home, USER_CONFIG_FILE) : null } };
-}
+// ---------------------------------------------------------------------------
+// 插件入口（组合根）
+// ---------------------------------------------------------------------------
 
-
-// 宿主 createUserMessage 的本地等价实现（见 docs/记忆的职责边界.md 的消息形状约定）。
-// 已核对宿主源码：createUserMessage = createMessage({...input, role:'user'})，
-// createMessage = deepFreeze(structuredClone({...input, id: randomUUID()}))。
-export function makeUserMessageFallback(input) {
-  const message = { ...input, role: 'user', id: randomUUID() };
-  const freeze = (value) => {
-    if (value && typeof value === 'object') {
-      for (const key of Object.keys(value)) freeze(value[key]);
-      Object.freeze(value);
-    }
-    return value;
-  };
-  return freeze(message);
-}
-
+/**
+ * 挂载插件。失败绝不阻塞会话。
+ *
+ * 分工：`createPluginRuntime` 建运行时（state / disposers / effect / 预热 / 工具面 / 设置路由），
+ * 本函数只负责**挂钩子**并交回 disposer。
+ *
+ * @param {object} ctx  宿主上下文（用 `ctx.on`、`ctx.logger?.warn`；其余一概不碰）
+ * @param {object} [rawConfig]
+ * @returns {Function} Cordis disposer；旧诊断字段挂在函数属性上
+ */
 export function apply(ctx, rawConfig = {}) {
   const config = resolveConfig(rawConfig);
-  // T25：**按 `session.id` 判「本会话已注入」** —— 宿主每个 pre-step 给的 session 可能是新对象，
-  // WeakSet 的对象身份会让 oncePerSession 永远判"没注入过"（T24 实测：同会话同 pid 重复注入 69/69）。
-  // `session.id` 与 `LAST_SCOPE` / `repeatStateFor` 是同一个稳定键；无 id 时才退回 WeakSet（旧行为兜底）。
-  //
-  // task-11 / P0-1：**判重的权威搬到 sidecar 槽位账本**（`rooms/inject-slot.mjs` 的 `{slotId, contentHash, seq}`）。
-  // 内存集合只能回答"这个 apply 实例里投过吗"—— 宿主 `session/end-seed` ⇒ 下一轮 agent 重建 ⇒ 重新 apply
-  // ⇒ 集合是空的，于是同一张卡每轮重投（aa0b0da9：10 次注入，10/10 都夹着 ≥1 个 end-seed）。
-  // 现在两条判据各管一层，都是机械的：
-  //   ① `injectedIds`  —— **同实例**事实（投过就记住；与拆分前逐字节一致，T52 的墓碑行靠它）；
-  //   ② 账本 + 上下文 —— 账本里该会话的槽记着的 `contentHash` **仍在本轮 `payload.messages` 里**
-  //      （只看原件里 `source.kind === CARD_SOURCE_KIND` 的消息，不逐条 hash 整个上下文）⇒ 跨 apply/重启都成立。
-  // 反向判据同样重要：账本记着但正文**已不在**上下文（被压缩掉）⇒ **不拦**，该重投（T49 ②「必要重注」）。
-  // 回滚：`KIFU_INJECT_SLOT_IDEMPOTENT=0` ⇒ 只走 ①（行为与 0.8.x 一致，账本保留不动）。
-  const injectedIds = new Set(); // session.id ⇒ 本实例已注入（同实例事实，不是权威）
-  const injectedObjects = new WeakSet(); // 无 id 的 session 对象 ⇒ 旧行为兜底（不泄漏引用）
-  const slotLedgerNotified = new Set(); // 账本读/写失败只 warn 一次（按 storeRoot）
-  const repeatStates = new Map(); // D5：每个会话的「同类失败计数」
-  const cardSampleCapNotified = new Set(); // T16：撞卡样本上限只报一次（按 storeRoot）
-  const liveStatsCapNotified = new Set(); // T18：撞心跳上限只报一次（按 storeRoot）
-  const oncePerSessionNotified = new Set(); // T52：被 oncePerSession 拦下时留一条墓碑行（每会话一次）
-  const disposers = [];
-  let disposed = false;
+  // Cordis 4.1 会把 apply 的返回值当作 effect 收集：普通诊断对象会触发 Invalid effect ⇒ 返回真 disposer。
+  const runtime = createPluginRuntime({ ctx, config, rawConfig, handleConfigRoute, identity: { name, hook: HOOK } });
+  if (!runtime.mounted) return runtime.effect; // 宿主没有 ctx.on：已 warn，原样交回（registered:false）
 
-  /** 本轮上下文里**我们自己投进去的**卡正文（只认 `source.kind`，不碰用户消息）。 */
-  const injectedCardTexts = (messages) => {
-    const out = [];
-    for (const message of Array.isArray(messages) ? messages : []) {
-      if (!message || typeof message !== 'object') continue;
-      if (message?.source?.kind !== CARD_SOURCE_KIND) continue;
-      const text = messageText(message);
-      if (text) out.push(text);
-    }
-    return out;
-  };
-
-  /**
-   * 这个会话是否**已经有同一张卡在上下文里**（跨 apply / 跨重启都成立）。
-   * 账本不可用（没有 storeRoot / 读写失败 / 版本不认识）⇒ 退回 false（= 不拦），并留一次 warn。
-   * 宁可多投一张，也不许因为账本坏了把该投的卡吞掉（判据不对称：吞卡用户看不见，多投有痕迹）。
-   */
-  const slotSaysAlreadyInjected = (sessionId, messages) => {
-    if (!sessionId || !slotIdempotencyEnabled()) return false;
-    let root = null;
-    try { root = resolveStoreRoot(config); } catch { root = null; }
-    if (!root) return false;
-    try {
-      const entry = slotSeen({ storeRoot: root, sessionId, slotId: INJECT_SLOT_ID });
-      if (!entry) return false;
-      return slotContentPresent(entry, injectedCardTexts(messages));
-    } catch (error) {
-      if (!slotLedgerNotified.has(root)) {
-        slotLedgerNotified.add(root);
-        warn(ctx, `槽位账本不可用（本轮退回进程内去重）：${String(error?.message ?? error)}`);
-      }
-      return false;
-    }
-  };
-
-  /**
-   * 注入成功 / 影子写成后记账（哈希相同 ⇒ 账本一个字节都不动；变了 ⇒ 覆盖同一条，`seq+1`）。
-   * 记账失败**不影响本轮**（卡已经投出去了），只留一次 warn。
-   */
-  const rememberInjectedSlot = (sessionId, sessionObject, card) => {
-    if (sessionId) injectedIds.add(sessionId);
-    else if (sessionObject) injectedObjects.add(sessionObject);
-    if (!sessionId || !slotIdempotencyEnabled()) return;
-    let root = null;
-    try { root = resolveStoreRoot(config); } catch { root = null; }
-    if (!root) return;
-    try {
-      const text = cardText(card);
-      if (!text) return;
-      recordSlot({ storeRoot: root, sessionId, slotId: INJECT_SLOT_ID, contentHash: slotContentHash(text), at: clockOf(config) });
-    } catch (error) {
-      if (!slotLedgerNotified.has(root)) {
-        slotLedgerNotified.add(root);
-        warn(ctx, `槽位账本记账失败（本轮照常注入）：${String(error?.message ?? error)}`);
-      }
-    }
-  };
-
-  // Cordis 4.1 会把 apply 的返回值当作 effect 收集：普通诊断对象会触发 Invalid effect。
-  // 返回真正的 disposer；旧诊断字段挂成函数属性，仅供现有测试/安装探针读取。
-  // ctx.on 自己也会把监听器登记到当前 fiber，这里的逆序清理同时支持直接调用与宿主卸载；
-  // Cordis 的 disposer 单次执行语义保证两条清理路径可以安全汇合。
-  const makeEffect = (registered) => {
-    let disposePromise = null;
-    const dispose = () => {
-      if (disposePromise) return disposePromise;
-      disposed = true;
-      disposePromise = (async () => {
-        repeatStates.clear();
-        injectedIds.clear();
-        slotLedgerNotified.clear();
-        cardSampleCapNotified.clear();
-        liveStatsCapNotified.clear();
-        oncePerSessionNotified.clear();
-        lifecycle.corpusCapNotified.clear();
-        const pending = [];
-        for (const off of disposers.splice(0).reverse()) {
-          const result = off();
-          if (result && typeof result.then === 'function') pending.push(result);
-        }
-        await Promise.all(pending);
-      })();
-      return disposePromise;
-    };
-    Object.defineProperties(dispose, {
-      name: { value: name, configurable: true },
-      hook: { value: HOOK },
-      registered: { value: registered },
-      config: { value: config },
-    });
-    return dispose;
-  };
-  const lifecycle = { ctx, builds: new Set(), isDisposed: () => disposed, corpusCapNotified: new Set() };
-  disposers.push(() => {
-    const pending = [];
-    for (const record of [...lifecycle.builds]) {
-      const result = record.cancel(lifecycle);
-      if (result && typeof result.then === 'function') pending.push(result);
-    }
-    return Promise.all(pending).then(() => undefined);
-  });
-  const listen = (event, handler) => {
-    const off = ctx.on(event, handler);
-    if (typeof off === 'function') disposers.push(off);
-  };
-
-  if (typeof ctx?.on !== 'function') {
-    warn(ctx, 'ctx.on 不可用（插件未挂载，宿主行为不变）');
-    return makeEffect(false);
-  }
-
-  // 预热 —— T390（2026-11-19）：**绝不在 apply 里同步做**，也绝不无条件做。
-  //
-  // 真机事故：用户在 UI 里一开插件，DSH 直接卡死、切会话一直"加载中"、只能重启。
-  // 冷启动实测（清空 `.cache` 后 apply）：
-  //     apply 完成 **14179 ms** · 事件循环最长阻塞 **14080 ms**
-  // 原因就是这里：`walkCacheFor` 会把 episodes(4377) / links(26346) / claims(3921) / topics(6593)
-  // 一次性读进内存并解析 bundle —— 全程在主线程同步跑，宿主在这 14 秒里什么都不能做。
-  // 库越大越久，会话/子代理/废弃会话越多越久 ⇒ 用户看到的就是"开完就卡死"。
-  //
-  // 现在：① 推到 apply 之后（`setTimeout 0`），② 先按 manifest 的规模闸判断，
-  // 大库直接跳过预热（宁可首轮冷一次，也不要卡住宿主），③ 失败静默。
-  const scheduleWarmUp = () => {
-    try {
-      const root = resolveStoreRoot(config);
-      if (!root || !fs.existsSync(root)) return;
-      const manifestPath = path.join(root, 'manifest.json');
-      let counts = null;
-      try { counts = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))?.counts ?? null; } catch { counts = null; }
-      const episodes = Number(counts?.episodes ?? 0);
-      const links = Number(counts?.links ?? 0);
-      // 规模闸：超过这个量级，预热的收益远小于"卡住宿主"的代价
-      const tooBig = episodes > WARMUP_MAX_EPISODES || links > WARMUP_MAX_LINKS;
-      if (tooBig) {
-        warn(ctx, `跳过预热：库规模过大（episodes=${episodes} links=${links}）——首轮走冷路径，避免阻塞宿主`);
-        return;
-      }
-      walkCacheFor(root, createStore({ root, bundle: true }), { createWalkCache });
-    } catch (error) {
-      warn(ctx, `预热失败（首轮可能变慢）：${String(error?.message ?? error)}`);
-    }
-  };
-  if (config.enabled || config.shadow) {
-    const timer = setTimeout(scheduleWarmUp, 0);
-    if (typeof timer?.unref === 'function') timer.unref();
-    disposers.push(() => { try { clearTimeout(timer); } catch { /* 已触发 */ } });
-  }
-
-  // 2026-11-04（S17）：把记忆查询注册成**工具** —— PTC / run_code 模式下宿主会据此生成 SDK 绑定，
-  // 代码块里可以直接循环调用（"要查几次查几次"），不再依赖模型反复召回。只读、零模型。
-  try {
-    const storeRoot = resolveStoreRoot(config);
-    const dshHome = storeRoot ? path.dirname(storeRoot) : null;
-    const createSdk = (opts) => createMemorySdk({ ...opts, dshHome: opts?.dshHome || dshHome || null });
-    const ctxHasRegister = typeof ctx?.tools?.register === 'function';
-    let names = registerMemoryTools(ctx, { createSdk, warn });
-    let via = names.length ? 'direct' : 'none';
-    // T388（2026-11-18）：**不再用 `ctx.inject(['tools'])` 去等一个可能永远不来的服务**。
-    //
-    // 真机事故 `crash-2026-11-09T19-46-33-220Z-web-boot.log`：
-    //   Error: web boot: 1 entry did not activate
-    //   dsh-gokifu-longmemory: failed
-    // `ctx.inject(deps, cb)` 在 Cordis 里等价于**派生一个等待这些服务的子插件**：服务不来，
-    // 子插件就一直 PENDING；宿主在 web 启动时统计"未激活的 entry"，**一个**就足以让整个 Web GUI 起不来。
-    // 现在：服务此刻在就已经在上面直接注册过；不在就如实记 none，绝不留下等待中的子插件。
-    if (!names.length) via = 'none';
-    // 凭据**无论成没成都写**：文件里没有工具名本身就是"没注册上"的证据（否则只能靠猜）。
-    if (storeRoot) recordToolRegistration(storeRoot, names, { host: 'dsh', via, ctxHasRegister });
-  } catch (error) {
-    warn(ctx, `工具面注册整体失败（不影响注入）：${String(error?.message ?? error)}`);
-  }
-
-  // 设置页的读写接口（只在本机 webServer 上注册；没有该服务就跳过）。
-  try {
-    // T388：只有 `webServer` **此刻就在**才注册；不在就整段跳过。
-    // 旧写法 `ctx.inject(['webServer'], …)` 在没有该服务的组合里会留下一个永远 PENDING 的子插件，
-    // 宿主 web 启动时按"未激活 entry"处理 ⇒ 整个 Web GUI 起不来（事故日志见上面 tools 那段）。
-    if (typeof ctx?.webServer?.register === 'function') {
-      {
-        const host = ctx;
-        host.webServer.register({
-          kind: 'exact',
-          path: CONFIG_ROUTE,
-          handler: (request, response) => {
-            const method = String(request?.method ?? 'GET').toUpperCase();
-            if (method === 'GET') {
-              const out = handleConfigRoute({ method, profileConfig: rawConfig });
-              response.writeHead(out.status, { 'content-type': 'application/json; charset=utf-8' });
-              response.end(JSON.stringify(out.body));
-              return;
-            }
-            if (method !== 'POST') {
-              response.writeHead(405, { allow: 'GET, POST' });
-              response.end();
-              return;
-            }
-            let raw = '';
-            request.on('data', (chunk) => {
-              raw += chunk;
-              if (raw.length > 64 * 1024) request.destroy();
-            });
-            request.on('end', () => {
-              const out = handleConfigRoute({ method, body: raw, profileConfig: rawConfig });
-              response.writeHead(out.status, { 'content-type': 'application/json; charset=utf-8' });
-              response.end(JSON.stringify(out.body));
-            });
-          },
-        });
-      }
-    }
-  } catch (error) {
-    warn(ctx, `设置接口没注册上：${String(error?.message ?? error)}`);
-  }
-
-  listen(HOOK, async (payload, next) => {
-    const decision = await next();
-    try {
-      if (!decision || typeof decision !== 'object') return decision;
-      if (decision.kind !== 'enter') return decision;
-      if (!Array.isArray(decision.messages)) return decision;
-
-      const session = payload?.agent?.session ?? payload?.session ?? null;
-      const sessionId = sessionIdOf(session); // T25：按 id 判会话（宿主每步可能换对象）
-      // T25：WeakSet 只能收对象 —— 极端情况下 payload.session 可能是字符串，兜底时先判类型（不许炸）
-      const sessionObject = session && typeof session === 'object' ? session : null;
-
-      // D5：先看这一刀有没有"同类失败反复"。它不受 oncePerSession 限制，但每会话有上限。
-      if (config.repeatHint && (config.enabled || config.shadow)) {
-        try {
-          const state = repeatStateFor(repeatStates, session, config.repeatHintAfter);
-          if (state && state.injected < config.repeatHintMax) {
-            const trigger = collectRepeatTrigger(state, payload?.messages);
-            if (trigger && config.shadow) {
-              // 影子模式（2026-11-02）：D5 不真注入，但**照样记录**"本来会补一张卡"——
-              // 这样在正式开注入之前就能观察触发率与类别分布。
-              try {
-                writeRepeatTelemetry({ config, trigger, at: Date.now(), shadow: true });
-              } catch { /* 影子遥测失败不影响决策 */ }
-              state.injected += 1;
-            } else if (trigger) {
-              const deps5 = await resolveDeps(config);
-              const inner = await decidePreStep({
-                ctx,
-                config,
-                deps: deps5,
-                payload: { ...payload, messages: [{ role: 'user', content: [{ type: 'text', text: trigger.quote }] }] },
-                decision,
-                lifecycle,
-              });
-              // T49：D5 也吃同一条去重 —— 卡已在上下文里就别再投（否则每次重新 apply 后 D5 会补同一张）
-              if (inner?.action === 'inject' && !cardAlreadyInContext(payload?.messages, inner.card)) {
-                state.injected += 1;
-                // D5 遥测（2026-11-02）：真注入后要能统计"二次命中触发率与误报"。
-                // 只写影子台账目录；任何异常不影响本轮注入。
-                try {
-                  writeRepeatTelemetry({ config, trigger, card: inner.card, digest: inner.digest, at: Date.now() });
-                } catch (error) {
-                  warn(ctx, `D5 遥测写入失败（忽略）：${String(error?.message ?? error)}`);
-                }
-                return inner.decision;
-              }
-            }
-          }
-        } catch (error) {
-          warn(ctx, `D5 补卡失败（继续本轮）：${String(error?.message ?? error)}`);
-        }
-      }
-
-      // T52（2026-11-09）：被 oncePerSession 拦下时**留一条墓碑行**（每会话一次）。
-      // 为什么：早退发生在心跳写入之前 ⇒ 台账里"被限流静默"与"插件根本没被调用/已死"长得一模一样
-      // （实测本机连续 125 分钟零心跳，只能靠推理分辨，T25 到底有没有生效无法审计）。
-      if (config.oncePerSession && session) {
-        // task-11：判据 = ① 同实例投过（内存）或 ② 账本记着的那份正文**还在本轮上下文里**（sidecar）。
-        // ② 是这次修的根：宿主 end-seed ⇒ 重新 apply ⇒ ① 归零，但 ② 照样成立 ⇒ 不再重投。
-        const blockedBySession = sessionId
-          ? (injectedIds.has(sessionId) || slotSaysAlreadyInjected(sessionId, payload?.messages))
-          : (sessionObject ? injectedObjects.has(sessionObject) : false);
-        if (blockedBySession) {
-          const key = sessionId ?? '(no-id)';
-          if (!oncePerSessionNotified.has(key)) {
-            oncePerSessionNotified.add(key);
-            try {
-              appendLiveStats(resolveStoreRoot(config), {
-                kind: 'pre-step',
-                scope: lastResolvedScope(session?.id)?.scope ?? null,
-                scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
-                action: 'skip',
-                reason: 'once-per-session',
-                digest: null,
-                tokens: null,
-                shadow: config.shadow === true,
-              });
-            } catch { /* 心跳失败不影响决策（这条本来就只是留痕） */ }
-          }
-          return decision;
-        }
-      }
-
-      const deps = await resolveDeps(config);
-      let result = await decidePreStep({ ctx, config, deps, payload, decision, lifecycle });
-      // T49：**无状态去重**（`oncePerSession` 只在同一个 apply 实例里有效；宿主重新 apply 后它一定是空的）。
-      // 卡正文已经逐字出现在本轮上下文里 ⇒ 再投一次是确定的浪费。降级成 `skip`（带 reason）而不是
-      // 静默返回：心跳台账要能看见"本来会投、因为已在上下文里所以没投"，否则这条闸无法被审计。
-      if (result.action === 'inject' && cardAlreadyInContext(payload?.messages, result.card)) {
-        // **`decision` 必须是官方入参那个原对象** —— `result.decision` 已经带上了那张卡（`{ ...decision, messages }`），
-        // 拿它返回等于照样注入（T49 ① 实测 4≠3 就是踩在这里）。
-        result = { ...result, action: 'skip', reason: 'already-in-context', decision };
-      }
-      // enabled=false 时的 "skip disabled" 没有诊断价值，别写（任何库内调用都会带出来一堆噪声）。
-      // 统一用 `=== true`（与 abstainIrrelevant 一致）。
-      // 注意：`liveStats` 上游有 `boolOf(src.liveStats, true)` 保护（未设置 ⇒ true），
-      // 所以 `!== false` 在这里**不是**真陷阱；但**统一写法**可避免将来有人**绕过 boolOf** 时踩坑。
-      if (config.liveStats === true && !(result.action === 'skip' && result.reason === 'disabled')) {
-        const storeRootForStats = resolveStoreRoot(config);
-        if (config.sampleCards === true && (result.action === 'inject') && result.card?.section) {
-          const cardSample = appendCardSample(storeRootForStats, {
-            scope: lastResolvedScope(session?.id)?.scope ?? null,
-            scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
-            digest: result.digest ?? null,
-            tokens: result.card?.tokens ?? null,
-            section: String(result.card.section),
-            // T365：**留样必须带信号**，否则"这张卡是否该注入"**无法审计**。
-            // 没有信号 ⇒ "不相关时沉默"这条原则**根本无法验证**（只能看到卡，看不到为什么给）。
-            // T10：从「只留前 160 字」改为**完整信号**（上限 4KB，另带 `signalPreviewTruncated` 明示截断）——
-            // 160 字让 T6 的离线审计全部失真（中位 0 / max 160），见 `cardSampleSignal` 的注释。
-            // 注意作用域：这里是**外层**（不是 decidePreStep 内部），没有局部 `text`；
-            // 必须用同文件的 `lastUserText(payload?.messages)` 现取（它就是 decidePreStep 用的那一条）。
-            ...cardSampleSignal(payload?.messages),
-            // T3：**指针行的自证字段** —— A6 文字层要把指针行排除出分子分母，
-            // 排除前必须能核对「这张卡本来有几条指针行」，否则豁免等于"静默跳过"。
-            // 两个字段都来自产出 `section` 的**同一张卡对象**（不是重新统计 section）。
-            tier: typeof result.card?.tier === 'string' ? result.card.tier : null,
-            pointerCount: Number.isFinite(result.card?.pointerCount) ? Number(result.card.pointerCount) : null,
-          });
-          // T16：撞上限不许静默 —— 一次性 warn（宿主日志）+ 一条 live-stats（kind=card-samples-cap）。
-          traceCardSampleCap({ ctx, storeRoot: storeRootForStats, sample: cardSample, notified: cardSampleCapNotified });
-        }
-        const liveStatsWrite = appendLiveStats(storeRootForStats, {
-          kind: 'pre-step',
-          // T364（2026-11-19）：**带上会话 id**。
-          // 没有它，A1.redundant 只能按「同 scope」判，于是把「跨会话重注」（必要）和
-          // 「同会话重注」（浪费）混在一起 —— 回放实测 430 次、23.86% 全是上界，不可判。
-          // 只加一个字段，不改任何行为；新行有 sid，历史行没有（回放时按 null 归入"不可判"）。
-          sid: sessionId ?? null,
-          scope: lastResolvedScope(session?.id)?.scope ?? null,
-          scopeFrom: lastResolvedScope(session?.id)?.from ?? null,
-          action: result.action ?? 'skip',
-          gateIds: Array.isArray(result.gateIds) && result.gateIds.length ? result.gateIds : null,
-          // 只有被闸拦下时才有意义：写错误码（如 card/imperative、claim/validity），仍不含卡内容。
-          gateCodes: Array.isArray(result.gateCodes) && result.gateCodes.length ? result.gateCodes : null,
-          reason: result.reason ?? null,
-          digest: result.digest ?? null,
-          tokens: result.card?.tokens ?? null,
-          shadow: config.shadow === true,
-          // T160：只有 gates-failed 才有这两项 —— "被哪几条 claim 拦住 / 卡上本来有几行"。
-          // 拿不到 id 时写 []（不猜）；行数拿不到写 null。**只记 id 与计数，不记卡正文。**
-          ...(result.reason === 'gates-failed'
-            ? {
-              gateClaimIds: Array.isArray(result.gateClaimIds) ? result.gateClaimIds : [],
-              gateLineCount: Number.isFinite(result.gateLineCount) ? result.gateLineCount : null,
-            }
-            : {}),
-        });
-        // T18：心跳撞上限不许静默 —— 一次性 warn（宿主日志）+ 一条 kind=live-stats-cap 的墓碑行（就写在 live-stats 里，
-        // 所有整文件读者都能看见；不写新文件，免得"留了痕但没人读"）。
-        traceLiveStatsCap({ ctx, storeRoot: storeRootForStats, result: liveStatsWrite, notified: liveStatsCapNotified });
-      }
-      // 真注入成功 / 影子记录写成 ⇒ 这个会话就别再来一遍（T25：按 session.id 记；无 id 才按对象）
-      // task-11：同时记进 sidecar 槽位账本（`{slotId, contentHash, seq}`）—— 跨 apply / 跨重启的判据在账本里。
-      if (result.action === 'inject' || result.action === 'shadow') {
-        if (session) rememberInjectedSlot(sessionId, sessionObject, result.card);
-      }
-      return result.decision ?? decision;
-    } catch (error) {
-      // 兜底：任何异常都不许冒泡到宿主（否则会阻塞本轮对话）
-      warn(ctx, `注入失败（继续本轮）：${String(error?.message ?? error)}`);
-      return decision;
-    }
-  });
+  const { lifecycle, state, listen, makeEffect } = runtime;
+  // 注入钩子（waterfall）：处理器只返回 decision，不写会话日志。
+  listen(HOOK, createPreStepHandler({ ctx, config, lifecycle, state, telemetry }));
 
   // D1（2026-11-02）：轮次收尾时增量刷新记忆库——不再只靠手动/首次 autoBuild。
-  // 条件：开了 autoArchive、库存在、且 manifest.updatedAt 已超过 autoArchiveMinutes。
   try {
-    listen('agent/turn-stopping', async () => {
-      try {
-        if (!config.autoArchive) return;
-        const root = resolveStoreRoot(config);
-        if (!root || !fs.existsSync(root)) return;
-        const marker = path.join(root, 'manifest.json');
-        let updated = 0;
-        try { updated = Number(JSON.parse(fs.readFileSync(marker, 'utf8')).updatedAt) || 0; } catch { updated = 0; }
-        const age = Date.now() - updated;
-        if (age < config.autoArchiveMinutes * 60 * 1000) return;
-        scheduleAutoBuild({ ctx, storeRoot: root, deps: config.deps ?? null, reason: 'periodic', lifecycle });
-      } catch (error) {
-        warn(ctx, `增量刷新检查失败：${String(error?.message ?? error)}`);
-      }
-    });
+    listen('agent/turn-stopping', createTurnStoppingHandler({ ctx, config, lifecycle }));
   } catch (error) {
     warn(ctx, `turn-stopping 钩子没挂上：${String(error?.message ?? error)}`);
   }
 
   return makeEffect(true);
-}
-
-export function enforceStoreRoot(config = {}) {
-  return resolveStoreRoot(config);
 }
 
 export default {
