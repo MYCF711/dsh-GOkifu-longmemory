@@ -1,0 +1,136 @@
+{
+  "face": "memoryGraph",
+  "source": "src/rooms/graphread.mjs",
+  "entry": "loadGraphAt",
+  "file": "graph.json + graph.json.delta.jsonl",
+  "schemaVersion": 1,
+  "legacySchemaVersion": 0,
+  "supportedSchemaVersions": [
+    0,
+    1
+  ],
+  "constants": {
+    "graphVersion": 1,
+    "deltaVersion": 1,
+    "deltaScalars": [
+      "updatedAt",
+      "nextNode",
+      "nextEdge",
+      "rootUserNodeIds",
+      "foldCount",
+      "lastFoldTotalTokens",
+      "checkpointSeq"
+    ]
+  },
+  "resolved": {
+    "current": 1,
+    "legacy": 0
+  },
+  "read": {
+    "frames": 1,
+    "truncated": false,
+    "missing": false,
+    "corrupt": false,
+    "graphCounts": {
+      "nodes": 2,
+      "edges": 1,
+      "order": 2
+    }
+  },
+  "resultShape": [
+    "$.baseHash: string",
+    "$.corrupt: boolean",
+    "$.deltaPath: string",
+    "$.error: null",
+    "$.frames: integer",
+    "$.graph: object",
+    "$.missing: boolean",
+    "$.reason: null",
+    "$.schemaVersion: integer",
+    "$.truncated: boolean"
+  ],
+  "graphShape": [
+    "$: object",
+    "$.checkpointSeq: null",
+    "$.createdAt: integer",
+    "$.cwd: string",
+    "$.edges: object",
+    "$.edges.*: object",
+    "$.edges.*.action: string",
+    "$.edges.*.evidence: object",
+    "$.edges.*.evidence.end: integer",
+    "$.edges.*.evidence.start: integer",
+    "$.edges.*.from: string",
+    "$.edges.*.id: string",
+    "$.edges.*.intent: string",
+    "$.edges.*.result: string",
+    "$.edges.*.to: string",
+    "$.edges.*.ts: integer",
+    "$.foldCount: integer",
+    "$.foldMarks: array",
+    "$.lastFoldTotalTokens: integer",
+    "$.lastFoldUsage: null",
+    "$.nextEdge: integer",
+    "$.nextNode: integer",
+    "$.nodes: object",
+    "$.nodes.*: object",
+    "$.nodes.*.constraintHash: string",
+    "$.nodes.*.id: string",
+    "$.nodes.*.kind: string",
+    "$.nodes.*.seq: integer",
+    "$.nodes.*.ts: integer",
+    "$.nodes.*.via: null",
+    "$.nodes.*.worldHash: string",
+    "$.order: array",
+    "$.order[0]: string",
+    "$.order[1]: string",
+    "$.rootUserNodeIds: array",
+    "$.rootUserNodeIds[0]: string",
+    "$.schemaVersion: integer",
+    "$.sessionId: string",
+    "$.stateIndex: object",
+    "$.stateIndex.*: string",
+    "$.updatedAt: integer",
+    "$.version: integer"
+  ],
+  "legacyGraphShape": [
+    "$: object",
+    "$.createdAt: integer",
+    "$.cwd: string",
+    "$.edges: object",
+    "$.foldCount: integer",
+    "$.nextEdge: integer",
+    "$.nextNode: integer",
+    "$.nodes: object",
+    "$.order: array",
+    "$.sessionId: string",
+    "$.updatedAt: integer",
+    "$.version: integer"
+  ],
+  "errorCodes": {
+    "baselineVersion": {
+      "threw": true,
+      "name": "Error",
+      "code": null,
+      "message": "graphread: unsupported version 2"
+    },
+    "schemaVersion": {
+      "threw": true,
+      "name": "Error",
+      "code": null,
+      "message": "graphread: unsupported schemaVersion 2 (期望 0 / 1)"
+    },
+    "schemaVersionType": {
+      "threw": true,
+      "name": "Error",
+      "code": null,
+      "message": "graphread: unsupported schemaVersion \"1\""
+    },
+    "deltaVersion": {
+      "threw": true,
+      "name": "Error",
+      "code": null,
+      "message": "graphread: unsupported delta version 2"
+    }
+  }
+}

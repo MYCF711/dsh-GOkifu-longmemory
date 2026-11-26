@@ -1,0 +1,55 @@
+{
+  "face": "injectSlotLedger",
+  "source": "src/rooms/inject-slot.mjs",
+  "file": "inject-slots.json",
+  "schemaVersionField": "version",
+  "schemaVersion": 1,
+  "constants": {
+    "slotId": "memory-card",
+    "idempotentEnv": "KIFU_INJECT_SLOT_IDEMPOTENT",
+    "maxSlots": 512
+  },
+  "planReasons": {
+    "created": "slot/created",
+    "unchanged": "slot/unchanged",
+    "overwritten": "slot/overwritten",
+    "noSession": "slot/no-session",
+    "noHash": "slot/no-hash"
+  },
+  "seqAfterOverwrite": 2,
+  "fileShape": [
+    "$: object",
+    "$.slots: object",
+    "$.slots.*: object",
+    "$.slots.*.at: integer",
+    "$.slots.*.contentHash: string",
+    "$.slots.*.seq: integer",
+    "$.slots.*.slotId: string",
+    "$.version: integer"
+  ],
+  "readShape": [
+    "$: object",
+    "$.slots: object",
+    "$.slots.*: object",
+    "$.slots.*.at: integer",
+    "$.slots.*.contentHash: string",
+    "$.slots.*.seq: integer",
+    "$.slots.*.slotId: string",
+    "$.version: integer"
+  ],
+  "entryShape": [
+    "$: object",
+    "$.at: integer",
+    "$.contentHash: string",
+    "$.seq: integer",
+    "$.slotId: string"
+  ],
+  "errorCodes": {
+    "unsupportedVersion": {
+      "threw": true,
+      "name": "SlotLedgerError",
+      "code": "slot/unsupported-version",
+      "message": "slot: unsupported ledger version 2 (期望 1)"
+    }
+  }
+}

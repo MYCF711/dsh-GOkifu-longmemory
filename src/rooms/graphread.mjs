@@ -3,15 +3,20 @@
  *
  * 契约（AGENTS §11 · R02）
  * - 入口导出：`loadGraphAt({basePath, deltaPath})`；配套纯函数 `applyDelta` / `decodeDeltaFrames` /
- *   `checksum31` / `baseHashOf` / `rebuildStateIndex`（测试与后续房间复用，不另设读法）。
+ *   `checksum31` / `baseHashOf` / `rebuildStateIndex` / `graphSchemaVersionOf` / `assertSupportedSchemaVersion`
+ *   （测试与后续房间复用，不另设读法）；常量 `GRAPH_VERSION` / `DELTA_VERSION` /
+ *   `GRAPH_SCHEMA_VERSION` / `GRAPH_SCHEMA_VERSION_LEGACY` / `GRAPH_SCHEMA_SUPPORTED`。
  * - 输入：`basePath` = 某会话目录下的 `graph.json`；`deltaPath` 缺省 = `${basePath}.delta.jsonl`。
- * - 输出：`{ graph, baseHash, frames, truncated, reason, missing, corrupt, deltaPath, error }`
+ * - 输出：`{ graph, schemaVersion, baseHash, frames, truncated, reason, missing, corrupt, deltaPath, error }`
  *   · `graph` 永远是「基线 + 已成功回放的前缀」，绝不把半帧当成最新图。
+ *   · `schemaVersion` = 这局基线被按哪个**对外面 schema** 解释（整数；无 `schemaVersion` 字段的老基线 = `0`）。
  * - 错误语义：
  *   · `graph.json` 不存在 → `{graph:null, missing:true}`（不抛：库扫描时"没棋谱"是常态）；
  *   · `graph.json` 解析失败 → `{graph:null, corrupt:true, error}`（不抛：一局坏图不许打断整库统计，
  *     但必须显式立旗，不许静默降级成空图）；
  *   · `graph.json` 版本未知 → **抛** `graphread: unsupported version <v>`（fail-closed，AGENTS §2.3）；
+ *   · `graph.json` 的 `schemaVersion` 未知（或不是整数）→ **抛** `graphread: unsupported schemaVersion <v>`
+ *     （契约版本闸：不认识的对外形状必须显式报错，不许读成"大概差不多"）；
  *   · delta 帧版本未知 → **抛** `graphread: unsupported delta version <v>`；
  *   · delta 坏尾（半写行 / 校验不通 / 基线哈希不匹配 / JSON 断）→ 返回已回放前缀 + `truncated:true`
  *     + `reason`（`malformed-frame` | `checksum` | `base-mismatch` | `bad-json`），不抛。
@@ -37,6 +42,44 @@ import { createHash } from 'node:crypto';
 export const GRAPH_VERSION = 1;
 /** 增量帧格式版本（帧内 `v`）。 */
 export const DELTA_VERSION = 1;
+
+/**
+ * 棋谱对外面 schema 版本（`graph.json.schemaVersion`，整数）。
+ * 含义与 `version` 不同：`version` 是**文件格式**（上游写盘契约），`schemaVersion` 是**我们这份读侧
+ * 对外面的字段形状**（字段增删/改名/改类型才 +1）。字段变了而版本没变 = 静默漂移，快照测试会拦。
+ */
+export const GRAPH_SCHEMA_VERSION = 1;
+/** 早期基线没有 `schemaVersion` 字段 ⇒ 按这一版解释（不是"最新版"，是"未知字段的老版"）。 */
+export const GRAPH_SCHEMA_VERSION_LEGACY = 0;
+/** 读侧认识的全部 schema 版本。不在表里 ⇒ 抛错（fail-closed，不许静默降级）。 */
+export const GRAPH_SCHEMA_SUPPORTED = Object.freeze([GRAPH_SCHEMA_VERSION_LEGACY, GRAPH_SCHEMA_VERSION]);
+
+/**
+ * 一局基线声明的 schema 版本（纯函数）。
+ * 缺字段 ⇒ 老基线（`GRAPH_SCHEMA_VERSION_LEGACY`）；出现但不是整数 ⇒ 直接抛，不做类型宽容。
+ * @param {object|null} graph
+ * @returns {number}
+ */
+export function graphSchemaVersionOf(graph) {
+  const raw = graph?.schemaVersion;
+  if (raw === undefined) return GRAPH_SCHEMA_VERSION_LEGACY;
+  if (!Number.isInteger(raw)) throw new Error(`graphread: unsupported schemaVersion ${JSON.stringify(raw)}`);
+  return raw;
+}
+
+/**
+ * 版本闸：不认识就抛（`graphread: unsupported schemaVersion <v>`）。
+ * @param {number} schemaVersion
+ * @returns {number} 原样返回（便于链式使用）
+ */
+export function assertSupportedSchemaVersion(schemaVersion) {
+  if (!GRAPH_SCHEMA_SUPPORTED.includes(schemaVersion)) {
+    throw new Error(
+      `graphread: unsupported schemaVersion ${JSON.stringify(schemaVersion)} (期望 ${GRAPH_SCHEMA_SUPPORTED.join(' / ')})`,
+    );
+  }
+  return schemaVersion;
+}
 
 /** delta 帧里允许覆盖的标量（白名单：其余字段只由基线确立，帧无权改）。 */
 export const DELTA_SCALARS = Object.freeze([
@@ -155,13 +198,15 @@ export function rebuildStateIndex(graph) {
  * 读一局的最新棋谱：基线 + delta 回放。
  *
  * @param {{basePath: string, deltaPath?: string}} paths
- * @returns {{graph: object|null, baseHash: string|null, deltaPath: string, frames: number,
- *            truncated: boolean, reason: string|null, missing: boolean, corrupt: boolean, error: string|null}}
+ * @returns {{graph: object|null, schemaVersion: number|null, baseHash: string|null, deltaPath: string,
+ *            frames: number, truncated: boolean, reason: string|null, missing: boolean, corrupt: boolean,
+ *            error: string|null}}
  */
 export function loadGraphAt({ basePath, deltaPath } = {}) {
   const dPath = deltaPath ?? `${basePath}.delta.jsonl`;
   const out = {
     graph: null,
+    schemaVersion: null,
     baseHash: null,
     deltaPath: dPath,
     frames: 0,
@@ -183,8 +228,12 @@ export function loadGraphAt({ basePath, deltaPath } = {}) {
   if (!graph || typeof graph !== 'object') return { ...out, corrupt: true, reason: 'bad-baseline', error: 'baseline is not an object' };
   if (graph.version !== GRAPH_VERSION) throw new Error(`graphread: unsupported version ${graph.version}`);
 
+  // 契约版本闸：不认识的对外形状必须显式报错（不许静默降级成"尽力而为"）。
+  const schemaVersion = assertSupportedSchemaVersion(graphSchemaVersionOf(graph));
+
   const baseHash = baseHashOf(text).slice(0, 16);
   out.graph = graph;
+  out.schemaVersion = schemaVersion;
   out.baseHash = baseHash;
   graph.nodes ??= {};
   graph.edges ??= {};

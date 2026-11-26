@@ -23,6 +23,9 @@
 // 错误语义：
 //   - 未知 manifest 版本 ⇒ verify 返回 `manifest/unsupported-version`（不静默降级）；
 //     写入侧 ensureCompatible 直接抛 PersistError('store/unsupported-version')。
+//   - 未知 manifest **schema 版本**（`schemaVersion` 字段）⇒ verify 返回 `manifest/unsupported-schema-version`；
+//     写入侧直接抛 PersistError('store/unsupported-schema-version')。缺该字段 = 老库（0）照常读，
+//     下次 writeManifest 补上（一次性升级）。字段形状由 `test/golden/manifest.json` 快照守着。
 //   - 缺 manifest / 坏 manifest ⇒ verify 返回 `manifest/missing` / `manifest/invalid` + hint rebuild。
 //   - 条目不慎带绝对路径 ⇒ put 抛 `persist/absolute-path`（宁可不入馆，不写进搬不走的库）。
 //   - journal 坏尾（崩溃截断）⇒ readJournal 丢尾行 + 计数，**不抛**；rebuild 仍可跑。
@@ -45,7 +48,29 @@ import { createHash } from 'node:crypto';
 
 export const STORE_VERSION = 1;
 export const STORE_SCHEMA = 'dsh-kifuin/memory-store@1';
+
 import { readKindBundleCached, writeKindBundle, WALK_BUNDLE_KINDS } from './walkbundle.mjs';
+
+/**
+ * manifest.json 对外面 schema 版本（整数）。与 `version` 分工不同：
+ * `version` = 库格式/布局版本（搬库契约），`schemaVersion` = **字段形状**版本（字段增删/改名/改类型才 +1）。
+ * 两者都走「不认识就显式报错」，不许静默降级（AGENTS §2.3）。
+ */
+export const MANIFEST_SCHEMA_VERSION = 1;
+/** 早期 manifest 没有 `schemaVersion` 字段 ⇒ 按这一版解释（老库照常能读，不是"当最新版"）。 */
+export const MANIFEST_SCHEMA_VERSION_LEGACY = 0;
+/** 读侧认识的全部 manifest schema 版本；不在表里 ⇒ 显式报错。 */
+export const MANIFEST_SCHEMA_SUPPORTED = Object.freeze([MANIFEST_SCHEMA_VERSION_LEGACY, MANIFEST_SCHEMA_VERSION]);
+
+/**
+ * 一份 manifest 声明的 schema 版本（纯函数）。缺字段 ⇒ 老库版本；非整数原样返回（由闸判）。
+ * @param {object|null} manifest
+ * @returns {*}
+ */
+export function manifestSchemaVersionOf(manifest) {
+  const raw = manifest?.schemaVersion;
+  return raw === undefined ? MANIFEST_SCHEMA_VERSION_LEGACY : raw;
+}
 
 export const MANIFEST_FILE = 'manifest.json';
 export const INDEX_FILE = 'index.md';
@@ -461,6 +486,8 @@ function sameExceptClocks(a, b) {
 export function isAuthoritativeProblem(error) {
   if (!error || typeof error !== 'object') return false;
   if (error.code === 'manifest/unsupported-version' || error.code === 'manifest/invalid') return false;
+  // 契约版本闸（schemaVersion）同属"程序与库不匹配"，不归到权威条目漂移里。
+  if (error.code === 'manifest/unsupported-schema-version') return false;
   const p = error.path;
   if (typeof p !== 'string') return false;
   if (error.code === 'counts/mismatch') return AUTHORITATIVE_KINDS.includes(p);
@@ -497,9 +524,10 @@ async function loadOptional(url) {
 
 /**
  * 打开（必要时创建）一个 sidecar store。
- * @param {{root:string, user?:string, now?:number|(()=>number), version?:number}} opts
+ * @param {{root:string, user?:string, now?:number|(()=>number), version?:number, schemaVersion?:number}} opts
  *        root = 记忆库根目录（`<DSH_HOME>/memory-context/`，测试用临时目录）。
  *        now  = 时钟注入（测试可固定；默认 Date.now）。
+ *        version / schemaVersion = 仅测试用的版本注入（模拟"更新/更旧的程序写的库"）。
  * @returns {object} store（方法见文件头与下方注释）
  */
 export function createStore(opts = {}) {
@@ -509,6 +537,7 @@ export function createStore(opts = {}) {
   const root = path.resolve(opts.root);
   const user = typeof opts.user === 'string' && opts.user !== '' ? opts.user : DEFAULT_USER;
   const version = Number.isFinite(opts.version) ? opts.version : STORE_VERSION;
+  const schemaVersion = Number.isFinite(opts.schemaVersion) ? opts.schemaVersion : MANIFEST_SCHEMA_VERSION;
   const clock = typeof opts.now === 'function' ? opts.now : () => (Number.isFinite(opts.now) ? opts.now : Date.now());
   // T62：**可选**的单文件 bundle 快路径（只有生产路径 sdk/plugin 打开；测试默认关 —— 见 walkbundle.mjs 的复用判据）。
   const useBundle = opts.bundle === true;
@@ -649,6 +678,23 @@ export function createStore(opts = {}) {
     return result;
   }
 
+  /**
+   * schema 版本闸（**写侧**）：不认识的字段形状必须显式报错，不许静默降级（契约 §7）。
+   * 缺 `schemaVersion` = 老库（`MANIFEST_SCHEMA_VERSION_LEGACY`）⇒ 放行，下一次 writeManifest 补上该字段
+   * （一次性升级，之后字节稳定）。
+   */
+  function assertManifestSchema(manifest) {
+    const found = manifestSchemaVersionOf(manifest);
+    if (!Number.isInteger(found) || !MANIFEST_SCHEMA_SUPPORTED.includes(found)) {
+      throw new PersistError(
+        `persist: unsupported manifest schemaVersion ${JSON.stringify(found)} (期望 ${schemaVersion})`,
+        'store/unsupported-schema-version',
+        { found, expected: schemaVersion },
+      );
+    }
+    return found;
+  }
+
   /** 写入侧的版本闸：不认识的版本必须明确报错，不许静默降级（契约 §7）。 */
   function ensureCompatible() {
     const { manifest, error } = readManifest();
@@ -663,6 +709,7 @@ export function createStore(opts = {}) {
         { found: manifest?.version, expected: version },
       );
     }
+    assertManifestSchema(manifest);
     return manifest;
   }
 
@@ -779,6 +826,7 @@ export function createStore(opts = {}) {
     const prev = previous.manifest;
     const next = {
       version,
+      schemaVersion,
       schema: STORE_SCHEMA,
       user,
       createdAt: Number.isFinite(prev?.createdAt) ? prev.createdAt : now,
@@ -1184,6 +1232,16 @@ export function createStore(opts = {}) {
           hint: '升级程序或用发出版本的程序打开；不允许静默降级',
         });
       }
+      // schema 版本闸（读侧）：缺字段 = 老库（0）照常读；不在支持表里 ⇒ 显式报错。
+      const manifestSchema = manifestSchemaVersionOf(manifest);
+      if (!Number.isInteger(manifestSchema) || !MANIFEST_SCHEMA_SUPPORTED.includes(manifestSchema)) {
+        errors.push({
+          code: 'manifest/unsupported-schema-version',
+          path: MANIFEST_FILE,
+          message: `未知 manifest schemaVersion ${JSON.stringify(manifestSchema)}（本程序支持 ${MANIFEST_SCHEMA_SUPPORTED.join(' / ')}）`,
+          hint: '升级程序或用发出版本的程序打开；不允许静默降级',
+        });
+      }
       if (manifest?.pathPolicy !== PATH_POLICY) {
         errors.push({
           code: 'manifest/path-policy',
@@ -1323,7 +1381,7 @@ export function createStore(opts = {}) {
       },
       counts: actualCounts,
       manifest: manifest
-        ? { version: manifest.version, user: manifest.user, createdAt: manifest.createdAt, updatedAt: manifest.updatedAt, counts: manifest.counts, pathPolicy: manifest.pathPolicy }
+        ? { version: manifest.version, schemaVersion: manifestSchemaVersionOf(manifest), user: manifest.user, createdAt: manifest.createdAt, updatedAt: manifest.updatedAt, counts: manifest.counts, pathPolicy: manifest.pathPolicy }
         : null,
       elapsedMs: Date.now() - t0,
     };
@@ -1412,6 +1470,7 @@ export function createStore(opts = {}) {
     root,
     user,
     version,
+    schemaVersion,
     manifestPath,
     indexPath,
     journalPath,

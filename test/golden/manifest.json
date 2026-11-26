@@ -1,0 +1,113 @@
+{
+  "face": "manifest",
+  "source": "src/rooms/persist.mjs",
+  "entry": "writeManifest / readManifest / ensureCompatible / verify",
+  "file": "manifest.json",
+  "schemaVersion": 1,
+  "legacySchemaVersion": 0,
+  "supportedSchemaVersions": [
+    0,
+    1
+  ],
+  "invariants": {
+    "version": 1,
+    "schemaVersion": 1,
+    "schema": "dsh-kifuin/memory-store@1",
+    "user": "owner",
+    "pathPolicy": "relative",
+    "storeVersion": 1,
+    "storeSchema": "dsh-kifuin/memory-store@1",
+    "defaultUser": "owner",
+    "pathPolicyConstant": "relative"
+  },
+  "lifecycle": {
+    "firstWriteChanged": true,
+    "secondWriteChanged": false,
+    "legacyAccepted": true,
+    "legacyResolvedSchemaVersion": 0,
+    "legacyUpgradeWrote": true,
+    "upgradedSchemaVersion": 1,
+    "upgradedAgainChanged": false,
+    "putChanged": true,
+    "verifiedOk": true
+  },
+  "manifestShape": [
+    "$: object",
+    "$.bytes: integer",
+    "$.checksums: object",
+    "$.checksums.*: string",
+    "$.counts: object",
+    "$.counts.adjudications: integer",
+    "$.counts.claims: integer",
+    "$.counts.episodes: integer",
+    "$.counts.joseki: integer",
+    "$.counts.links: integer",
+    "$.counts.threads: integer",
+    "$.counts.topics: integer",
+    "$.createdAt: integer",
+    "$.files: integer",
+    "$.pathPolicy: string",
+    "$.schema: string",
+    "$.schemaVersion: integer",
+    "$.updatedAt: integer",
+    "$.user: string",
+    "$.version: integer"
+  ],
+  "writeResultShape": [
+    "$.changed: boolean",
+    "$.manifest: object"
+  ],
+  "readManifestResultShape": [
+    "$.error: null",
+    "$.manifest: object",
+    "$.raw: string"
+  ],
+  "verifyResultShape": [
+    "$.checked: object",
+    "$.counts: object",
+    "$.elapsedMs: integer",
+    "$.errors: array",
+    "$.manifest: object",
+    "$.ok: boolean",
+    "$.warnings: array"
+  ],
+  "verifyManifestShape": [
+    "$: object",
+    "$.counts: object",
+    "$.counts.adjudications: integer",
+    "$.counts.claims: integer",
+    "$.counts.episodes: integer",
+    "$.counts.joseki: integer",
+    "$.counts.links: integer",
+    "$.counts.threads: integer",
+    "$.counts.topics: integer",
+    "$.createdAt: integer",
+    "$.pathPolicy: string",
+    "$.schemaVersion: integer",
+    "$.updatedAt: integer",
+    "$.user: string",
+    "$.version: integer"
+  ],
+  "errorCodes": {
+    "unsupportedSchemaVersion": {
+      "threw": true,
+      "name": "PersistError",
+      "code": "store/unsupported-schema-version",
+      "message": "persist: unsupported manifest schemaVersion 2 (期望 1)"
+    },
+    "unsupportedSchemaVersionVerify": [
+      {
+        "code": "manifest/unsupported-schema-version",
+        "path": "manifest.json",
+        "message": "未知 manifest schemaVersion 2（本程序支持 0 / 1）",
+        "hint": "升级程序或用发出版本的程序打开；不允许静默降级"
+      }
+    ],
+    "unsupportedSchemaVersionPut": {
+      "threw": true,
+      "name": "PersistError",
+      "code": "store/unsupported-schema-version",
+      "message": "persist: unsupported manifest schemaVersion 2 (期望 1)"
+    }
+  }
+}
