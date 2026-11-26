@@ -2776,3 +2776,70 @@ test('task-11 ④: 判据原样搬运（词表与行形态逐字不变；拆分�
   assert.equal(gate.estimateTokens('中文字'), 2);
   assert.equal(gate.formatCardDate(Date.UTC(2026, 9, 21, 12)), '2026-10-21');
 });
+
+// ---------------------------------------------------------------------------
+// task-14 · 取数房（③恢复事实 / ④trial / ⑤影子记录 + CLI）与卡片房再切一刀（tombstone）
+//
+// 拆分后的形状（docs/重构-繁复收敛.md 期 G）：
+//   inject-card.mjs     —— **渲染侧**：① 卡片渲染 + token 预算　② entry 构造（≤1,200 行）
+//   inject-recovery.mjs —— **取数/记录侧**：信号 / store 视图 / 次序 / 降级 walk / ③ / ④ / ⑤
+//   inject.mjs          —— 转发垫片（导出面一字不变）
+//
+// 本节钉四件事，删/改都会红：
+//   ① 取数房在，且 ③④⑤ 与取数原语的关键符号能从它直接 import —— 删掉该文件 ⇒ 卡片房与垫片 import 失败 ⇒ 整片红；
+//   ② 两房是**同一引用**（垫片 → 卡片房 → 取数房），不是复制一份实现；
+//   ③ 卡片房**只剩 ①②**（≤1,200 行，里面不再有 ③④⑤ 的实现）—— 把实现搬回去 ⇒ 红；
+//   ④ 导出面不因拆分变大：内部取数原语（`storeView` / `rankOf`）不外泄到卡片房与垫片。
+// ---------------------------------------------------------------------------
+
+test('task-14 ①: 取数房在，③④⑤ 的关键符号能直接从它 import（删掉 inject-recovery.mjs ⇒ 本条与整片红）', async () => {
+  const url = new URL('../src/rooms/inject-recovery.mjs', import.meta.url);
+  assert.equal(existsSync(url), true, '缺少取数房：src/rooms/inject-recovery.mjs（删掉它 ⇒ inject-card 与垫片都 import 失败）');
+  const mod = await import(url.href);
+  const names = [
+    // ③ 恢复事实
+    'recoveryInsightClass', 'recoveryFactOf', 'recoverySuffix',
+    // ④ trial
+    'TRIAL_OUTCOMES', 'trialOutcomeOf', 'recordInjectionTrials',
+    // ⑤ 影子记录 + `inject` CLI
+    'CARD_VERSION', 'SHADOW_DIR_REL', 'SHADOW_FILE', 'InjectError',
+    'defaultShadowDir', 'assertSafeShadowDir', 'writeShadow', 'readShadow', 'runInject',
+    // 取数原语（卡片房与降级 walk 共用同一份）
+    'signalFromText', 'storeView', 'rankOf', 'degradedWalk',
+  ];
+  for (const name of names) assert.ok(name in mod, `inject-recovery.mjs 必须导出 ${name}`);
+});
+
+test('task-14 ②: 两房同一引用 —— 垫片 → 卡片房 → 取数房（不是复制一份实现）', async () => {
+  const shim = await import('../src/rooms/inject.mjs');
+  const card = await import('../src/rooms/inject-card.mjs');
+  const recovery = await import('../src/rooms/inject-recovery.mjs');
+  for (const name of ['CARD_VERSION', 'InjectError', 'TRIAL_OUTCOMES', 'trialOutcomeOf',
+    'recordInjectionTrials', 'recoveryInsightClass', 'signalFromText', 'degradedWalk',
+    'defaultShadowDir', 'assertSafeShadowDir', 'writeShadow', 'readShadow', 'runInject']) {
+    assert.equal(card[name], recovery[name], `${name}：卡片房必须原样转发取数房的同一个引用`);
+    assert.equal(shim[name], recovery[name], `${name}：垫片必须与取数房同一引用`);
+  }
+  // 导出面没被拆分撑大：取数房的内部符号不外泄
+  assert.equal('storeView' in shim, false, 'storeView 是内部取数原语，不属于对外导出面');
+  assert.equal('rankOf' in shim, false, 'rankOf 是内部次序表，不属于对外导出面');
+  assert.equal('storeView' in card, false, 'storeView 不外泄到卡片房导出面');
+  assert.equal('rankOf' in card, false, 'rankOf 不外泄到卡片房导出面');
+});
+
+test('task-14 ③: 卡片房只剩 ①②（≤1,200 行），且不再有 ③④⑤ 的实现（搬回去 ⇒ 本条红）', () => {
+  const file = new URL('../src/rooms/inject-card.mjs', import.meta.url);
+  const source = readFileSync(file, 'utf8');
+  const lines = source.split('\n').length - (source.endsWith('\n') ? 1 : 0);
+  assert.ok(lines <= 1200, `inject-card.mjs 必须只剩渲染与条目构造（当前 ${lines} 行，上限 1,200）`);
+  for (const gone of ['function recoveryFactOf', 'function recoverySuffix', 'function storeView',
+    'function degradedWalk', 'function writeShadow', 'function readShadow', 'async function runInject',
+    'function recordInjectionTrials', 'function trialOutcomeOf', 'function recoveryInsightClass']) {
+    assert.equal(source.includes(gone), false, `卡片房不许再出现 ${gone}（实现属于取数房）`);
+  }
+  // 但不能把卡片房掏空：渲染 + 条目构造必须还在
+  for (const kept of ['export function buildMemoryCard', 'function renderSection', 'function renderEntryLine',
+    'function entryFromClaim', 'function collectEntries', 'function collapseMergeNodes']) {
+    assert.equal(source.includes(kept), true, `卡片房必须还留着 ${kept}`);
+  }
+});
