@@ -57,6 +57,17 @@ import {
   // T33：注入时结算 trial（只写 sidecar，不改可见性/不退役）
   recordInjectionTrials,
 } from './rooms/inject.mjs';
+// task-11 / P0-1：注入去重的**权威**从 `apply()` 内的内存集合搬到 sidecar 槽位账本。
+// 为什么必须搬：宿主 `session/end-seed` ⇒ 下一轮 agent 重建 ⇒ 插件**重新 apply** ⇒ 内存集合归零 ⇒
+// 同一张卡重投（会话 aa0b0da9 实测 10/10 次重复注入；对照会话 0 个 end-seed 只投 1 次）。
+import {
+  INJECT_SLOT_ID,
+  recordSlot,
+  slotContentHash,
+  slotContentPresent,
+  slotIdempotencyEnabled,
+  slotSeen,
+} from './rooms/inject-slot.mjs';
 import { probeValidity, validityKeyOf, workspaceOf, runGates } from './rooms/gates.mjs';
 import { classifyErrorClass } from './rooms/claim.mjs';
 import { errorClassKeyOf } from './rooms/topic.mjs';
@@ -1507,14 +1518,83 @@ export function apply(ctx, rawConfig = {}) {
   // T25：**按 `session.id` 判「本会话已注入」** —— 宿主每个 pre-step 给的 session 可能是新对象，
   // WeakSet 的对象身份会让 oncePerSession 永远判"没注入过"（T24 实测：同会话同 pid 重复注入 69/69）。
   // `session.id` 与 `LAST_SCOPE` / `repeatStateFor` 是同一个稳定键；无 id 时才退回 WeakSet（旧行为兜底）。
-  const injectedIds = new Set(); // session.id ⇒ 已注入
+  //
+  // task-11 / P0-1：**判重的权威搬到 sidecar 槽位账本**（`rooms/inject-slot.mjs` 的 `{slotId, contentHash, seq}`）。
+  // 内存集合只能回答"这个 apply 实例里投过吗"—— 宿主 `session/end-seed` ⇒ 下一轮 agent 重建 ⇒ 重新 apply
+  // ⇒ 集合是空的，于是同一张卡每轮重投（aa0b0da9：10 次注入，10/10 都夹着 ≥1 个 end-seed）。
+  // 现在两条判据各管一层，都是机械的：
+  //   ① `injectedIds`  —— **同实例**事实（投过就记住；与拆分前逐字节一致，T52 的墓碑行靠它）；
+  //   ② 账本 + 上下文 —— 账本里该会话的槽记着的 `contentHash` **仍在本轮 `payload.messages` 里**
+  //      （只看原件里 `source.kind === CARD_SOURCE_KIND` 的消息，不逐条 hash 整个上下文）⇒ 跨 apply/重启都成立。
+  // 反向判据同样重要：账本记着但正文**已不在**上下文（被压缩掉）⇒ **不拦**，该重投（T49 ②「必要重注」）。
+  // 回滚：`KIFU_INJECT_SLOT_IDEMPOTENT=0` ⇒ 只走 ①（行为与 0.8.x 一致，账本保留不动）。
+  const injectedIds = new Set(); // session.id ⇒ 本实例已注入（同实例事实，不是权威）
   const injectedObjects = new WeakSet(); // 无 id 的 session 对象 ⇒ 旧行为兜底（不泄漏引用）
+  const slotLedgerNotified = new Set(); // 账本读/写失败只 warn 一次（按 storeRoot）
   const repeatStates = new Map(); // D5：每个会话的「同类失败计数」
   const cardSampleCapNotified = new Set(); // T16：撞卡样本上限只报一次（按 storeRoot）
   const liveStatsCapNotified = new Set(); // T18：撞心跳上限只报一次（按 storeRoot）
   const oncePerSessionNotified = new Set(); // T52：被 oncePerSession 拦下时留一条墓碑行（每会话一次）
   const disposers = [];
   let disposed = false;
+
+  /** 本轮上下文里**我们自己投进去的**卡正文（只认 `source.kind`，不碰用户消息）。 */
+  const injectedCardTexts = (messages) => {
+    const out = [];
+    for (const message of Array.isArray(messages) ? messages : []) {
+      if (!message || typeof message !== 'object') continue;
+      if (message?.source?.kind !== CARD_SOURCE_KIND) continue;
+      const text = messageText(message);
+      if (text) out.push(text);
+    }
+    return out;
+  };
+
+  /**
+   * 这个会话是否**已经有同一张卡在上下文里**（跨 apply / 跨重启都成立）。
+   * 账本不可用（没有 storeRoot / 读写失败 / 版本不认识）⇒ 退回 false（= 不拦），并留一次 warn。
+   * 宁可多投一张，也不许因为账本坏了把该投的卡吞掉（判据不对称：吞卡用户看不见，多投有痕迹）。
+   */
+  const slotSaysAlreadyInjected = (sessionId, messages) => {
+    if (!sessionId || !slotIdempotencyEnabled()) return false;
+    let root = null;
+    try { root = resolveStoreRoot(config); } catch { root = null; }
+    if (!root) return false;
+    try {
+      const entry = slotSeen({ storeRoot: root, sessionId, slotId: INJECT_SLOT_ID });
+      if (!entry) return false;
+      return slotContentPresent(entry, injectedCardTexts(messages));
+    } catch (error) {
+      if (!slotLedgerNotified.has(root)) {
+        slotLedgerNotified.add(root);
+        warn(ctx, `槽位账本不可用（本轮退回进程内去重）：${String(error?.message ?? error)}`);
+      }
+      return false;
+    }
+  };
+
+  /**
+   * 注入成功 / 影子写成后记账（哈希相同 ⇒ 账本一个字节都不动；变了 ⇒ 覆盖同一条，`seq+1`）。
+   * 记账失败**不影响本轮**（卡已经投出去了），只留一次 warn。
+   */
+  const rememberInjectedSlot = (sessionId, sessionObject, card) => {
+    if (sessionId) injectedIds.add(sessionId);
+    else if (sessionObject) injectedObjects.add(sessionObject);
+    if (!sessionId || !slotIdempotencyEnabled()) return;
+    let root = null;
+    try { root = resolveStoreRoot(config); } catch { root = null; }
+    if (!root) return;
+    try {
+      const text = cardText(card);
+      if (!text) return;
+      recordSlot({ storeRoot: root, sessionId, slotId: INJECT_SLOT_ID, contentHash: slotContentHash(text), at: clockOf(config) });
+    } catch (error) {
+      if (!slotLedgerNotified.has(root)) {
+        slotLedgerNotified.add(root);
+        warn(ctx, `槽位账本记账失败（本轮照常注入）：${String(error?.message ?? error)}`);
+      }
+    }
+  };
 
   // Cordis 4.1 会把 apply 的返回值当作 effect 收集：普通诊断对象会触发 Invalid effect。
   // 返回真正的 disposer；旧诊断字段挂成函数属性，仅供现有测试/安装探针读取。
@@ -1528,6 +1608,7 @@ export function apply(ctx, rawConfig = {}) {
       disposePromise = (async () => {
         repeatStates.clear();
         injectedIds.clear();
+        slotLedgerNotified.clear();
         cardSampleCapNotified.clear();
         liveStatsCapNotified.clear();
         oncePerSessionNotified.clear();
@@ -1729,7 +1810,11 @@ export function apply(ctx, rawConfig = {}) {
       // 为什么：早退发生在心跳写入之前 ⇒ 台账里"被限流静默"与"插件根本没被调用/已死"长得一模一样
       // （实测本机连续 125 分钟零心跳，只能靠推理分辨，T25 到底有没有生效无法审计）。
       if (config.oncePerSession && session) {
-        const blockedBySession = sessionId ? injectedIds.has(sessionId) : (sessionObject ? injectedObjects.has(sessionObject) : false);
+        // task-11：判据 = ① 同实例投过（内存）或 ② 账本记着的那份正文**还在本轮上下文里**（sidecar）。
+        // ② 是这次修的根：宿主 end-seed ⇒ 重新 apply ⇒ ① 归零，但 ② 照样成立 ⇒ 不再重投。
+        const blockedBySession = sessionId
+          ? (injectedIds.has(sessionId) || slotSaysAlreadyInjected(sessionId, payload?.messages))
+          : (sessionObject ? injectedObjects.has(sessionObject) : false);
         if (blockedBySession) {
           const key = sessionId ?? '(no-id)';
           if (!oncePerSessionNotified.has(key)) {
@@ -1821,11 +1906,9 @@ export function apply(ctx, rawConfig = {}) {
         traceLiveStatsCap({ ctx, storeRoot: storeRootForStats, result: liveStatsWrite, notified: liveStatsCapNotified });
       }
       // 真注入成功 / 影子记录写成 ⇒ 这个会话就别再来一遍（T25：按 session.id 记；无 id 才按对象）
+      // task-11：同时记进 sidecar 槽位账本（`{slotId, contentHash, seq}`）—— 跨 apply / 跨重启的判据在账本里。
       if (result.action === 'inject' || result.action === 'shadow') {
-        if (session) {
-          if (sessionId) injectedIds.add(sessionId);
-          else if (sessionObject) injectedObjects.add(sessionObject);
-        }
+        if (session) rememberInjectedSlot(sessionId, sessionObject, result.card);
       }
       return result.decision ?? decision;
     } catch (error) {

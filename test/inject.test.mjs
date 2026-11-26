@@ -2692,3 +2692,87 @@ test('T48 ③: V3「同源 claim 包」把同一 episode 折成一块（头行�
     assert.match(v3, /  - \[antipattern\] .*· seq 2/, '组内保留 seq');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// task-11 · 三房拆分与转发垫片（tombstone）
+//
+// 拆分后的形状（docs/重构-繁复收敛.md 期 B）：
+//   inject-gate.mjs —— 十道闸的判定原语   inject-card.mjs —— 卡片产物（渲染 + 预算裁剪）
+//   inject-slot.mjs —— 槽位幂等账本        inject.mjs      —— 转发垫片（只有转发，没有实现）
+//
+// 本节钉住三件事，删/改都会红：
+//   ① **每个房都在，且关键符号能从该房直接 import** —— 删掉任一房间 ⇒ 对应 import 直接失败；
+//   ② 垫片是**真转发**（不是复制一份实现）：`inject.mjs` 导出的符号与房间导出**同一个引用**（`===`）；
+//   ③ 垫片**足够薄**（≤120 行，且里面不出现 `export function`）—— 有人把实现搬回垫片 ⇒ 红。
+// ---------------------------------------------------------------------------
+
+test('task-11 ①: 三个新房间都在，且关键符号能直接从各自房间 import（删掉任一房间 ⇒ 本条红）', async () => {
+  const rooms = {
+    'inject-gate.mjs': ['IMPERATIVE_PATTERNS', 'GOVERNANCE_PATTERNS', 'PROVENANCE_LINE_RE', 'INDEX_LINE_RE',
+      'MARKERS_LINE', 'estimateTokens', 'formatCardDate', 'auditImperatives', 'normalizeScopeKey',
+      'isScopeVisible', 'isUnknownScope', 'filterHitsByScope', 'scopeKeyFromPath', 'fileExistsPreconditionOk'],
+    'inject-card.mjs': ['CARD_VERSION', 'buildMemoryCard', 'renderIndexLine', 'clipLine',
+      'singleLine', 'signalFromText', 'degradedWalk', 'writeShadow', 'readShadow', 'runInject', 'tierOf', 'InjectError'],
+    'inject-slot.mjs': ['INJECT_SLOT_ID', 'INJECT_SLOT_LEDGER_FILE', 'slotContentHash', 'slotKeyOf', 'lookupSlot',
+      'planSlotWrite', 'readSlotLedger', 'writeSlotLedger', 'recordSlot', 'slotContentPresent',
+      'slotIdempotencyEnabled', 'SlotLedgerError'],
+  };
+  for (const [file, names] of Object.entries(rooms)) {
+    const url = new URL(`../src/rooms/${file}`, import.meta.url);
+    assert.equal(existsSync(url), true, `缺少房间文件：${file}（删掉它会连带红掉它的契约测试与插件接线）`);
+    const mod = await import(url.href);
+    for (const name of names) {
+      assert.ok(name in mod, `${file} 必须导出 ${name}`);
+    }
+  }
+});
+
+test('task-11 ②: 垫片是**真转发** —— 导出的符号与房间是同一个引用（不是复制一份实现）', async () => {
+  const shim = await import('../src/rooms/inject.mjs');
+  const gate = await import('../src/rooms/inject-gate.mjs');
+  const card = await import('../src/rooms/inject-card.mjs');
+  const slot = await import('../src/rooms/inject-slot.mjs');
+
+  // 闸判据（gates.mjs / check.mjs 的边界审计都读这一份）
+  assert.equal(shim.auditImperatives, gate.auditImperatives, 'auditImperatives 必须同一引用');
+  assert.equal(shim.estimateTokens, gate.estimateTokens, 'estimateTokens 必须同一引用（闸 6 与渲染同一口径）');
+  assert.equal(shim.formatCardDate, gate.formatCardDate, 'formatCardDate 必须同一引用（闸 0 与渲染同一口径）');
+  assert.equal(shim.isScopeVisible, gate.isScopeVisible, 'isScopeVisible 必须同一引用（闸 1 与注入前过滤同一实现）');
+  assert.equal(shim.IMPERATIVE_PATTERNS, gate.IMPERATIVE_PATTERNS, '词表必须同一引用（边界闸与渲染同一份）');
+  // 卡片产物
+  assert.equal(shim.buildMemoryCard, card.buildMemoryCard, 'buildMemoryCard 必须同一引用');
+  assert.equal(shim.runInject, card.runInject, 'runInject 必须同一引用');
+  assert.equal(shim.clipLine, card.clipLine, 'clipLine 必须同一引用');
+  assert.equal(shim.singleLine, card.singleLine, 'singleLine 必须同一引用');
+  // 槽位账本
+  assert.equal(shim.planSlotWrite, slot.planSlotWrite, 'planSlotWrite 必须同一引用');
+  assert.equal(shim.recordSlot, slot.recordSlot, 'recordSlot 必须同一引用');
+  assert.equal(shim.INJECT_SLOT_ID, slot.INJECT_SLOT_ID, 'INJECT_SLOT_ID 必须同一引用');
+});
+
+test('task-11 ③: 垫片 ≤120 行，且里面**没有实现**（只有转发；把实现搬回来 ⇒ 本条红）', () => {
+  const file = new URL('../src/rooms/inject.mjs', import.meta.url);
+  const source = readFileSync(file, 'utf8');
+  const lines = source.split('\n').length - (source.endsWith('\n') ? 1 : 0);
+  assert.ok(lines <= 120, `inject.mjs 必须只剩转发垫片（当前 ${lines} 行，上限 120）`);
+  assert.equal(/^export function /m.test(source), false, '垫片里不许再出现 `export function`（实现属于房间）');
+  assert.equal(/^function /m.test(source), false, '垫片里不许有私有实现函数');
+  // 必须确实在转发（不是只留个空壳）
+  assert.match(source, /export \* from '\.\/inject-gate\.mjs'/, '必须转发闸房间');
+  assert.match(source, /export \* from '\.\/inject-card\.mjs'/, '必须转发卡片房间');
+  assert.match(source, /export \* from '\.\/inject-slot\.mjs'/, '必须转发槽位房间');
+});
+
+test('task-11 ④: 判据原样搬运（词表与行形态逐字不变；拆分只搬家不改判据）', async () => {
+  const gate = await import('../src/rooms/inject-gate.mjs');
+  assert.deepEqual([...gate.IMPERATIVE_PATTERNS], ['你应该', '请', '下一步', '建议', '务必', '记得', '不要忘记', '可以试试'],
+    '指令式词表一字不许改（边界闸的判据）');
+  assert.equal(gate.INDEX_LINE_RE.test('MEMORY: docs/index.md（scope=w:d:/x, 3 局, 未列出≠不存在）'), true);
+  assert.equal(gate.INDEX_LINE_RE.test('随便一行'), false);
+  assert.equal(gate.PROVENANCE_LINE_RE.test('- [antipattern] 原文 (ep-aaaaaaa1, 2026-10-21, seq 30)'), true);
+  assert.equal(gate.PROVENANCE_LINE_RE.test('- [antipattern] 原文 (ep-aaaaaaa1, seq 30)'), false, '缺日期必须不匹配');
+  // 度量口径不变：CJK 1.5 字/token、ASCII 4 字/token
+  assert.equal(gate.estimateTokens('abcd'), 1);
+  assert.equal(gate.estimateTokens('中文字'), 2);
+  assert.equal(gate.formatCardDate(Date.UTC(2026, 9, 21, 12)), '2026-10-21');
+});

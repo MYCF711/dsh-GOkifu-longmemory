@@ -91,7 +91,10 @@ test('知识库 84 **渲染接线**：传了 signalText 时，方向相反的 cl
   const marker = markerWithPolarity({ kind: 'fact', state: 'semantic' }, pol);
   assert.equal(marker, 'disputed', '渲染时必须是 [disputed]，不是 [semantic]（建议）');
   // 不传 signalText ⇒ 走 stateTokenOf（保持原标记，向后兼容）
-  const src = await import('node:fs').then((m) => m.readFileSync('src/rooms/inject.mjs', 'utf8'));
+  // task-11：渲染实现已搬进 `src/rooms/inject-card.mjs`（`inject.mjs` 只剩转发垫片）。
+  // **判据不动**（源码里必须真有这两个接线点），只把扫描目标换成**实际渲染路径** ——
+  // 继续扫垫片等于让这条断言对着一份没有渲染代码的文件空过（假绿）。
+  const src = await import('node:fs').then((m) => m.readFileSync('src/rooms/inject-card.mjs', 'utf8'));
   assert.ok(src.includes('options?.signalText'), '渲染路径必须支持可选的 signalText');
   assert.ok(src.includes('signalText: signal?.text'), 'buildMemoryCard 必须把信号原文传下去');
 });

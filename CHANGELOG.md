@@ -17,6 +17,31 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.164（2026-11-26）
+
+### 繁复收敛重构（A/E/F 三期）：全绿一条命令 + 归档 63s → 17s + 常量单一来源
+
+**版本说明**：改 `src/**` 与 `scripts/**` 行为（新增门禁、增量派生、常量表）⇒ **patch**（`v0.9.0` 已被旧线占用）。
+
+**A 期 · `node scripts/gate.mjs` 一条命令全绿**
+此前要跑五条以上命令且顺序靠人记。现在一条：`--fast`（check + 单测，排除真库 e2e）/ `--full`（再加 patrol / metrics-guard / ledger-check / tag-audit）/ `--only`（复现单门）/ `--list`。
+实测 `--fast` **2/2 通过 · 237.5s · tests 1333 / pass 1327 / fail 0 / skip 6**。
+门禁自身有 16 条单测，含「删掉某门登记 ⇒ 红」的 tombstone（实测删 `tag-audit` 后 exit 1，恢复后 16/16）。
+
+**E 期 · 归档按 episode 增量（`deriveIncremental`）**
+稳态 **17s / 14s**（原 63s），派生侧写入全 0（topics 0 / links 0 / threads 0）。
+新增 `.cache/derive-state.json`（派生数据可丢，缺了自动退全量）、`deleteDerived`（只删点名 id，不做全目录扫描）、`derivedDigest`；`KIFU_ARCHIVE_FULL_DERIVE=1` 可回滚到全量路径。
+**顺手修掉两个真 bug**（这才是「真库永远进不了稳态」的根因）：
+1. 增量水位只写「本轮处理过的会话」⇒ 水位越跑越小，每轮重解 1.4k–4.7k 局；
+2. 首次入档时目录未建 ⇒ 写入静默失败。
+两者叠加使会话数在 1,435 / 4,709 之间震荡 —— 此前所有「耗时忽高忽低」的读数都源于此，不是性能抖动。
+
+**F 期 · `src/rooms/limits.mjs` 唯一常量表**
+21 项常量（零 import / 零 fs / 全部 `Object.freeze`），`metrics-guard`、`ledger-check`、`inject`、`plugin`、`link`、`walk` 全部改读它，数值逐一相等（快照测试钉住）。
+新增 8 条测试断言**两处读到的 A4 门槛是同一个冻结对象** —— 治的是 D7 那次「改一半就发版」（0.8.160/0.8.161 连续两轮被同一门槛拦）。
+
+**判据**：`check.mjs` PASS · `gate --fast` 2/2 · 全量 0 fail · `archive.test`+`archive-stale.test` 19/19 · `staleMarkedBy` 不丢（T159b 四条）。
+
 ## 0.8.163（2026-11-21）
 
 ### D10 落地（第一步）· 不再物化「团边」：真库 links **35,122 → 20,128**，**A2b 一字未动**
