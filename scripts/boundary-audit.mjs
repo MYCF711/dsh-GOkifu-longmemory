@@ -18,8 +18,14 @@ const REPO = fileURLToPath(new URL('..', import.meta.url));
 
 /** 会进入模型上下文的文件（渲染路径 + 插件消息构造）。 */
 export const SCAN_FILES = [
-  'src/rooms/inject.mjs', // 卡片渲染（唯一真正进模型上下文的地方）
-  'src/plugin.mjs',       // 注入消息构造
+  // task-11（重构 B 期）后本文件只有转发：卡片渲染搬进了 `inject-card.mjs`，
+  // 闸的词表与行形态搬进了 `inject-gate.mjs`。
+  // **这两行不能省** —— 漏掉就等于让静态边界审计对着一份没有渲染代码的垫片空过（假绿）；
+  // 垫片本身留着，防止有人把实现搬回来时反而逃过扫描。
+  'src/rooms/inject-card.mjs', // 卡片渲染（唯一真正进模型上下文的地方）
+  'src/rooms/inject-gate.mjs', // 边界闸的词表与行形态（判据来源，渲染时逐行套用）
+  'src/rooms/inject.mjs',      // 转发垫片（保留扫描：实现若被搬回这里也要被查）
+  'src/plugin.mjs',            // 注入消息构造
 ];
 // 说明：gates.mjs 里的字符串是**给代码/日志看的失败原因**，不注入模型上下文，故不扫。
 
