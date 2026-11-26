@@ -82,15 +82,21 @@ export const LIVE_DRIFT = Object.freeze({ claim: 12, threads: 12, episodes: 12 }
 // A4 p50：延迟是**统计量**，不是可复现的标量（T225）
 // ---------------------------------------------------------------------------
 
+// task-9 / P0-4：这三个数**不在本文件定义** —— 唯一权威表是 `src/rooms/limits.mjs`。
+// 事故：本文件曾自己写一份 50 的门槛（metrics-guard 之外的第二份拷贝），D7 只改一半 ⇒ 两个版本
+// 连续被同一门槛拦下发版。现在两处读同一个冻结对象（test/limits-single-source.test.mjs 用 `===` 钉住）。
+import { A4_P50_MAX_MS, A4_REL_SLACK, A4_ABS_SLACK_MS } from '../src/rooms/limits.mjs';
+/** 同一张权威表原样重导出（测试据此判「两处读到同一常量对象」）。 */
+export { LIMITS } from '../src/rooms/limits.mjs';
+
 /**
- * A4 p50 的**真实门槛**（ms）—— 与 `scripts/metrics-guard.mjs` 的 `a4p50MaxMs` 同源：
+ * A4 p50 的**真实门槛**（ms）—— 值来自 `src/rooms/limits.mjs` 的 `A4_P50_MAX_MS`（唯一一份）。
+ * 旧名保留只为不破既有消费方（test/ledger-tmp-guard.test.mjs 直接 import 这个名字）；
  * 这条不放松，p50 真变慢（如 300ms）先被它拦下。
  */
-export const A4_GATE_MS = 50;
-/** 台账值允许是实测值的几倍（同一命令跨时段的量级差）。 */
-export const A4_REL_SLACK = 2;
-/** 绝对下限（ms）：实测很小时（如 1ms），2 倍也才 2ms，抖动会把它顶穿 ⇒ 再留 20ms。 */
-export const A4_ABS_SLACK_MS = 20;
+export const A4_GATE_MS = A4_P50_MAX_MS;
+/** 台账值允许是实测值的几倍（同一命令跨时段的量级差）。值同样来自 limits.mjs。 */
+export { A4_REL_SLACK, A4_ABS_SLACK_MS };
 
 /**
  * A4 p50 的**量级**判据（T225）。
@@ -143,7 +149,7 @@ export function relativeA4Ok(actualMs, gateMs, { repoRoot = null } = {}) {
   return { ok: true, note: `实测 ${actualMs.toFixed(2)}ms 高于门槛，但同语料下对基线 ${base.medianOfMedians}ms 为 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%` };
 }
 
-export function a4MagnitudeOk(ledgerMs, actualMs, { gateMs = A4_GATE_MS, relSlack = A4_REL_SLACK, absSlackMs = A4_ABS_SLACK_MS } = {}) {
+export function a4MagnitudeOk(ledgerMs, actualMs, { gateMs = A4_P50_MAX_MS, relSlack = A4_REL_SLACK, absSlackMs = A4_ABS_SLACK_MS } = {}) {
   if (!Number.isFinite(ledgerMs) || !Number.isFinite(actualMs)) return { ok: true, limit: null, gateFailed: false, reason: null };
   const limit = Math.max(actualMs * relSlack, actualMs + absSlackMs);
   if (actualMs > gateMs) {
@@ -231,8 +237,8 @@ export function compare(ledger, actual, { live = false, staleHours = 6, notes = 
   if (has(ledger.a2) && has(actual.a2) && Math.abs(ledger.a2 - actual.a2) > a2Tol) bad.push(`A2：台账 ${ledger.a2}% vs 实测 ${actual.a2}%（容差 ${a2Tol}pp${live ? '，线上整库增长' : ''}）`);
   // 2026-11-05（T225）：A4 p50 是**统计量**（GC / 磁盘缓存 / CPU 调度），同一份代码两次跑差 5–10ms 属正常
   // （今晚实测 21.5 vs 14）。拿"绝对相等 ± 固定容差"去卡统计量 = 要求它可复现到毫秒 ⇒ 只会周期性假红。
-  // 改成**量级判据**：台账值 ≤ max(实测×2, 实测+20ms)；另保留"实测 p50 ≤ 50ms"的真实门槛
-  // （与 scripts/metrics-guard.mjs 的 a4p50MaxMs 同源）。放宽的只是"台账 vs 实测"的比对方式，门槛一点没松。
+  // 改成**量级判据**：台账值 ≤ max(实测×2, 实测+20ms)；另保留"实测 p50 ≤ A4_P50_MAX_MS"的真实门槛
+  // （与 scripts/metrics-guard.mjs **同一个** limits.mjs 常量，不再各写一份）。放宽的只是"台账 vs 实测"的比对方式，门槛一点没松。
   if (has(ledger.a4) && has(actual.a4)) {
     const a4Verdict = a4MagnitudeOk(ledger.a4, actual.a4);
     if (!a4Verdict.ok) bad.push(`A4 p50：${a4Verdict.reason}`);

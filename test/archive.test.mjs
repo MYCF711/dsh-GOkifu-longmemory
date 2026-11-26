@@ -433,3 +433,165 @@ test('T294 归档管线：depth>0 + 父局同 scope ⇒ 自动归并（mergedChi
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// P0-3 · 归档改「按 episode 增量」（取代每轮全量 replaceDerived）
+//   ① 稳态（本轮没有 episode 变化）⇒ 派生不重算、不重写：第二次 writes.*.written === 0
+//   ② 新局进来 ⇒ 只重算受影响的 topic/link/thread，结果与全量路径一致
+//   ③ 子局归位（episode 离开活跃集）⇒ 它的主题/边/卷跟着消失（删除只由 episode 变化驱动）
+//   ④ KIFU_ARCHIVE_FULL_DERIVE=1 走老的全量路径（回滚 + 对照）
+// ---------------------------------------------------------------------------
+
+// 合成会话 id：前 8 位取 a —— `scripts/privacy-scan.mjs` 的 session-uuid 规则对 a{6,} 前缀豁免
+const S5 = 'session-aaaaaaaa-5555-4555-8555-000000000005';
+
+const stripBookkeeping = (record) => {
+  const out = { ...record };
+  delete out._store;
+  delete out.updatedAt;
+  return out;
+};
+
+const byRecordId = (a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0);
+/** 边的身份 = 两端 + 类别（`id` 里含 `why`，而 why 的顺序随 N 变，比对时不当身份用）。 */
+const edgeKey = (l) => `${l.kind}|${l.a?.episode}|${l.a?.nodeId ?? ''}|${l.b?.episode}|${l.b?.nodeId ?? ''}`;
+
+function readDerived(storeRoot) {
+  const store = createStore({ root: storeRoot });
+  const grab = (kind) => store.list(kind).map((x) => x.record).filter(Boolean);
+  return { store, topics: grab('topics'), links: grab('links'), threads: grab('threads') };
+}
+
+test('P0-3: 稳态增量 —— 第二轮派生写入全 0，deriveMode=noop', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-p03-steady-'));
+  try {
+    const fixture = buildFixture(root);
+    const storeRoot = path.join(root, 'memory-context');
+    const first = await runArchive({ dataRoot: fixture.root, storeRoot, now: T_ARCHIVE, incremental: true });
+    assert.ok(first.deriveMode === 'full', `首次没有派生状态缓存 ⇒ 全量：${first.deriveMode}`);
+    assert.ok(first.derived.topics > 0 && first.derived.links > 0);
+
+    const second = await runArchive({ dataRoot: fixture.root, storeRoot, now: T_ARCHIVE + 3_600_000, incremental: true });
+    assert.equal(second.deriveMode, 'noop', '没有 episode 变化 ⇒ 派生不重算');
+    for (const [kind, w] of Object.entries(second.writes)) {
+      assert.equal(w.written, 0, `${kind} 第二轮不得写入（实际 ${JSON.stringify(w)}）`);
+      assert.equal(w.removed, 0, `${kind} 第二轮不得删除`);
+    }
+    assert.equal(second.added, 0);
+    assert.equal(second.manifest.changed, false, '无变更不重写 manifest');
+    assert.equal(second.verify.ok, true, JSON.stringify(second.verify.errors));
+    // 增量稳态下也不许把子局状态来回翻转（水位 + 父局解析都读库内既有记录）
+    assert.equal(second.writes.episodes.written, 0);
+    assert.equal(second.episodes.folded, 0, '本轮没重建任何局 ⇒ 归并 0 条');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('P0-3: 新局进来只重算受影响记录 —— 与全量路径产物一致', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-p03-scoped-'));
+  try {
+    const fixture = buildFixture(root);
+    const storeA = path.join(root, 'store-a');
+    const storeB = path.join(root, 'store-b');
+    await runArchive({ dataRoot: fixture.root, storeRoot: storeA, now: T_ARCHIVE });
+
+    // 新增一局：与 S1/S2/S3 共享同一个 repo 主题 ⇒ 至少一条 shared-topic 边
+    writeSession(root, { sid: S5 });
+    writeGraph(root, S5);
+    const inc = await runArchive({ dataRoot: fixture.root, storeRoot: storeA, now: T_ARCHIVE + 60_000 });
+    assert.equal(inc.deriveMode, 'scoped', `新增一局应走增量：${inc.deriveMode}`);
+    assert.equal(inc.derive.dirtyEpisodes, 1, '只有新局是脏的');
+    assert.ok(inc.derive.affectedTopics > 0, '受影响主题必须被点名');
+    assert.ok(inc.derive.affectedPairs > 0, '受影响端点对必须被点名');
+    assert.equal(inc.verify.ok, true, JSON.stringify(inc.verify.errors));
+
+    // 全量路径对照：同一语料从零入档（= rebuild 口径）
+    await runArchive({ dataRoot: fixture.root, storeRoot: storeB, now: T_ARCHIVE + 60_000 });
+
+    const A = readDerived(storeA);
+    const B = readDerived(storeB);
+    assert.deepEqual(
+      A.topics.map(stripBookkeeping).sort(byRecordId),
+      B.topics.map(stripBookkeeping).sort(byRecordId),
+      '主题记录逐字段一致（df/episodes 都是成员集合算术）',
+    );
+    const edgesA = A.links.map(edgeKey).sort();
+    const edgesB = B.links.map(edgeKey).sort();
+    assert.deepEqual(edgesA, edgesB, '边的集合一致（类别 + 两端 + 节点）');
+    assert.deepEqual(
+      A.threads.map(stripBookkeeping).sort(byRecordId),
+      B.threads.map(stripBookkeeping).sort(byRecordId),
+      '卷记录逐字段一致',
+    );
+    // 增量路径不许漏掉新局的边
+    const newEp = 'ep-aaaaaaaa';
+    assert.ok(edgesA.some((k) => k.includes(newEp)), '新局的相关边必须入馆');
+    assert.ok(A.topics.some((t) => t.episodes.includes(newEp)), '新局的主题必须入馆');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('P0-3: episode 离开活跃集 ⇒ 它的主题/边/卷跟着消失（删除由 episode 变化驱动）', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-p03-drop-'));
+  try {
+    const fixture = buildFixture(root);
+    const storeRoot = path.join(root, 'memory-context');
+    // 只入档子局：父局不在语料 ⇒ 按现有语义保留 archived（不丢数据）
+    const only = await runArchive({
+      dataRoot: fixture.root, storeRoot, now: T_ARCHIVE, sessionPrefix: S4,
+    });
+    assert.equal(only.episodes.total, 1);
+    const child = 'ep-99999999';
+    const before = readDerived(storeRoot);
+    assert.ok(before.topics.some((t) => t.episodes.includes(child)), '子局独立成谱时它有主题');
+
+    // 全语料入档：父局出现 ⇒ 子局归并（离开活跃集）⇒ 它的派生记录必须被删掉
+    const inc = await runArchive({ dataRoot: fixture.root, storeRoot, now: T_ARCHIVE + 60_000 });
+    assert.equal(inc.verify.ok, true, JSON.stringify(inc.verify.errors));
+    const after = readDerived(storeRoot);
+    const epChild = createStore({ root: storeRoot }).get('episodes', child);
+    assert.ok(String(epChild.state).startsWith('folded-into:'), `子局应归位：${epChild.state}`);
+    assert.equal(after.topics.filter((t) => t.episodes.includes(child)).length, 0, '子局的主题必须消失');
+    assert.equal(after.links.filter((l) => l.episodes.includes(child)).length, 0, '子局的边必须消失');
+    assert.equal(after.threads.filter((t) => t.kifus.includes(child)).length, 0, '子局不再进卷');
+    assert.deepEqual(
+      after.topics.map(stripBookkeeping).sort(byRecordId),
+      readDerived(storeRoot).topics.map(stripBookkeeping).sort(byRecordId),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('P0-3: KIFU_ARCHIVE_FULL_DERIVE=1 走老的全量路径（回滚 + 对照）', async () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'kifuin-p03-rollback-'));
+  try {
+    const fixture = buildFixture(root);
+    const storeRoot = path.join(root, 'memory-context');
+    await runArchive({ dataRoot: fixture.root, storeRoot, now: T_ARCHIVE });
+    const steady = await runArchive({ dataRoot: fixture.root, storeRoot, now: T_ARCHIVE + 60_000 });
+    assert.equal(steady.deriveMode, 'noop');
+
+    process.env.KIFU_ARCHIVE_FULL_DERIVE = '1';
+    let forced;
+    try {
+      forced = await runArchive({ dataRoot: fixture.root, storeRoot, now: T_ARCHIVE + 120_000 });
+    } finally {
+      delete process.env.KIFU_ARCHIVE_FULL_DERIVE;
+    }
+    assert.equal(forced.deriveMode, 'full', '环境变量必须能强制回滚到全量路径');
+    assert.equal(forced.writes.topics.unchanged, forced.writes.topics.total, '全量路径在同一语料上同样 0 变更');
+    assert.equal(forced.added, 0);
+    assert.equal(forced.verify.ok, true, JSON.stringify(forced.verify.errors));
+
+    // 关掉开关后仍能回到稳态增量
+    const back = await runArchive({ dataRoot: fixture.root, storeRoot, now: T_ARCHIVE + 180_000 });
+    assert.equal(back.deriveMode, 'noop');
+    assert.equal(back.added, 0);
+    assert.equal(back.verify.ok, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -7,7 +7,7 @@
 //   - 排序：失败教训 > 约束/偏好 > 定式候选（分类只看 signals 计数与 claim.kind）
 //   - limit / budgetTokens 前缀式截断 + omitted 计数（含 reason）
 //   - 无命中 = 空数组、零 path、零 tokens、omitted.count=0（沉默是默认）
-//   - 只读：走之前/之后 store 的 sha256 快照 + journal 行数完全一致；源码不 import 任何模块
+//   - 只读：走之前/之后 store 的 sha256 快照 + journal 行数完全一致；源码只 import 一张零 I/O 常量表
 //   - "无时不入"（缺 occurredAt 的棋谱/claim 不入 hits）、folded-into 子代理局不入、invalidated claim 不入
 //   - 主题匹配口径：精确/包含/实体/主题 id/大小写；CJK 2 字、ASCII 3 字最小长度闸
 //   - token 口径：CJK 1.5 字/token、ASCII 4 字/token；result.tokens = Σ hit.tokens
@@ -518,8 +518,13 @@ test('R11: 不写盘 —— 走之前/之后 store 的 sha256 快照与 journal 
   assert.deepEqual(after, before, 'walk 不得写盘（条目字节、manifest 计数、journal 全部不变）');
 });
 
-test('R11: 只读结构 —— 源码不 import 任何模块（连 node: 内置都没有）', () => {
-  assert.equal(/^\s*import\s/m.test(WALK_SOURCE), false, 'R11 必须零 import：没有 fs 句柄就不可能写盘');
+test('R11: 只读结构 —— 源码只 import 一张零 I/O 常量表（连 node: 内置都没有）', () => {
+  // task-9（P0-4）：深度/预算的数值迁到唯一权威表 `src/rooms/limits.mjs`，所以允许**且只允许**这一条 import。
+  // 该表自身零 import、零 fs、全部 Object.freeze（test/limits-single-source.test.mjs 双向钉住）⇒
+  // "没有 fs 句柄就不可能写盘"这条结构保证一字未松；多出任何第二条 import 仍然红。
+  const imports = WALK_SOURCE.match(/^\s*import\b/gm) ?? [];
+  assert.equal(imports.length, 1, `R11 只允许 import 零 I/O 常量表，实际 ${imports.length} 条`);
+  assert.match(WALK_SOURCE, /import \{[^}]*\} from '\.\/limits\.mjs';/, 'R11 唯一允许的依赖是 ./limits.mjs（纯常量表）');
   assert.equal(/require\s*\(/.test(WALK_SOURCE), false);
   // 只读 store 面：只需要 list()；给一个只有 list 的 wrapper 也能跑通
   const readOnly = { list: (kind) => store.list(kind) };

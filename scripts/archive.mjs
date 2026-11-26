@@ -32,6 +32,7 @@ import { appendMergedChild } from './subagent-merge.mjs';
 import {
   createStore,
   deriveStore,
+  deriveIncremental,
   asRecordList,
   relativizeSource,
   sourceStatusOf,
@@ -238,6 +239,67 @@ function plannedDiff(store, kind, records) {
   return { kind, total: records.length, added, changed, unchanged, existing: existing.size };
 }
 
+/** 派生摘要（summary.derived 的形状，四处调用保持同一口径）。 */
+function derivedSummaryOf(inc) {
+  return {
+    topics: inc.counts.topics,
+    links: inc.counts.links,
+    threads: inc.counts.threads,
+    mentions: inc.counts.mentions,
+    indexBytes: inc.counts.indexBytes,
+  };
+}
+
+/**
+ * 增量路径写一个派生 kind：`putMany` 只写本轮变化/新增的记录，`deleteDerived` 只删**点名**的 id。
+ * 与 `replaceDerived` 的区别：没有"整目录替换"语义 —— 没点名的记录一条都不碰。
+ */
+function writeDerivedScoped(store, kind, records, removedIds, total, at) {
+  const put = store.putMany(kind, records ?? [], { at });
+  const del = store.deleteDerived(kind, removedIds ?? [], { at });
+  const all = Number.isFinite(total) ? total : put.total;
+  return {
+    kind,
+    total: all,
+    written: put.written,
+    unchanged: Math.max(0, all - put.written),
+    removed: del.removed,
+  };
+}
+
+/**
+ * dry-run 的派生预估：增量/全量/noop 各自给同一形状（kind/total/added/changed/unchanged/removed）。
+ * 增量路径用文件名层面的 id 集合区分新增与变更 —— 不读内容，预估成本与真实写入对齐。
+ */
+function planFromDerived(plan, store, inc) {
+  if (inc.mode === 'full' && inc.full) {
+    plan.topics = plannedDiff(store, 'topics', inc.full.topics);
+    plan.links = plannedDiff(store, 'links', inc.full.links);
+    plan.threads = plannedDiff(store, 'threads', Array.isArray(inc.full.threads) ? inc.full.threads : []);
+    return plan;
+  }
+  const planFor = (kind, records, removedCount, total) => {
+    const existingIds = new Set(store.ids(kind));
+    let added = 0;
+    let changed = 0;
+    for (const record of records) (existingIds.has(String(record?.id)) ? (changed += 1) : (added += 1));
+    const all = Number.isFinite(total) ? total : records.length;
+    return { kind, total: all, added, changed, unchanged: Math.max(0, all - added - changed), existing: existingIds.size, removed: removedCount };
+  };
+  if (inc.mode === 'scoped') {
+    plan.topics = planFor('topics', inc.changed.topics, inc.changed.removedTopics.length, inc.counts.topics);
+    plan.links = planFor('links', inc.changed.links, inc.changed.removedLinks.length, inc.counts.links);
+    plan.threads = planFor('threads', inc.changed.threads, inc.changed.removedThreads.length, inc.counts.threads);
+    return plan;
+  }
+  // noop / skipped：派生侧 0 变更
+  for (const [kind, count] of [['topics', inc.counts.topics], ['links', inc.counts.links], ['threads', inc.counts.threads]]) {
+    const all = Number.isFinite(count) ? count : 0;
+    plan[kind] = { kind, total: all, added: 0, changed: 0, unchanged: all, existing: all, removed: 0 };
+  }
+  return plan;
+}
+
 /**
  * 派生/权威条目里由生产者打的"首次出现"时钟，重放时取旧值：
  * 否则 R06/R08/R09 每次用 Date.now() 生成的 createdAt 会让幂等失效（假的"变更"）。
@@ -285,10 +347,12 @@ function stabilizeExisting(store, kind, records) {
  * 只对"本轮没重新入档的旧条目"做——本轮写了的就是按本轮读到的原件算的。
  * 原件搬回来 ⇒ 自动回 `present`；原件没了 ⇒ `missing`（不失效、不删条目）。
  */
-function refreshSourceStatus(store, dataRoot, writtenIds) {
+function refreshSourceStatus(store, dataRoot, writtenIds, knownEpisodes = null) {
   const out = [];
-  for (const entry of store.list('episodes')) {
-    const rec = entry.record;
+  const rows = Array.isArray(knownEpisodes)
+    ? knownEpisodes                                   // 本轮已经读过一遍的既有 episode（省 1.5 秒）
+    : store.list('episodes').map((entry) => entry.record).filter(Boolean);
+  for (const rec of rows) {
     if (!rec || writtenIds.has(rec.id)) continue;
     const present = typeof rec.closure?.logPath === 'string'
       && rec.closure.logPath !== ''
@@ -440,17 +504,23 @@ export async function runArchive(opts = {}) {
       if (raw && raw.version === 1 && raw.sessions && typeof raw.sessions === 'object') watermark = raw;
     } catch { /* 没有水位 = 第一次跑，全量 */ }
   }
+  // ---- 1b. 记忆库句柄 + **既有 episode 只读一次** ----
+  // 水位筛选 / 子代理归并 / 派生增量 / 原件巡检都吃这一份，避免同一份 6 千个文件读三遍。
+  // 注意：store 必须在这里创建（TDZ 坑，2026-11-19 踩过：在 filter 里引用后面的 const 会抛
+  // ReferenceError 并被 catch 吞掉，结果水位恒空、一条都跳不掉，看起来"跑了增量"实际全量重算）。
+  const store = createStore({ root: storeRoot, user: opts.user ?? 'owner' });
+  let prevEpisodes = [];
+  try {
+    prevEpisodes = store.list('episodes').map((x) => x.record).filter(Boolean);
+  } catch (err) {
+    warnings.push(`既有 episode 读取失败（派生将退化为全量）：${String(err?.message ?? err)}`);
+  }
+  __t('after-list-prev-episodes');
+
   let skippedIncremental = 0;
   let pairList = pairs;
   if (incremental) {
-    const archived = new Set();
-    // 注意：**不能**用后面的 `store` 常量 —— 它在这之后才初始化（TDZ），
-    // 访问会抛 ReferenceError 并被 catch 吞掉，于是 archived 恒为空、一条都跳不掉
-    // （2026-11-19 实测踩过：看起来"跑了增量"，实际全量重算了 4601 局）。
-    try {
-      const storeForWatermark = createStore({ root: storeRoot });
-      for (const entry of storeForWatermark.list('episodes')) if (entry.record?.sessionId) archived.add(entry.record.sessionId);
-    } catch { /* 读不到就当没有 */ }
+    const archived = new Set(prevEpisodes.filter((e) => e && e.sessionId).map((e) => e.sessionId));
     pairList = pairs.filter((p) => {
       const w = watermark.sessions[p.sessionId];
       if (!w) return true;
@@ -648,7 +718,11 @@ export async function runArchive(opts = {}) {
   } // T401b：批次循环结束
   __t('after-build-loop');
   // ---- 3. 子代理归并：depth>0 且父局在语料里 ⇒ folded-into:<父局 id> ----
-  const idBySession = new Map(built.map((b) => [b.record.sessionId, b.record.id]));
+  // 父局 id 必须从「本轮重建的局 ∪ 库里既有的局」一起解析：增量模式下父局常常不在本轮
+  // `built` 里，只查 built 会让子局误判成"父局不在语料"⇒ 保留 archived，且每轮反复翻转。
+  const idBySession = new Map();
+  for (const ep of prevEpisodes) if (ep && typeof ep.sessionId === 'string' && typeof ep.id === 'string') idBySession.set(ep.sessionId, ep.id);
+  for (const b of built) idBySession.set(b.record.sessionId, b.record.id);
   let folded = 0;
   let mergedChildren = 0;
   for (const item of built) {
@@ -672,9 +746,44 @@ export async function runArchive(opts = {}) {
     }
   }
 
-  const episodes = built
-    .map((b) => b.record)
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // ---- 3b. 库里既有、但状态与本轮判据不符的子局：一次性归位 ----
+  // 为什么要在库里修：增量模式下父局大多不在本轮 `built` 里，只在本轮重建过的子局才会被修正，
+  // 于是"上一轮误判成 archived"的状态会一直留着（真库实测 1,600+ 条），且每轮随重建反复翻转。
+  // 这里按同一条判据（depth>0 + 父局在语料里 + 不是 --include-subagents）把既有记录也归位，
+  // 只改 state/foldedInto/topics（派生输入），信号与闭包一个字不动。
+  let repairedFolded = 0;
+  const repairedEpisodes = [];
+  if (!includeSubagents) {
+    for (const rec of prevEpisodes) {
+      if (!rec || typeof rec.id !== 'string') continue;
+      const depth = Number.isFinite(rec.delegationDepth) ? rec.delegationDepth : 0;
+      if (depth <= 0) continue;
+      if (typeof rec.state === 'string' && rec.state.startsWith('folded-into:')) continue;
+      const parentId = typeof rec.parentSessionId === 'string' ? idBySession.get(rec.parentSessionId) : null;
+      if (!parentId) continue;
+      const next = { ...rec, state: `folded-into:${parentId}`, foldedInto: parentId, topics: [] };
+      repairedEpisodes.push(next);
+      repairedFolded += 1;
+    }
+  }
+
+  const rawEpisodes = [
+    ...built.map((b) => b.record),
+    ...repairedEpisodes,
+  ].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // episode id 是 `ep-<sid8>`：sessionId 前 8 位相同的会话会撞同一个 id
+  // （真库实测 109 个 `session-upgrade-probe-*` 会话全撞成 `ep-upgradep`）。
+  // 撞了就只能落一条 —— 保留排序后的最后一条（与"逐条覆盖写"的最终结果一致），
+  // 但**不许静默重复写同一个文件 109 次**，并把碰撞显式报出来（id 生成约定归 R00，本轮不修）。
+  const episodeById = new Map();
+  for (const rec of rawEpisodes) episodeById.set(rec.id, rec);
+  const episodes = [...episodeById.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  if (episodeById.size !== rawEpisodes.length) {
+    warnings.push(
+      `episode id 碰撞：${rawEpisodes.length} 条棋谱只能落 ${episodeById.size} 个 id（ep-<sid8> 前 8 位相同）；`
+      + 'R00 的 id 生成约定需要改成带冲突后缀',
+    );
+  }
   const archived = episodes.filter((e) => (e.state ?? 'archived') === 'archived');
 
   __t('after-fold');
@@ -782,19 +891,14 @@ export async function runArchive(opts = {}) {
   const recoveryIndexFacts = recoveryIndexFactsForClaims(authoritative.claims, recoveryFactsByEpisode);
 
   __t('after-recovery-index');
-  // ---- 5. 派生（R04/R05/R07/R06 重算；与 rebuild 共用同一函数 ⇒ 产物一致） ----
-  // T388（2026-11-20）：**真跑时不再做第一次全量派生**。
-  // 读代码确认：`derived` 在非 dry-run 里只用于 ① `skipped` 提示 ② summary 数字；
-  // 真正写入库的 topics/links/threads 来自后面的 `derivedFromStore`（从 store 回读再派生）。
-  // 而一次 `deriveStore` 实测 **14.2 秒**（4572 局 → 21.5 万条 link）⇒ 白算一遍。
-  // dry-run 仍要算（它要出 `wouldWrite` 预估）。
-  const derived = dryRun ? await deriveStore({ episodes, derive: opts.derive ?? null, at: now }) : null;
-  if (derived) for (const note of derived.skipped) skipped.push(note);
 
   // T370：写增量水位（只写非 dry-run）。记录**本次参与归档**的每个会话的 log/graph 指纹。
+  // 必须与旧水位**合并**：只写本轮处理的会话会把"被跳过的会话"的水位抹掉，
+  // 于是下一轮它们又变成"没有水位 ⇒ 重算"，水位越跑越小、归档永远进不了稳态
+  // （2026-11-26 实测：6029 个会话在 1435 / 4709 之间来回震荡，每轮重解 80–260 秒）。
   if (!dryRun && incremental) {
     try {
-      const sessions = {};
+      const sessions = { ...(watermark.sessions ?? {}) };
       for (const p of pairList) {
         const log = logs.find((l) => l.sessionId === p.sessionId) ?? null;
         const graph = graphBySession.get(p.sessionId) ?? null;
@@ -805,11 +909,13 @@ export async function runArchive(opts = {}) {
           graphBytes: graph?.bytes ?? 0,
         };
       }
+      // 目录可能还没建（首次入档时 ensureDirs 在写库段才跑）⇒ 自己建，否则静默失败、
+      // 水位永远是空的，增量模式每轮全量重解（2026-11-26 实测踩过）。
+      fs.mkdirSync(storeRoot, { recursive: true });
       fs.writeFileSync(watermarkPath, JSON.stringify({ version: 1, updatedAt: new Date(now).toISOString(), sessions }, null, 2) + String.fromCharCode(10));
     } catch { /* 水位写失败不影响归档结果，下次会全量 */ }
   }
 
-  const store = createStore({ root: storeRoot, user: opts.user ?? 'owner' });
   const summary = {
     dryRun,
     dataRoot,
@@ -831,24 +937,46 @@ export async function runArchive(opts = {}) {
       total: episodes.length,
       archived: archived.length,
       folded,
+      repairedFolded, // 库里既有子局按同一判据归位的条数（增量模式的收敛项）
       mergedChildren, // T294：本次归档**自动归并**进父局的子局数（只增不改、幂等）
       skipped: pairs.length - built.length,
     },
-    // dry-run 用第一次派生；真跑时留空，等 `derivedFromStore` 算完再回填（见下方 T388）
-    derived: derived
-      ? {
-        topics: derived.topics.length,
-        links: derived.links.length,
-        threads: Array.isArray(derived.threads) ? derived.threads.length : null,
-        mentions: derived.mentions.length,
-        indexBytes: derived.stats?.indexBytes ?? 0,
-      }
-      : { topics: null, links: null, threads: null, mentions: null, indexBytes: null },
+    // 占位：派生数字在下面（deriveIncremental）算完后回填，与写入用的是同一份结果
+    derived: { topics: null, links: null, threads: null, mentions: null, indexBytes: null },
+    deriveMode: null,
     joseki: authoritative.joseki.length,
     claims: authoritative.claims.length,
     skipped,
     warnings,
   };
+
+  // ---- 5b. 派生（**episode 为最小更新单位**；老的全量路径保留给 KIFU_ARCHIVE_FULL_DERIVE=1）----
+  // 稳态（本轮没有任何 episode 变化）⇒ `mode:"noop"`：派生不重算、不重写，只报数。
+  // dry-run 走**同一条**路径（只是不写盘），这样 `--dry-run --json` 可以当两条路径的对照读数。
+  const fullDerive = String(process.env.KIFU_ARCHIVE_FULL_DERIVE ?? '') === '1';
+  let dryEpisodes = null;
+  if (dryRun) {
+    // 预演"写后的库"：既有条目 + 本轮新建/变更（时钟按 stabilizeExisting 的老规矩保留）
+    const merged = new Map(prevEpisodes.map((e) => [e.id, e]));
+    for (const rec of stabilizeExisting(store, 'episodes', episodes)) merged.set(rec.id, rec);
+    dryEpisodes = [...merged.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  }
+  let derivedIncrement = null;
+  if (dryRun) {
+    __t('before-derive-out');
+    derivedIncrement = await deriveIncremental({
+      episodes: dryEpisodes,
+      prevEpisodes,
+      store,
+      derive: opts.derive ?? null,
+      at: now,
+      forceFull: fullDerive,
+    });
+    for (const note of derivedIncrement.skipped) skipped.push(note);
+    summary.deriveMode = derivedIncrement.mode;
+    summary.derived = derivedSummaryOf(derivedIncrement);
+    __t(`after-derive-${derivedIncrement.mode}`);
+  }
 
   // ---- 6. dry-run：只做只读预估，不建目录、不写文件 ----
   if (dryRun) {
@@ -857,11 +985,9 @@ export async function runArchive(opts = {}) {
       const records = kind === 'episodes' ? episodes : authoritative[kind];
       plan[kind] = plannedDiff(store, kind, stabilizeExisting(store, kind, records ?? []));
     }
-    plan.topics = plannedDiff(store, 'topics', derived.topics);
-    plan.links = plannedDiff(store, 'links', derived.links);
-    plan.threads = plannedDiff(store, 'threads', Array.isArray(derived.threads) ? stabilizeExisting(store, 'threads', derived.threads) : []);
+    planFromDerived(plan, store, derivedIncrement);
     // 来源状态巡检也要算进预估（原件搬走/搬回 ⇒ 一次变更）
-    const staleSources = refreshSourceStatus(store, dataRoot, new Set(episodes.map((e) => e.id)));
+    const staleSources = refreshSourceStatus(store, dataRoot, new Set(episodes.map((e) => e.id)), prevEpisodes);
     if (staleSources.length) {
       plan.episodes.changed += staleSources.length;
       plan.episodes.total += staleSources.length;
@@ -883,42 +1009,98 @@ export async function runArchive(opts = {}) {
   }
 
   // 旧条目的来源状态（原件搬走/搬回 ⇒ sourceStatus 是事实变化，不是"新记忆"）
-  const staleSources = refreshSourceStatus(store, dataRoot, new Set(episodes.map((e) => e.id)));
+  const staleSources = refreshSourceStatus(store, dataRoot, new Set(episodes.map((e) => e.id)), prevEpisodes);
   if (staleSources.length) writes.sourceStatus = store.putMany('episodes', staleSources, { at: now });
 
-  // 回读 episodes 再算派生：保证"入档产物 == rebuild 产物"（同一份数据、同一函数）
-  const storedEpisodes = store
-    .list('episodes')
-    .filter((e) => e.record)
-    .map((e) => e.record);
-  __t('before-derive-out');
-  const derivedFromStore = await deriveStore({ episodes: storedEpisodes, derive: opts.derive ?? null, at: now });
-  __t('after-derive-out');
-  // T388：真跑时 summary 的派生数字从这里回填（与写入用的是同一份结果，数字不会跑偏）
-  if (!derived) {
-    summary.derived = {
-      topics: derivedFromStore.topics.length,
-      links: derivedFromStore.links.length,
-      threads: Array.isArray(derivedFromStore.threads) ? derivedFromStore.threads.length : null,
-      mentions: derivedFromStore.mentions?.length ?? 0,
-      indexBytes: derivedFromStore.stats?.indexBytes ?? 0,
-    };
+  // 派生要吃"写后的库"：保证"入档产物 == rebuild 产物"（同一份数据、同一份判据）。
+  // 不在磁盘上回读 6 千个文件，而是在内存里合成写后视图 —— `put` 只会改 `_store` 与
+  // `recordedAt/createdAt`（旧值保留），这两样都不进派生指纹，所以视图与盘面在派生口径上等价。
+  // 本轮权威侧一个字节都没改 ⇒ 直接复用开工时读过的那一份。
+  const wroteAuthoritative = Object.values(writes).some((w) => Number(w?.written) > 0);
+  let storedEpisodes = prevEpisodes;
+  if (wroteAuthoritative) {
+    const merged = new Map(prevEpisodes.map((e) => [e.id, e]));
+    for (const rec of episodes) merged.set(rec.id, rec);
+    for (const rec of staleSources) merged.set(rec.id, rec);
+    storedEpisodes = [...merged.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
-  writes.topics = store.replaceDerived('topics', derivedFromStore.topics, { at: now });
-  __t('after-topics');
-  writes.links = store.replaceDerived('links', derivedFromStore.links, { at: now });
-  __t('after-links');
-  writes.threads = Array.isArray(derivedFromStore.threads)
-    ? store.replaceDerived('threads', stabilizeExisting(store, 'threads', derivedFromStore.threads), { at: now })
-    : { kind: 'threads', skipped: true, total: 0, written: 0, unchanged: 0, removed: [] };
-  writes.index = typeof derivedFromStore.indexMd === 'string'
-    ? store.writeIndex(derivedFromStore.indexMd, { at: now })
-    : { changed: false, skipped: true };
-  writes.manifest = store.writeManifest(now);
-  __t('after-manifest');
+  __t('before-derive-out');
+  derivedIncrement = await deriveIncremental({
+    episodes: storedEpisodes,
+    prevEpisodes,
+    store,
+    derive: opts.derive ?? null,
+    at: now,
+    forceFull: fullDerive,
+  });
+  for (const note of derivedIncrement.skipped) skipped.push(note);
+  summary.deriveMode = derivedIncrement.mode;
+  summary.derived = derivedSummaryOf(derivedIncrement);
+  summary.derive = {
+    mode: derivedIncrement.mode,
+    dirtyEpisodes: derivedIncrement.dirty.episodes.length,
+    removedEpisodes: derivedIncrement.dirty.removed.length,
+    affectedTopics: derivedIncrement.dirty.topics,
+    affectedPairs: derivedIncrement.dirty.pairs,
+  };
+  __t(`after-derive-${derivedIncrement.mode}`);
 
-  const verify = store.verify();
-  __t('after-verify');
+  if (derivedIncrement.mode === 'full' && derivedIncrement.full) {
+    // 老路径（回滚/对照）：全量投影 + 整目录替换（含删除多余文件）
+    writes.topics = store.replaceDerived('topics', derivedIncrement.full.topics, { at: now });
+    __t('after-topics');
+    writes.links = store.replaceDerived('links', derivedIncrement.full.links, { at: now });
+    __t('after-links');
+    writes.threads = Array.isArray(derivedIncrement.full.threads)
+      ? store.replaceDerived('threads', stabilizeExisting(store, 'threads', derivedIncrement.full.threads), { at: now })
+      : { kind: 'threads', skipped: true, total: 0, written: 0, unchanged: 0, removed: [] };
+  } else if (derivedIncrement.mode === 'scoped') {
+    // 增量路径：只写本轮真的变了的记录 + 只删真的失去归属的记录
+    writes.topics = writeDerivedScoped(store, 'topics', derivedIncrement.changed.topics, derivedIncrement.changed.removedTopics, derivedIncrement.counts.topics, now);
+    __t('after-topics');
+    writes.links = writeDerivedScoped(store, 'links', derivedIncrement.changed.links, derivedIncrement.changed.removedLinks, derivedIncrement.counts.links, now);
+    __t('after-links');
+    writes.threads = Number.isFinite(derivedIncrement.counts.threads)
+      ? writeDerivedScoped(store, 'threads', derivedIncrement.changed.threads, derivedIncrement.changed.removedThreads, derivedIncrement.counts.threads, now)
+      : { kind: 'threads', skipped: true, total: 0, written: 0, unchanged: 0, removed: [] };
+  } else {
+    // noop / skipped：派生一个字不动（只报数）
+    const idle = (kind, total) => ({ kind, total: Number.isFinite(total) ? total : 0, written: 0, unchanged: Number.isFinite(total) ? total : 0, removed: [] });
+    writes.topics = idle('topics', derivedIncrement.counts.topics);
+    writes.links = idle('links', derivedIncrement.counts.links);
+    writes.threads = { ...idle('threads', derivedIncrement.counts.threads), skipped: derivedIncrement.mode === 'skipped' };
+  }
+  writes.index = typeof derivedIncrement.indexMd === 'string'
+    ? store.writeIndex(derivedIncrement.indexMd, { at: now })
+    : { changed: false, skipped: true };
+
+  // manifest：一个文件都没改且 index 没变 ⇒ 先校验，盘面与 manifest 一致就不重写
+  // （snapshot 要 stat 6.6 万个文件、实测 5.5 秒；稳态下把它省掉，判据一点没松 —— verify 更严）
+  const touchedFiles = Object.values(writes)
+    .reduce((n, w) => n + (Number(w?.written) || 0) + (Array.isArray(w?.removed) ? w.removed.length : 0), 0);
+  let verify;
+  if (touchedFiles === 0 && !writes.index?.changed) {
+    verify = store.verify();
+    writes.manifest = verify.ok
+      ? { changed: false, manifest: store.readManifest().manifest ?? null }
+      : store.writeManifest(now);
+    if (!verify.ok) { verify = store.verify(); __t('after-verify'); }
+  } else {
+    writes.manifest = store.writeManifest(now);
+    __t('after-manifest');
+    verify = store.verify();
+    __t('after-verify');
+  }
+
+  // 派生状态缓存（下次判定"谁变了"用）：必须在 manifest 写完之后取摘要
+  if (derivedIncrement.state) {
+    try {
+      derivedIncrement.state.derived = store.derivedDigest();
+      store.writeDeriveState(derivedIncrement.state);
+    } catch (err) {
+      warnings.push(`derive-state 写入失败（下轮退化为全量派生）：${String(err?.message ?? err)}`);
+    }
+  }
   summary.writes = Object.fromEntries(
     Object.entries(writes).map(([kind, w]) => [kind, {
       total: w.total ?? 0,
