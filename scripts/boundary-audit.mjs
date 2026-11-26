@@ -23,6 +23,10 @@ export const SCAN_FILES = [
   // **这两行不能省** —— 漏掉就等于让静态边界审计对着一份没有渲染代码的垫片空过（假绿）；
   // 垫片本身留着，防止有人把实现搬回来时反而逃过扫描。
   'src/rooms/inject-card.mjs', // 卡片渲染（唯一真正进模型上下文的地方）
+  // task-14（重构 G 期）：卡行的**恢复事实尾注**（`recoverySuffix`）随 ③ 搬进了取数房，
+  // 它拼进 `section`（进模型上下文）。**这一行不能省** —— 漏掉就是同一类假绿：
+  // 渲染字面量搬走了、审计还对着旧文件扫。
+  'src/rooms/inject-recovery.mjs', // 恢复事实尾注 + `inject` CLI 文案（尾注进卡行）
   'src/rooms/inject-gate.mjs', // 边界闸的词表与行形态（判据来源，渲染时逐行套用）
   'src/rooms/inject.mjs',      // 转发垫片（保留扫描：实现若被搬回这里也要被查）
   'src/plugin.mjs',            // 注入消息构造
