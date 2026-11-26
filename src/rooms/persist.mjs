@@ -744,6 +744,23 @@ export function createStore(opts = {}) {
     return { files, counts, issues, bytes };
   }
 
+  /**
+   * 派生目录（topics/links/threads/）的 checksums 摘要 —— 增量派生的**状态校验**用。
+   * 为什么不拿整份 manifest：权威侧（episodes/claims/joseki）的簿记变化与派生无关，
+   * 用整份摘要会让增量路径每轮失效；只看派生目录才是"派生文件没被外人动过"的准确判据。
+   * 成本：manifest 已在 readManifest 里记忆化，这里只是遍历 checksums 的键。
+   */
+  function derivedDigest() {
+    const { manifest } = readManifest();
+    const sums = manifest?.checksums && typeof manifest.checksums === 'object' ? manifest.checksums : {};
+    const lines = [];
+    for (const rel of Object.keys(sums).sort()) {
+      if (!DERIVED_KINDS.some((kind) => rel.startsWith(`${kind}/`))) continue;
+      lines.push(`${rel}:${sums[rel]}`);
+    }
+    return sha256(lines.join(String.fromCharCode(10)));
+  }
+
   function sortedChecksums(files) {
     const out = {};
     for (const key of [...files.keys()].sort()) out[key] = files.get(key);
@@ -1074,6 +1091,42 @@ export function createStore(opts = {}) {
     return { kind, total: list.length, written: written.written, unchanged: written.unchanged, removed };
   }
 
+  /**
+   * 只删**显式给出**的派生 id（增量路径用：不做 `ids()` 全扫）。
+   * 与 `replaceDerived` 的区别：这里没有"整目录替换"语义 —— 没点名的记录一条都不动。
+   * @returns {{kind:string, removed:string[], skipped:string[]}}
+   */
+  function deleteDerived(kind, ids, delOpts = {}) {
+    if (!DERIVED_KINDS.includes(kind)) {
+      throw new PersistError(
+        `persist: ${kind} 是权威目录，不能删除条目（只增不改）`,
+        'persist/authoritative-kind',
+      );
+    }
+    const at = Number.isFinite(delOpts.at) ? delOpts.at : clock();
+    const removed = [];
+    const failed = [];
+    const list = Array.isArray(ids) ? ids : [];
+    if (list.length === 0) return { kind, removed, skipped: failed };
+    JOURNAL_BATCH += 1;
+    try {
+      for (const id of list) {
+        const rel = entryRel(kind, id);
+        try {
+          fs.unlinkSync(path.join(root, rel));
+          appendJournal({ at, op: 'delete', kind, id, path: rel, sha256: null });
+          removed.push(rel);
+        } catch {
+          failed.push(id); // 删不掉就留着：下次增量/全量会再判一次，绝不假装删了
+        }
+      }
+    } finally {
+      JOURNAL_BATCH -= 1;
+      flushJournal();
+    }
+    return { kind, removed, skipped: failed };
+  }
+
   // ---- index.md ----
 
   function writeIndex(markdown, opts = {}) {
@@ -1326,6 +1379,29 @@ export function createStore(opts = {}) {
       ? writeIndex(derived.indexMd, { at })
       : { changed: false, skipped: true };
     result.manifest = writeManifest(at);
+    // 增量派生的状态缓存：rebuild 是全量口径 ⇒ 顺手把"这一版派生"的指纹记下来，
+    // 下一次归档判定"谁变了"才是准的（不写也不会错，只是下一轮会退化成全量）。
+    try {
+      const activeEpisodes = episodes.filter((e) => (e.state ?? 'archived') === 'archived');
+      const state = makeDeriveState({
+        mode: 'full',
+        n: activeEpisodes.length,
+        episodes: activeEpisodes,
+        counts: {
+          episodes: activeEpisodes.length,
+          topics: derived.topics.length,
+          links: derived.links.length,
+          threads: Array.isArray(derived.threads) ? derived.threads.length : null,
+          mentions: derived.mentions.length,
+          indexBytes: typeof derived.indexMd === 'string' ? Buffer.byteLength(derived.indexMd, 'utf8') : 0,
+        },
+        at,
+      });
+      state.derived = derivedDigest();
+      result.deriveState = writeDeriveState(root, state);
+    } catch (err) {
+      result.deriveState = { error: String(err?.message ?? err) };
+    }
     result.episodes = episodes.length;
     result.elapsedMs = Date.now() - started;
     return result;
@@ -1356,6 +1432,10 @@ export function createStore(opts = {}) {
     put,
     putMany,
     replaceDerived,
+    deleteDerived,
+    derivedDigest,
+    readDeriveState: () => readDeriveState(root),
+    writeDeriveState: (state) => writeDeriveState(root, state),
     appendJournal,
     writeIndex,
     writeManifest,
@@ -1416,36 +1496,16 @@ export function asRecordList(result, keys = []) {
 }
 
 /**
- * 从 episodes（权威）重算派生数据。
- * @param {{episodes:Array, derive?:object|null, at?:number}} p
- * @returns {Promise<{topics:Array, links:Array, threads:Array|null, mentions:Array, indexMd:string|null,
- *                    skipped:string[], active:number, stats:object|null}>}
+ * 派生投影（R04/R05/R06/R07 → 落盘记录）：`deriveStore` 与 `deriveIncremental` 共用。
+ *
+ * D8（2026-11-20，主人裁定）：**`idfNorm` 不再落盘**。它是按全库局数归一化的派生值
+ * （`idfNorm = f(df, N)`），每新增一局全库 topic 都会变，导致每轮归档把 9,000 个 topic 全量重写。
+ * 只存 `df`（真实计数），需要时用 `idfNormOf(df, N)` 现算 —— 读的地方见 `src/rooms/cli.mjs`。
+ *
+ * @param {{withTopics:Array, table:object, mods:object, at:number, built:object, skipped:string[]}} p
+ * @returns {{topicRecords:Array, linkRecords:Array, threads:Array|null, mentions:Array, indexMd:string|null}}
  */
-export async function deriveStore({ episodes = [], derive = null, at = Date.now() } = {}) {
-  const mods = derive ?? (await loadDerivers());
-  const skipped = [];
-  // 只收独立成谱的局：folded-into:<父局> 的子代理局不参与建网（AGENTS §4.1「只收 depth=0」）
-  const active = (Array.isArray(episodes) ? episodes : []).filter(
-    (e) => e && typeof e.id === 'string' && (e.state ?? 'archived') === 'archived',
-  );
-
-  if (!okObject(mods.topic, ['computeDf', 'deriveScaffoldTopics']) || !okObject(mods.link, ['buildLinks'])) {
-    skipped.push('topics/links: R04 topic 或 R05 link 缺失（派生未重算，旧文件保持原样）');
-    return { topics: [], links: [], threads: null, mentions: [], indexMd: null, skipped, active: active.length, stats: null };
-  }
-
-  let perEpisode = active.map((e) => ({ episodeId: e.id, topics: Array.isArray(e.topics) ? e.topics : [] }));
-  const missingTopics = active.filter((e) => !Array.isArray(e.topics)).length;
-  if (missingTopics > 0) skipped.push(`topics: ${missingTopics} 局条目里没有 topics 字段（按空处理）`);
-  perEpisode = mods.topic.deriveScaffoldTopics(perEpisode);
-  const table = mods.topic.computeDf(perEpisode);
-  const withTopics = active.map((e, i) => ({ ...e, topics: perEpisode[i].topics ?? [] }));
-  const built = mods.link.buildLinks({ episodes: withTopics, topics: table });
-
-  // D8（2026-11-20，主人裁定）：**`idfNorm` 不再落盘**。
-  // 它是按全库局数归一化的派生值（`idfNorm = f(df, N)`），每新增一局全库 topic 都会变，
-  // 导致每轮归档把 9,000 个 topic 全量重写（实测约 52 秒）。
-  // 只存 `df`（真实计数），需要时用 `idfNormOf(df, N)` 现算 —— 读的地方见 `src/rooms/cli.mjs`。
+function projectDerived({ withTopics, table, mods, at, built, skipped }) {
   const topicRecords = table.topics.map((t) => ({
     id: t.id,
     kind: t.kind,
@@ -1498,6 +1558,38 @@ export async function deriveStore({ episodes = [], derive = null, at = Date.now(
     });
   }
 
+  return { topicRecords, linkRecords, threads, mentions: built.mentions, indexMd };
+}
+
+/**
+ * 从 episodes（权威）重算派生数据。
+ * @param {{episodes:Array, derive?:object|null, at?:number}} p
+ * @returns {Promise<{topics:Array, links:Array, threads:Array|null, mentions:Array, indexMd:string|null,
+ *                    skipped:string[], active:number, stats:object|null}>}
+ */
+export async function deriveStore({ episodes = [], derive = null, at = Date.now() } = {}) {
+  const mods = derive ?? (await loadDerivers());
+  const skipped = [];
+  // 只收独立成谱的局：folded-into:<父局> 的子代理局不参与建网（AGENTS §4.1「只收 depth=0」）
+  const active = (Array.isArray(episodes) ? episodes : []).filter(
+    (e) => e && typeof e.id === 'string' && (e.state ?? 'archived') === 'archived',
+  );
+
+  if (!okObject(mods.topic, ['computeDf', 'deriveScaffoldTopics']) || !okObject(mods.link, ['buildLinks'])) {
+    skipped.push('topics/links: R04 topic 或 R05 link 缺失（派生未重算，旧文件保持原样）');
+    return { topics: [], links: [], threads: null, mentions: [], indexMd: null, skipped, active: active.length, stats: null };
+  }
+
+  let perEpisode = active.map((e) => ({ episodeId: e.id, topics: Array.isArray(e.topics) ? e.topics : [] }));
+  const missingTopics = active.filter((e) => !Array.isArray(e.topics)).length;
+  if (missingTopics > 0) skipped.push(`topics: ${missingTopics} 局条目里没有 topics 字段（按空处理）`);
+  perEpisode = mods.topic.deriveScaffoldTopics(perEpisode);
+  const table = mods.topic.computeDf(perEpisode);
+  const withTopics = active.map((e, i) => ({ ...e, topics: perEpisode[i].topics ?? [] }));
+  const built = mods.link.buildLinks({ episodes: withTopics, topics: table });
+  const projected = projectDerived({ withTopics, table, mods, at, built, skipped });
+  const { topicRecords, linkRecords, threads, indexMd } = projected;
+
   return {
     topics: topicRecords,
     links: linkRecords,
@@ -1517,9 +1609,660 @@ export async function deriveStore({ episodes = [], derive = null, at = Date.now(
   };
 }
 
+// ---------------------------------------------------------------------------
+// 增量派生（P0-3）：**episode 是最小更新单位**
+//
+// 对标上游 Graphiti `add_episode`：只有本轮新增/内容变更的 episode 参与重算；
+// 候选只取**同一对端点**（`_pair_search_filter` 的同义做法）；bulk upsert 只写本轮 resolved 的记录；
+// 全量重建只有显式调用（这里 = `KIFU_ARCHIVE_FULL_DERIVE=1` 或状态缓存失效）。
+//
+// 三条落地判据（不许松）：
+//   1. **正确性**：受影响区之外的主题/边/卷一个字都不动（`其余沿用库内既有记录`）；
+//      受影响区按「成员集合真的变了」判定，不是按"上次跑完到现在过了多久"。
+//   2. **删除只由 episode 变化驱动**：只有某条派生记录失去全部 episode 归属（或某对端点的边不再成立）
+//      才会被删 —— 不因为"这一轮没算到它"而删。
+//   3. **可回滚**：`KIFU_ARCHIVE_FULL_DERIVE=1` 走 `deriveStore` + `replaceDerived`（老路径）。
+//
+// 状态缓存 `<root>/.cache/derive-state.json`（**派生数据，可丢**）：缺了/对不上就走全量，
+// 只让"有没有变化"这一步变便宜，绝不用它替代任何判据。
+//   `{version, mode, n, derived:<派生目录 checksums 摘要>, counts:{…}, episodes:{epId: 指纹}}`
+//
+// 「受影响」怎么定（全部机械、可复算）：
+//   · 主题：episode 的**派生主题集合**（含 scaffold）变了，或该 episode 进出活跃集；
+//     外加「判别性上限」窗口内的主题（`max(2,⌈10%·N⌉)` 随 N 变 ⇒ 边界主题的可用性翻转）。
+//   · 边：同一条边只可能因「端点之一变了」或「参与判定的主题 df 变了」而变
+//     ⇒ 受影响 pair = 受影响主题的持有者两两配对 ∪ 变化 episode 相关的 pair。
+//   · 卷：（scope, topic）分组的成员变了就重算；R06 的成卷规则一个字不改（直接调用）。
+// ---------------------------------------------------------------------------
+
+export const DERIVE_STATE_REL = '.cache/derive-state.json';
+export const DERIVE_STATE_VERSION = 1;
+/** 增量判定：受影响 episode 超过活跃集的这个比例就退回全量（全量此时也便宜，且更保守）。 */
+export const DERIVE_SCOPED_MAX_RATIO = 0.25;
+
+export function deriveStatePath(root) {
+  return path.join(path.resolve(root), DERIVE_STATE_REL);
+}
+
+/** 读派生状态缓存；缺失/版本不符/形状不对 ⇒ null（调用方走全量）。 */
+export function readDeriveState(root) {
+  try {
+    const raw = JSON.parse(fs.readFileSync(deriveStatePath(root), 'utf8'));
+    if (!raw || raw.version !== DERIVE_STATE_VERSION) return null;
+    if (!Number.isFinite(raw.n) || raw.n < 0) return null;
+    if (!raw.episodes || typeof raw.episodes !== 'object' || Array.isArray(raw.episodes)) return null;
+    if (typeof raw.derived !== 'string' || raw.derived === '') return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+/** 写派生状态缓存（原子替换；失败只是下次走全量，不影响正确性）。 */
+export function writeDeriveState(root, state) {
+  const dir = path.resolve(root);
+  fs.mkdirSync(dir, { recursive: true });
+  const target = deriveStatePath(dir);
+  const tmp = path.join(dir, `.tmp-derive-state-${process.pid}-${Date.now().toString(36)}`);
+  try {
+    fs.writeFileSync(tmp, `${JSON.stringify(state)}\n`, 'utf8');
+    fs.renameSync(tmp, target);
+  } catch (err) {
+    try { fs.unlinkSync(tmp); } catch { /* 清理失败不影响主错误 */ }
+    throw err;
+  }
+  return target;
+}
+
+/**
+ * 一局棋谱的**派生输入指纹**：只覆盖派生真正读到的字段
+ * （state / scopeKey / l0 / 时间窗 / 主题及其出现位置）。
+ * `closure` `signals` 之类不参与派生，不进指纹 —— 否则权威侧簿记变化会引起假"变更"。
+ */
+export function episodeDeriveFingerprint(episode) {
+  if (!episode || typeof episode.id !== 'string' || episode.id === '') return null;
+  const times = ['occurredAt', 'startedAt', 'firstEventAt', 'endedAt', 'lastEventAt']
+    .map((k) => (Number.isFinite(episode[k]) ? episode[k] : ''))
+    .join(',');
+  const rows = [];
+  for (const t of Array.isArray(episode.topics) ? episode.topics : []) {
+    if (!t || typeof t.id !== 'string') continue;
+    let occKey = '';
+    for (const o of Array.isArray(t.occurrences) ? t.occurrences : []) {
+      occKey += `${o?.seq ?? ''}:${o?.occurredAt ?? ''}:${o?.nodeId ?? ''}:${o?.edgeId ?? ''};`;
+    }
+    rows.push(`${t.id}\u0001${t.kind ?? ''}\u0001${t.key ?? ''}\u0001${occKey}`);
+  }
+  return sha256([episode.state ?? 'archived', episode.scopeKey ?? '', episode.l0 ?? '', times, rows.join('\u0002')].join('\u0003')).slice(0, 32);
+}
+
+/** 判别性上限（与 R05 `linkEligible` 同式：df ≤ max(2, ⌈10%·N⌉)）。 */
+function eligibilityCapOf(n) {
+  return Math.max(2, Math.ceil((Number.isFinite(n) ? n : 0) * 0.1));
+}
+
+function sortedIdList(topics) {
+  const ids = [];
+  for (const t of Array.isArray(topics) ? topics : []) if (t && typeof t.id === 'string') ids.push(t.id);
+  return ids.sort();
+}
+
+function sameTopicIdSet(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function byIdAsc(a, b) {
+  return String(a?.id) < String(b?.id) ? -1 : String(a?.id) > String(b?.id) ? 1 : 0;
+}
+
+/**
+ * 一局棋谱的主题视图（id → {id,kind,key,occurrences}）——与 R05 `buildLinks` 内部同一口径：
+ * 同一 id 出现多次时取 occurrences 最长的那条。
+ */
+function episodeViews(episodes, table) {
+  const views = new Map();
+  for (const ep of episodes) {
+    const occById = new Map();
+    for (const t of Array.isArray(ep.topics) ? ep.topics : []) {
+      if (!t || !t.id) continue;
+      const ref = table.byId.get(t.id);
+      const view = {
+        id: t.id,
+        kind: ref?.kind ?? t.kind,
+        key: ref?.key ?? t.key,
+        occurrences: Array.isArray(t.occurrences) ? t.occurrences : [],
+      };
+      if (!occById.has(t.id)) occById.set(t.id, view);
+      else if (view.occurrences.length > occById.get(t.id).occurrences.length) occById.set(t.id, view);
+    }
+    views.set(ep.id, { episode: ep, occById });
+  }
+  return views;
+}
+
+function firstOccurrenceOf(topic) {
+  const occ = Array.isArray(topic?.occurrences) ? topic.occurrences : [];
+  return [...occ].sort((a, b) => {
+    const sa = Number.isFinite(a?.seq) ? a.seq : Number.MAX_SAFE_INTEGER;
+    const sb = Number.isFinite(b?.seq) ? b.seq : Number.MAX_SAFE_INTEGER;
+    return sa - sb;
+  })[0] ?? null;
+}
+
+function nodeSideOf(episodeId, occ) {
+  const side = { episode: episodeId };
+  if (occ?.nodeId) side.nodeId = occ.nodeId;
+  if (occ?.edgeId) side.edgeId = occ.edgeId;
+  return side;
+}
+
+/**
+ * **一对端点**的全部相关边（shared-topic / same-error / same-file），规则逐条对齐 R05 `buildLinks`：
+ * 只算这一对，不看别的对。这是「候选限定同一对端点」的落点 —— 全量口径由调用方传进来的
+ * 全局 df 表与 N 保证（不重算全库两两配对）。
+ * @returns {Array<{a:object,b:object,kind:string,topics:string[],why:string,weight:number,occurredAt:number|null}>}
+ */
+export function pairLinksOf(va, vb, n, mods, dfTable) {
+  const linkEligible = mods.link.linkEligible;
+  const idfNorm = mods.link.idfNorm;
+  const hardKinds = mods.topic.HARD_KINDS;
+  const softKinds = mods.topic.SOFT_KINDS;
+  const out = [];
+  if (!va || !vb) return out;
+  const dfOf = (id) => {
+    const t = dfTable?.get(id);
+    return Number.isFinite(t?.df) ? t.df : 0;
+  };
+  const normOf = (id) => idfNorm(dfOf(id), n);
+
+  // ---- 棋谱 ↔ 棋谱：共享硬主题（error 除外）优先，其次 ≥2 个判别性软主题 ----
+  const hardA = [];
+  const softA = [];
+  for (const view of va.occById.values()) {
+    const df = dfOf(view.id);
+    if (hardKinds.has(view.kind) && view.kind !== 'error' && linkEligible(df, n)) hardA.push(view);
+    if (softKinds.has(view.kind) && linkEligible(df, n)) softA.push(view);
+  }
+  const sharedHard = hardA.filter((t) => vb.occById.has(t.id));
+  if (sharedHard.length) {
+    sharedHard.sort((x, y) => (normOf(y.id) - normOf(x.id)) || (x.key < y.key ? -1 : 1));
+    const primaryA = firstOccurrenceOf(sharedHard[0]);
+    const primaryB = firstOccurrenceOf(vb.occById.get(sharedHard[0].id));
+    const at = Math.min(
+      Number.isFinite(primaryA?.occurredAt) ? primaryA.occurredAt : Infinity,
+      Number.isFinite(primaryB?.occurredAt) ? primaryB.occurredAt : Infinity,
+    );
+    out.push({
+      a: { episode: va.episode.id },
+      b: { episode: vb.episode.id },
+      kind: 'shared-topic',
+      topics: sharedHard.map((t) => t.id),
+      why: sharedHard.map((t) => t.key).join(', '),
+      weight: 1,
+      occurredAt: Number.isFinite(at) ? at : (va.episode.startedAt ?? null),
+    });
+  } else {
+    const sharedSoft = softA.filter((t) => vb.occById.has(t.id));
+    if (sharedSoft.length >= 2) {
+      sharedSoft.sort((x, y) => (normOf(y.id) - normOf(x.id)) || (x.key < y.key ? -1 : 1));
+      const mean = sharedSoft.reduce((s, t) => s + normOf(t.id), 0) / sharedSoft.length;
+      const primaryA = firstOccurrenceOf(sharedSoft[0]);
+      const primaryB = firstOccurrenceOf(vb.occById.get(sharedSoft[0].id));
+      const at = Math.min(
+        Number.isFinite(primaryA?.occurredAt) ? primaryA.occurredAt : Infinity,
+        Number.isFinite(primaryB?.occurredAt) ? primaryB.occurredAt : Infinity,
+      );
+      out.push({
+        a: { episode: va.episode.id },
+        b: { episode: vb.episode.id },
+        kind: 'shared-topic',
+        topics: sharedSoft.map((t) => t.id),
+        why: sharedSoft.map((t) => t.key).join(', '),
+        weight: Math.round(0.5 * mean * 10000) / 10000,
+        occurredAt: Number.isFinite(at) ? at : (va.episode.startedAt ?? null),
+      });
+    }
+  }
+
+  // ---- 节点 ↔ 节点：同一 error 原文 / 同一文件 + 同一错误 ----
+  const isGeneric = mods.topic.isGenericErrorKey;
+  const errorsOf = (view) => {
+    const rows = [];
+    for (const t of view.occById.values()) {
+      if (t.kind !== 'error') continue;
+      if (typeof isGeneric === 'function' && isGeneric(t.key)) continue;
+      if (String(t.key).startsWith('class:')) continue;
+      const occ = firstOccurrenceOf(t);
+      if (!occ) continue;
+      rows.push({ id: t.id, key: t.key, occ });
+    }
+    return rows;
+  };
+  const filesOf = (view) => {
+    const rows = [];
+    for (const t of view.occById.values()) {
+      if (t.kind !== 'file') continue;
+      const occ = firstOccurrenceOf(t);
+      if (!occ) continue;
+      rows.push({ id: t.id, key: t.key, occ });
+    }
+    return rows;
+  };
+  const errA = errorsOf(va);
+  const errB = errorsOf(vb);
+  const sharedErrors = errA.filter((x) => errB.some((y) => y.id === x.id));
+  for (const err of sharedErrors) {
+    const other = errB.find((y) => y.id === err.id);
+    const at = Math.min(
+      Number.isFinite(err.occ?.occurredAt) ? err.occ.occurredAt : Infinity,
+      Number.isFinite(other.occ?.occurredAt) ? other.occ.occurredAt : Infinity,
+    );
+    out.push({
+      a: nodeSideOf(va.episode.id, err.occ),
+      b: nodeSideOf(vb.episode.id, other.occ),
+      kind: 'same-error',
+      topics: [err.id],
+      why: err.key,
+      weight: 1,
+      occurredAt: Number.isFinite(at) ? at : null,
+    });
+  }
+  if (sharedErrors.length) {
+    const filesA = filesOf(va);
+    const filesB = filesOf(vb);
+    for (const file of filesA) {
+      if (!filesB.some((f) => f.id === file.id)) continue;
+      for (const err of sharedErrors) {
+        const other = errB.find((y) => y.id === err.id);
+        const at = Math.min(
+          Number.isFinite(err.occ?.occurredAt) ? err.occ.occurredAt : Infinity,
+          Number.isFinite(other.occ?.occurredAt) ? other.occ.occurredAt : Infinity,
+        );
+        out.push({
+          a: nodeSideOf(va.episode.id, err.occ),
+          b: nodeSideOf(vb.episode.id, other.occ),
+          kind: 'same-file',
+          topics: [file.id, err.id],
+          why: `${file.key}, ${err.key}`,
+          weight: 1,
+          occurredAt: Number.isFinite(at) ? at : null,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * 增量派生入口（**episode 为最小更新单位**）。
+ *
+ * @param {{episodes?:Array, prevEpisodes?:Array|null, store?:object|null,
+ *          derive?:object|null, at?:number, forceFull?:boolean}} opts
+ *   episodes     = 本轮**写后**的全量 episode 记录（权威）
+ *   prevEpisodes = 本轮**写前**的全量 episode 记录（缺省 = episodes）；用于判定"谁真的变了"
+ *   store        = 用于读派生状态缓存与既有 links/threads（缺失 ⇒ 只能全量）
+ *   forceFull    = true 走老的全量路径（回滚/对照）
+ * @returns {Promise<object>} 见下方 return；`mode` ∈ full | scoped | noop | skipped
+ */
+export async function deriveIncremental(opts = {}) {
+  const episodes = Array.isArray(opts.episodes) ? opts.episodes : [];
+  const prevEpisodes = Array.isArray(opts.prevEpisodes) ? opts.prevEpisodes : episodes;
+  const store = opts.store ?? null;
+  const mods = opts.derive ?? (await loadDerivers());
+  const at = Number.isFinite(opts.at) ? opts.at : Date.now();
+  const forceFull = Boolean(opts.forceFull);
+  const skipped = [];
+
+  const isActive = (e) => e && typeof e.id === 'string' && (e.state ?? 'archived') === 'archived';
+  const active = episodes.filter(isActive).sort(byIdAsc);
+  const prevActiveList = prevEpisodes.filter(isActive).sort(byIdAsc);
+  const prevById = new Map(prevActiveList.map((e) => [e.id, e]));
+
+  if (!okObject(mods.topic, ['computeDf', 'deriveScaffoldTopics']) || !okObject(mods.link, ['buildLinks', 'linkEligible', 'capLinksPerEpisode'])) {
+    skipped.push('topics/links: R04 topic 或 R05 link 缺失（派生未重算，旧文件保持原样）');
+    return {
+      mode: 'skipped',
+      skipped,
+      counts: { episodes: active.length, topics: null, links: null, threads: null, mentions: null, indexBytes: 0 },
+      dirty: { episodes: [], removed: [], topics: [], pairs: 0 },
+      changed: emptyChangedSets(),
+      indexMd: null,
+      full: null,
+      state: null,
+    };
+  }
+
+  // 派生主题（scaffold 是全局判据：族里成员 ≥2 —— 两条路径都按全量语料算，12ms）
+  const scaffold = (list) => mods.topic.deriveScaffoldTopics(
+    list.map((e) => ({ episodeId: e.id, topics: Array.isArray(e.topics) ? e.topics : [] })),
+  );
+  const perEpisode = scaffold(active);
+  const table = mods.topic.computeDf(perEpisode);
+  const withTopics = active.map((e, i) => ({ ...e, topics: perEpisode[i].topics ?? [] }));
+  const prevPer = scaffold(prevActiveList);
+  const prevDerivedTopics = new Map(prevActiveList.map((e, i) => [e.id, sortedIdList(prevPer[i].topics)]));
+
+  const N = active.length;
+  const capNow = eligibilityCapOf(N);
+  const state = store ? readDeriveState(store.root) : null;
+  const digest = store && typeof store.derivedDigest === 'function' ? store.derivedDigest() : null;
+  const stateValid = Boolean(state && digest && state.derived === digest);
+  // 状态缓存说"派生文件没变"，但文件数对不上（被外部删/多出来）⇒ 不敢走 noop，
+  // 退回全量把派生目录修回来。readdir 只看文件名，三个 kind 合计 ~0.3 秒。
+  const derivedCountsMatch = () => {
+    if (!store || !state || !state.counts) return true;
+    for (const kind of DERIVED_KINDS) {
+      const want = state.counts[kind];
+      if (!Number.isFinite(want)) continue;
+      if (store.ids(kind).length !== want) return false;
+    }
+    return true;
+  };
+  const useFull = forceFull || !stateValid || !derivedCountsMatch();
+
+  const buildFull = () => {
+    const built = mods.link.buildLinks({ episodes: withTopics, topics: table });
+    const projected = projectDerived({ withTopics, table, mods, at, built, skipped });
+    const counts = {
+      episodes: N,
+      topics: projected.topicRecords.length,
+      links: projected.linkRecords.length,
+      threads: Array.isArray(projected.threads) ? projected.threads.length : null,
+      mentions: projected.mentions.length,
+      indexBytes: typeof projected.indexMd === 'string' ? Buffer.byteLength(projected.indexMd, 'utf8') : 0,
+    };
+    return {
+      mode: 'full',
+      skipped,
+      counts,
+      dirty: {
+        episodes: active.map((e) => e.id),
+        removed: prevActiveList.filter((e) => !active.some((x) => x.id === e.id)).map((e) => e.id),
+        topics: table.topics.length,
+        pairs: 0,
+      },
+      changed: emptyChangedSets(),
+      indexMd: projected.indexMd,
+      full: {
+        topics: projected.topicRecords,
+        links: projected.linkRecords,
+        threads: projected.threads,
+      },
+      state: null,
+    };
+  };
+
+  if (useFull) {
+    const out = buildFull();
+    out.state = makeDeriveState({ mode: 'full', n: N, episodes: active, counts: out.counts, at });
+    return out;
+  }
+
+  // ---- 变化判定：谁真的变了（内容 / 派生主题集合 / 进出活跃集）----
+  const fps = new Map(active.map((e) => [e.id, episodeDeriveFingerprint(e)]));
+  const dirtyIds = [];
+  for (const ep of withTopics) {
+    const prev = prevById.get(ep.id);
+    if (!prev) { dirtyIds.push(ep.id); continue; }
+    const prevFp = state.episodes[ep.id];
+    if (typeof prevFp !== 'string' || prevFp !== fps.get(ep.id)) { dirtyIds.push(ep.id); continue; }
+    const idsNow = sortedIdList(ep.topics);
+    const idsPrev = prevDerivedTopics.get(ep.id) ?? [];
+    if (!sameTopicIdSet(idsNow, idsPrev)) dirtyIds.push(ep.id);
+  }
+  const activeIds = new Set(active.map((e) => e.id));
+  const removedIds = [...prevById.keys()].filter((id) => !activeIds.has(id));
+
+  if (dirtyIds.length === 0 && removedIds.length === 0) {
+    // ---- noop：本轮没有任何 episode 变化 ⇒ 派生一份不重算、不重写（只报数）----
+    const counts = {
+      episodes: N,
+      topics: Number.isFinite(state.counts?.topics) ? state.counts.topics : table.topics.length,
+      links: Number.isFinite(state.counts?.links) ? state.counts.links : null,
+      threads: Number.isFinite(state.counts?.threads) ? state.counts.threads : null,
+      mentions: Number.isFinite(state.counts?.mentions) ? state.counts.mentions : null,
+      indexBytes: Number.isFinite(state.counts?.indexBytes) ? state.counts.indexBytes : 0,
+    };
+    return {
+      mode: 'noop',
+      skipped,
+      counts,
+      dirty: { episodes: [], removed: [], topics: 0, pairs: 0 },
+      changed: emptyChangedSets(),
+      indexMd: null, // 派生索引与派生记录同源：没有 episode 变化 ⇒ 不必重渲染
+      full: null,
+      state: null,
+    };
+  }
+
+  if (dirtyIds.length + removedIds.length > Math.max(8, Math.ceil(N * DERIVE_SCOPED_MAX_RATIO))) {
+    const out = buildFull();
+    out.state = makeDeriveState({ mode: 'full', n: N, episodes: active, counts: out.counts, at });
+    return out;
+  }
+
+  // ---- 受影响主题 ----
+  const Taff = new Set();
+  const addTopicIdsOf = (rec) => { for (const id of sortedIdList(rec?.topics)) Taff.add(id); };
+  for (const id of dirtyIds) addTopicIdsOf(prevById.get(id));
+  for (const id of removedIds) addTopicIdsOf(prevById.get(id));
+  for (const id of dirtyIds) addTopicIdsOf(active.find((e) => e.id === id));
+  for (const id of dirtyIds) for (const t of prevDerivedTopics.get(id) ?? []) Taff.add(t);
+  for (const id of removedIds) for (const t of prevDerivedTopics.get(id) ?? []) Taff.add(t);
+  // 判别性上限随 N 变 ⇒ 边界主题（df ∈ (旧上限, 新上限]）的可用性翻转
+  const capPrev = eligibilityCapOf(Number.isFinite(state.n) ? state.n : N);
+  if (capPrev !== capNow) {
+    const lo = Math.min(capPrev, capNow);
+    const hi = Math.max(capPrev, capNow);
+    for (const t of table.topics) if (t.df > lo && t.df <= hi) Taff.add(t.id);
+  }
+
+  // ---- 主题记录：只重算受影响主题（成员集合算术，判据只有一条「谁提到它」）----
+  const changed = emptyChangedSets();
+  for (const id of Taff) {
+    const t = table.byId.get(id);
+    if (!t) { changed.removedTopics.push(id); continue; } // 没有任何活跃局再提到它
+    changed.topics.push({
+      id: t.id,
+      kind: t.kind,
+      key: t.key,
+      df: t.df,
+      firstSeenAt: t.firstSeenAt,
+      lastSeenAt: t.lastSeenAt,
+      episodes: [...t.episodes].sort(),
+    });
+  }
+
+  // ---- 边：候选限定同一对端点 ----
+  const views = episodeViews(withTopics, table);
+  const orderedIds = withTopics.map((e) => e.id).sort();
+  const pairKeys = new Set();
+  const addPair = (x, y) => {
+    if (x === y) return;
+    pairKeys.add(x < y ? `${x}\u0000${y}` : `${y}\u0000${x}`);
+  };
+  // 成本闸：受影响端点对一旦超过「全量两两配对」的量级，就地退回全量（全量此时更省）。
+  // 只统计**真能产出边**的主题：判别性通过（≤ 上限）的硬/软主题，加上非通用、非类级的 error；
+  // 其余主题（df 太大的通用词）本来就不建边，算进来只会白白触发全量。
+  const totalPairs = (orderedIds.length * (orderedIds.length - 1)) / 2;
+  const pairBudgetLimit = Math.min(Math.max(totalPairs, 64), 400000);
+  let pairBudget = 0;
+  for (const id of [...Taff].sort()) {
+    const t = table.byId.get(id);
+    if (!t || t.df < 2) continue;
+    const linkable = (t.kind === 'error' && !mods.topic.isGenericErrorKey(t.key) && !String(t.key).startsWith('class:'))
+      || (t.kind !== 'error' && mods.link.linkEligible(t.df, N));
+    if (!linkable) continue;
+    const holders = t.episodes ?? [];
+    pairBudget += (holders.length * (holders.length - 1)) / 2;
+    if (pairBudget > pairBudgetLimit) return finishFull();
+    const sorted = [...holders].sort();
+    for (let i = 0; i < sorted.length; i += 1) {
+      for (let j = i + 1; j < sorted.length; j += 1) addPair(sorted[i], sorted[j]);
+    }
+  }
+
+  const storedLinks = store.list('links').filter((x) => x.record).map((x) => x.record);
+  if (process.env.KIFU_TRACE_DERIVE === '1') {
+    console.error('[derive] scoped: N=%d dirty=%j removed=%j Taff=%d pairs=%d storedLinks=%d', N, dirtyIds, removedIds, Taff.size, pairKeys.size, storedLinks.length);
+  }
+  const removedSet = new Set(removedIds);
+  const linkTouchesTopic = (l) => (Array.isArray(l.topics) ? l.topics.some((t) => Taff.has(t)) : false);
+  const linkAffected = (l) => {
+    const a = l?.a?.episode;
+    const b = l?.b?.episode;
+    if (removedSet.has(a) || removedSet.has(b)) return true;
+    if (typeof a === 'string' && typeof b === 'string' && pairKeys.has(a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`)) return true;
+    return linkTouchesTopic(l);
+  };
+
+  const freshLinks = [];
+  const seenKeys = new Set();
+  const ordered = [...pairKeys].sort();
+  for (const key of ordered) {
+    const [aId, bId] = key.split('\u0000');
+    const va = views.get(aId);
+    const vb = views.get(bId);
+    if (!va || !vb) continue;
+    for (const link of pairLinksOf(va, vb, N, mods, table.byId)) {
+      const dedupe = `${link.kind}|${link.a.episode}|${link.b.episode}|${link.why}`;
+      if (seenKeys.has(dedupe)) continue;
+      seenKeys.add(dedupe);
+      freshLinks.push(link);
+    }
+  }
+
+  // 上限裁剪：判据函数直接用 R05 的（不复制），候选取「库内未受影响的边 ∪ 本轮重算的边」。
+  // 说明：库内的边已被上一轮裁过，被裁掉的候选不在池里 ⇒ 这里只会**少裁**、不会凭空造边。
+  // 落盘形状先转成记录（含稳定 id），这样"新增/删除"都能按 id 集合比，不靠内容猜。
+  const maxPerEpisode = mods.link.DEFAULT_LINK_OPTIONS?.maxLinksPerEpisode;
+  const toRecord = (l) => ({
+    id: linkIdOf(l),
+    kind: l.kind,
+    a: l.a,
+    b: l.b,
+    topics: l.topics,
+    why: l.why,
+    weight: l.weight,
+    occurredAt: l.occurredAt,
+    episodes: [l.a?.episode, l.b?.episode].filter((x) => typeof x === 'string').sort(),
+  });
+  const freshRecords = freshLinks.map(toRecord);
+  const pool = [...storedLinks.filter((l) => !linkAffected(l)), ...freshRecords];
+  const capped = mods.link.capLinksPerEpisode(pool, Number.isFinite(maxPerEpisode) ? maxPerEpisode : 16);
+
+  const storedIds = new Set(storedLinks.map((l) => l.id));
+  const finalIds = new Set(capped.map((l) => l.id));
+  changed.links = capped.filter((l) => !storedIds.has(l.id));
+  changed.removedLinks = [...storedIds].filter((id) => !finalIds.has(id));
+  if (process.env.KIFU_TRACE_DERIVE === '1') {
+    console.error('[derive] pool=%d capped=%d write=%d removed=%d', pool.length, capped.length, changed.links.length, changed.removedLinks.length);
+  }
+
+  // ---- 卷 / index：R06/R07 的判据不复制，直接按全量口径调用（0.9 秒量级），只写变了的 ----
+  const builtLinks = capped;
+  let threads = null;
+  if (!okObject(mods.thread, ['buildThreads'])) {
+    skipped.push('threads: R06 thread 缺失（threads/ 保持原样）');
+  } else {
+    try {
+      threads = asRecordList(mods.thread.buildThreads({ episodes: withTopics, links: builtLinks, topics: table, now: at }), ['threads'])
+        .filter((t) => t && typeof t.id === 'string')
+        .map((t) => ({ ...t }))
+        .sort(byIdAsc);
+    } catch (err) {
+      skipped.push(`threads: R06 抛错（${String(err?.message ?? err)}）`);
+      threads = null;
+    }
+  }
+  if (Array.isArray(threads)) {
+    const storedThreads = store.list('threads').filter((x) => x.record).map((x) => x.record);
+    const storedThreadById = new Map(storedThreads.map((t) => [t.id, t]));
+    const threadIds = new Set(threads.map((t) => t.id));
+    for (const t of threads) {
+      const prev = storedThreadById.get(t.id);
+      const next = { ...t };
+      if (prev) for (const field of ['createdAt', 'recordedAt', 'generatedAt']) if (prev[field] !== undefined) next[field] = prev[field];
+      if (!prev || !sameMemoryContent(next, prev)) changed.threads.push(next);
+    }
+    changed.removedThreads = storedThreads.filter((t) => !threadIds.has(t.id)).map((t) => t.id);
+  }
+
+  let indexMd = null;
+  if (okObject(mods.index, ['renderIndex'])) {
+    indexMd = mods.index.renderIndex({
+      episodes: withTopics,
+      links: builtLinks,
+      topics: table,
+      mentions: [],
+      generatedAt: null,
+      tz: 'UTC',
+    });
+  } else {
+    skipped.push('index.md: R07 index 缺失（不重写 index.md）');
+  }
+
+  const counts = {
+    episodes: N,
+    topics: table.topics.length,
+    links: capped.length,
+    threads: Array.isArray(threads) ? threads.length : null,
+    mentions: null,
+    indexBytes: typeof indexMd === 'string' ? Buffer.byteLength(indexMd, 'utf8') : 0,
+  };
+  return {
+    mode: 'scoped',
+    skipped,
+    counts,
+    dirty: { episodes: dirtyIds, removed: removedIds, topics: Taff.size, pairs: pairKeys.size },
+    changed,
+    indexMd,
+    full: null,
+    state: makeDeriveState({ mode: 'scoped', n: N, episodes: active, counts, at }),
+  };
+
+  function finishFull() {
+    const out = buildFull();
+    out.state = makeDeriveState({ mode: 'full', n: N, episodes: active, counts: out.counts, at });
+    return out;
+  }
+}
+
+function emptyChangedSets() {
+  return { topics: [], links: [], threads: [], removedTopics: [], removedLinks: [], removedThreads: [] };
+}
+
+/** 派生状态缓存（写盘前由调用方补 `derived` 摘要）。 */
+function makeDeriveState({ mode, n, episodes, counts, at }) {
+  const fps = {};
+  for (const ep of episodes) {
+    const fp = episodeDeriveFingerprint(ep);
+    if (fp) fps[ep.id] = fp;
+  }
+  return {
+    version: DERIVE_STATE_VERSION,
+    mode,
+    derivedAt: at,
+    n,
+    counts: { ...counts },
+    derived: null,
+    episodes: fps,
+  };
+}
+
 export default {
   createStore,
   deriveStore,
+  deriveIncremental,
+  pairLinksOf,
+  deriveStatePath,
+  readDeriveState,
+  writeDeriveState,
+  episodeDeriveFingerprint,
+  DERIVE_STATE_VERSION,
+  DERIVE_SCOPED_MAX_RATIO,
   loadDerivers,
   linkIdOf,
   asRecordList,

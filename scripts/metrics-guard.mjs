@@ -40,6 +40,9 @@ import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+// task-9 / P0-4：六轴门槛的唯一权威表。A4 门槛曾在本文件与 ledger-check 各写一份 50（D7 只改一半，
+// 两个版本连撞两次发版），现在两边都读这里的同一个冻结对象。
+import { LIMITS as SHARED_LIMITS } from '../src/rooms/limits.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPO = fileURLToPath(new URL('..', import.meta.url));
@@ -69,25 +72,21 @@ export const HOLDOUT_BASELINE = Object.freeze({
   note: '内容相关口径（不限局）+ 同局严格下界；n=118，门槛 = 当前实测',
 });
 
-const LIMITS = {
-  a1Max: 0.05,
-  // T7：A1 的第二条轴（反向记忆率）与 stale **并列**，同一个 5% 硬上限。
-  // 但只有"通电"（`detail.usableForDecision` = 可判率 ≥30% 且线上有正样本）才参与 exit code ——
-  // 线上 0 次触发时它是 0/0，不能当通过（见文件头）。
-  a1OppositeMax: 0.05,
-  // T27：A1 的第三条轴（**会话级**冗余注入）。只有 `redundantWaste` 参与 exit code（necessary 是压缩后
-  // 必要重注，不卡）；只有"通电"（窗口样本够）才卡 —— 样本不足时不硬造数（与 opposite 同形状）。
-  a1RedundantWasteMax: 0.01,
-  a5Max: 0,
-  a6Min: 1,
-  a4p50MaxMs: 50,
+// 六轴门槛（A1 / A1.opposite / A1.redundant / A5 / A6 / A4）**不在这里定义** ——
+// 唯一权威表是 `src/rooms/limits.mjs`（task-9）。这里只做两件事：
+//   ① 把那张冻结表原样重导出（测试用 `===` 判「两处读到同一常量对象」）；
+//   ② 在它之上补本脚本**独占**的 A2b 门槛（数值来自本文件顶部的考卷基线，不属于共享表）。
+export { SHARED_LIMITS as LIMITS };
+
+const GATE_LIMITS = Object.freeze({
+  ...SHARED_LIMITS,
   // 新考卷门槛（T242）：低于当前实测即红 —— 只允许持平或更好
   a2bStrictMin: HOLDOUT_BASELINE.strictMin,
   a2bCoverMin: HOLDOUT_BASELINE.coverMin,
   // 旧口径（sampleSource='report'，n=19 repeat-only）才适用的回归线；新考卷不用它
   a2bStrictRef: 0.8421052631578947,
   a2bStrictDropMax: 0.1,
-};
+});
 
 /**
  * @param {object} report         m5-report 的 JSON
@@ -97,7 +96,7 @@ const LIMITS = {
  *        否则退回 m5 报告里的 injectionRecall（旧口径，只作对照）。
  */
 let a4RelativeNote = null;
-export function judge(report, limits = LIMITS, a2bOverride = null) {
+export function judge(report, limits = GATE_LIMITS, a2bOverride = null) {
   const axes = report?.axes ?? report ?? {};
   const fails = [];
   const a1 = axes.A1?.value;
@@ -185,7 +184,7 @@ export function judge(report, limits = LIMITS, a2bOverride = null) {
   // 为什么：语料每天在长（13,212 主题 / 29,293 links），绝对 50ms 抓到的是"数据变多"而不是"代码变慢"。
   // 规则：语料指纹一致 ⇒ 与 `evidence/a4-baseline.json` 的 medianOfMedians 比，退化 >20% 才红；
   //       语料变了或没有基线 ⇒ 退回绝对阈值（宁可严格，不放过）。
-  if (Number.isFinite(p50) && p50 > limits.a4p50MaxMs) {
+  if (Number.isFinite(p50) && p50 > limits.a4P50MaxMs) {
     const rel = relativeA4Verdict(p50);
     if (rel.ok) a4RelativeNote = rel.note;
     else constraints.push(rel.note);
@@ -287,11 +286,11 @@ function corpusCounts(storeRoot) {
 function relativeA4Verdict(p50) {
   const storeRoot = process.env.DSH_HOME ? path.join(process.env.DSH_HOME, 'memory-context') : null;
   const basePath = path.join(REPO, 'evidence/a4-baseline.json');
-  if (!storeRoot) return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms > ${LIMITS.a4p50MaxMs}ms（无 store root，按绝对阈值判）` };
+  if (!storeRoot) return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms > ${GATE_LIMITS.a4P50MaxMs}ms（无 store root，按绝对阈值判）` };
   let base = null;
   try { base = JSON.parse(fs.readFileSync(basePath, 'utf8')); } catch { /* 没基线 */ }
   if (!base || !Number.isFinite(base.medianOfMedians)) {
-    return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms > ${LIMITS.a4p50MaxMs}ms（无基线，按绝对阈值判）` };
+    return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms > ${GATE_LIMITS.a4P50MaxMs}ms（无基线，按绝对阈值判）` };
   }
   const cur = corpusCounts(storeRoot);
   const same = JSON.stringify(cur) === JSON.stringify(base.corpus);
@@ -305,7 +304,7 @@ function relativeA4Verdict(p50) {
   if (delta > 20) {
     return { ok: false, note: `A4 p50 ${p50.toFixed(2)}ms 比基线 ${base.medianOfMedians}ms 退化 ${delta.toFixed(1)}%（>20%）` };
   }
-  return { ok: true, note: `A4 p50 ${p50.toFixed(2)}ms 高于绝对阈值 ${LIMITS.a4p50MaxMs}ms，但同语料下对基线 ${base.medianOfMedians}ms 为 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%（未退化 >20%）` };
+  return { ok: true, note: `A4 p50 ${p50.toFixed(2)}ms 高于绝对阈值 ${GATE_LIMITS.a4P50MaxMs}ms，但同语料下对基线 ${base.medianOfMedians}ms 为 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%（未退化 >20%）` };
 }
 
 export function renderSummary(out, verdict) {
@@ -325,7 +324,7 @@ export function renderSummary(out, verdict) {
 if (invokedDirectly) {
   const argv = process.argv.slice(2);
   const strictIdx = argv.indexOf('--strict');
-  const limits = { ...LIMITS };
+  const limits = { ...GATE_LIMITS };
   if (strictIdx >= 0 && Number.isFinite(Number(argv[strictIdx + 1]))) limits.a2bStrictMin = Number(argv[strictIdx + 1]);
   const json = argv.includes('--json');
   // T242：主判据默认考卷口径。`--source report` 才退回 m5 报告里的旧口径（对照用）。

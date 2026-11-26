@@ -64,6 +64,9 @@ import { registerMemoryTools, recordToolRegistration } from './tools.mjs';
 import { createMemorySdk } from './sdk.mjs';
 import { createStore } from './rooms/persist.mjs';
 import { createWalkCache } from './rooms/walk.mjs';
+// task-9 / P0-4：心跳摘要条数上限的唯一权威值（原为三处各写一份 5：两个 gate* 函数的默认参数 +
+// 一条 warn 的 slice(0, 5)）。
+import { DIGEST_GATE_CODES_LIMIT } from './rooms/limits.mjs';
 
 /** 插件名（宿主用来标识这个插件）。 */
 export const name = 'dsh-gokifu-longmemory';
@@ -621,7 +624,7 @@ export function gateIdsFromGates(gates) {
   return [...new Set(fromErrors)];
 }
 
-export function gateCodesFromGates(gates, limit = 5) {
+export function gateCodesFromGates(gates, limit = DIGEST_GATE_CODES_LIMIT) {
   const codes = (Array.isArray(gates?.errors) ? gates.errors : []).map((e) => String(e?.code ?? '')).filter(Boolean);
   return [...new Set(codes)].slice(0, limit);
 }
@@ -640,7 +643,7 @@ export function gateCodesFromGates(gates, limit = 5) {
  * 只收非空字符串；去重保序；最多 `limit` 个（默认 5，防止一行心跳被撑爆）。
  * **只读 id，不碰卡正文**（心跳里不许出现记忆内容）。
  */
-export function gateClaimIdsFromGates(gates, limit = 5) {
+export function gateClaimIdsFromGates(gates, limit = DIGEST_GATE_CODES_LIMIT) {
   const errors = Array.isArray(gates?.errors) ? gates.errors : [];
   const ids = [];
   const push = (value) => {
@@ -833,7 +836,7 @@ async function decidePreStep({ ctx, config, deps, payload, decision, lifecycle }
 
   if (!config.enabled) return { decision, action: 'skip', reason: 'disabled', card, gates, digest };
   if (!gates?.ok) {
-    warn(ctx, `闸门未通过（本轮不注入）：${(gates?.errors ?? []).map((e) => e.code).slice(0, 5).join(', ')}`);
+    warn(ctx, `闸门未通过（本轮不注入）：${(gates?.errors ?? []).map((e) => e.code).slice(0, DIGEST_GATE_CODES_LIMIT).join(', ')}`);
     // 2026-11-04：记下是哪几道闸拦的（只写闸 id 与错误码，不写卡内容，避免把记忆写进心跳）。
     // 修（0.132.0）：之前只读 `gates.failed`，但 `runGates()` 返回的是 `{ok, errors, checks}` —— 没有 `failed` 字段，
     // 于是线上两次 `gates-failed` 的心跳都是 `gateIds: null`，事后根本查不出被哪道闸拦的（"红了但不知道是谁"的同类问题）。

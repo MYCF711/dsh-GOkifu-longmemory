@@ -16,6 +16,9 @@
 // 因此只保留在 mention 里，不参与棋谱↔棋谱建边（否则 N 局两两全连，图退化成一张全连图）。
 
 import { HARD_KINDS, SOFT_KINDS, isGenericErrorKey } from './topic.mjs';
+// task-9 / P0-4：每局边数上限的唯一权威值在 `./limits.mjs`（上游对应：Graphiti 无存量级边上限，
+// 只约束候选/批次；本仓 D10 自设 16，理由写在那张表里）。
+import { MAX_LINKS_PER_EPISODE } from './limits.mjs';
 
 export const LINK_KIND_ORDER = Object.freeze(['shared-topic', 'same-error', 'same-file']);
 
@@ -29,7 +32,8 @@ export const DEFAULT_LINK_OPTIONS = Object.freeze({
   // 边是"团"：N 局共享同一文件/同一报错 ⇒ N² 条边，而 walk 深度 ≤2、每层 limit 5，用不到这么多。
   // 做法：每局最多保留 `maxLinksPerEpisode` 条边（按 weight 降序、同重按 occurredAt 新的优先，再按 id 稳定排序）。
   // 这只是**截断候选**，不改任何判据；被截掉的邻居仍可由 `holdersByTopic`（walk cache 里已有）按需展开。
-  maxLinksPerEpisode: 16,
+  // 值来自 `./limits.mjs` 的 MAX_LINKS_PER_EPISODE（单一来源，不在本文件写第二份）。
+  maxLinksPerEpisode: MAX_LINKS_PER_EPISODE,
 });
 
 function clamp(x, lo, hi) {

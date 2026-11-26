@@ -34,24 +34,27 @@ import { readRecoveryIndex, readTrials, appendTrials } from './persist.mjs';
 import { classifyErrorClass } from './claim.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// task-9 / P0-4：注入侧的条数与预算来自唯一权威表（原为多处各写一份字面量：条数 5、预算 500 tokens）。
+import {
+  ENTRY_LIMIT,
+  BUDGET_TOKENS,
+  INDEX_LINE_BUDGET,
+  TEXT_CLIP,
+  TIGHT_CLIP,
+  POINTER_SUPPORT_LIMIT,
+} from './limits.mjs';
 
 export const CARD_VERSION = 1;
-/** 命中展开的条数上限（方案 §7.3：≤5 条）。 */
-export const ENTRY_LIMIT = 5;
-/** 命中展开的 token 预算（方案 §7.2 六条纪律 3：≤500 tokens）。口径 = indexLine + section 合计（保守）。 */
-export const BUDGET_TOKENS = 500;
-/** 首轮一行 INDEX 指针的预算（方案 §7.3：~40 tokens；这里放宽到 60 作为闸值）。 */
-export const INDEX_LINE_BUDGET = 60;
-/** 单条文本渲染上限（超预算时「先降表示，不丢来源与日期」：160 → 60 两级）。 */
-export const TEXT_CLIP = 160;
+// task-9 / P0-4：ENTRY_LIMIT / BUDGET_TOKENS / INDEX_LINE_BUDGET / TEXT_CLIP / TIGHT_CLIP /
+// POINTER_SUPPORT_LIMIT 的注释与上游对应值都写在 `src/rooms/limits.mjs`（唯一权威表），
+// 本文件不写第二份；这里原样重导出，导出面（含 default 导出里的这 6 个名字）一字不变。
+export { ENTRY_LIMIT, BUDGET_TOKENS, INDEX_LINE_BUDGET, TEXT_CLIP, TIGHT_CLIP, POINTER_SUPPORT_LIMIT };
 /**
  * T345 · F3 尾注的字符上限（**派生内容**，不占正文预算）。
  * 目的：让模型知道「什么情况算我错」，又不让卡片被条件句撑爆。
  * 口径：单条 ≤ F3_MAX_CHARS 字符；超了截断并保留规则 id 可追溯。
  */
 export const F3_MAX_CHARS = 60;
-/** 降表示第二级的单条文本上限。 */
-export const TIGHT_CLIP = 60;
 export const SHADOW_DIR_REL = path.join('evidence', 'shadow');
 export const SHADOW_FILE = 'shadow.jsonl';
 
@@ -107,9 +110,6 @@ export const MARKERS_LINE = '# markers: [semantic]=≥3 局且无反例 · [cand
 // 只有 ②（支撑 1 却标了 candidate/semantic）⇒ 状态自相矛盾，**按最保守的"不降级"走**
 // （宁可多给，不许把有把握的条目降成指针）。
 // ---------------------------------------------------------------------------
-
-/** 「没把握」的支撑局数上限（含）。计数口径 = `claim.support.length`（**不按作用域过滤**）。 */
-export const POINTER_SUPPORT_LIMIT = 1;
 
 /**
  * 三级交付的**生产默认值**（单一来源）。

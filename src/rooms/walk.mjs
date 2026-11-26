@@ -69,21 +69,34 @@
 //   store 没有 list() ⇒ WalkError('walk/invalid-store')。其余情况**不抛**：
 //   缺时间戳的棋谱（"无时不入"）、folded-into 的子代理局、invalidated claim 只计数
 //   （result.dropped），不抛、不入 hits。
-// 只读保证：本房间**不 import 任何模块**（连 node: 内置都不用）——没有 fs 句柄、没有写方法，
-//   结构上不可能写盘，也就不可能写 <DSH_HOME>。疑似写盘的行为在测试里用 store 快照对比验证。
-// 允许依赖：无（R05 的 links / R04 的主题表 / R07 的索引都由 store 提供成品；本房间不 import）。
+// 只读保证：本房间**除了下面那一张零 I/O 常量表之外，不 import 任何模块**（连 node: 内置都不用）
+//   ——`./limits.mjs` 自身零 import、零 fs、全部 Object.freeze（test/limits-single-source.test.mjs
+//   双向钉住），所以"没有 fs 句柄、没有写方法"这条结构保证不变，也就不可能写盘 / 写 <DSH_HOME>。
+//   疑似写盘的行为在测试里用 store 快照对比验证。
+// 允许依赖：`./limits.mjs`（纯常量；task-9 的单一权威表）。R05 的 links / R04 的主题表 / R07 的索引
+//   都由 store 提供成品，本房间不 import 它们。
+
+// task-9 / P0-4：深度与预算的数值只写在 `./limits.mjs`（唯一权威表）。
+// 上游对应（Graphiti `MAX_SEARCH_DEPTH=3` / `DEFAULT_SEARCH_LIMIT=10`）写在那张表里，不在这里重复。
+import {
+  WALK_MAX_DEPTH,
+  WALK_DEFAULT_LIMIT,
+  WALK_DEFAULT_BUDGET_TOKENS,
+  WALK_MAX_TOPICS,
+  WALK_MAX_HOPS,
+} from './limits.mjs';
 
 /** 默认参数（契约 §7.2 的 5 条 / 500 tokens）。 */
 export const WALK_DEFAULTS = Object.freeze({
-  depth: 2,
-  limit: 5,
-  budgetTokens: 500,
-  maxTopics: 8, // 一次信号最多匹配几个主题（多了说明信号太宽，宁可少跳）
-  maxHops: 40,   // path 的最大跳数（保护注入侧上下文）
+  depth: WALK_MAX_DEPTH,
+  limit: WALK_DEFAULT_LIMIT,
+  budgetTokens: WALK_DEFAULT_BUDGET_TOKENS,
+  maxTopics: WALK_MAX_TOPICS, // 一次信号最多匹配几个主题（多了说明信号太宽，宁可少跳）
+  maxHops: WALK_MAX_HOPS,     // path 的最大跳数（保护注入侧上下文）
 });
 
 /** 深度硬上限（契约 §7.2「深度 ≤2」）。 */
-export const MAX_DEPTH = 2;
+export const MAX_DEPTH = WALK_MAX_DEPTH;
 
 /** 信号来源枚举（契约 §7.1）。 */
 export const SIGNAL_KINDS = Object.freeze(['root-message', 'activity', 'user-explicit']);
