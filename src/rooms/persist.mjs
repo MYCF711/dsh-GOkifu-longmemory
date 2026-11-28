@@ -15,6 +15,11 @@
 // 幂等：同一输入重放到同一 store ⇒ 文件字节相同、manifest 的 counts/checksums 相同、
 //   updatedAt 不再变（无变更就不重写 manifest）、journal 不追加（journal 只记真实变更）。
 //   条目的 `_store.createdAt/updatedAt` 是存储簿记，不参与"同一内容"判定。
+// 双时态失效（T-15 / P1-1，Graphiti `_apply_temporal_invalidation` 同构）：`putMany('claims', …)`
+//   在写盘**前**把「库内既有 + 本轮提交」合成一份视图交给 R09 的 `applyTemporalInvalidation` 判定；
+//   被判失效的旧行只加 `invalidAt`（失效起点 = 新证据的 occurredAt）与 `expiredAt`（判定时刻），
+//   **正文/证据/state 一字不改、行不删**（读侧照常读得到）；已判定过的标注粘住，重放不复位、不改口。
+//   规则本体在 R09（纯函数），R15 只做库内合并与落盘（判据见 docs/数据契约.md §9.1）。
 // 路径纪律（§4.11 规则 2）：store 内一切路径相对 root（manifest.checksums 的 key、条目文件名都是
 //   相对路径）；**不存绝对路径**。来源文件（会话日志/棋谱）的绝对路径不入库：
 //   一律存成相对 DSH_HOME 的路径 + `sourceRoot:"DSH_HOME"`，并带 `sourceStatus`。
@@ -29,7 +34,8 @@
 //   - 缺 manifest / 坏 manifest ⇒ verify 返回 `manifest/missing` / `manifest/invalid` + hint rebuild。
 //   - 条目不慎带绝对路径 ⇒ put 抛 `persist/absolute-path`（宁可不入馆，不写进搬不走的库）。
 //   - journal 坏尾（崩溃截断）⇒ readJournal 丢尾行 + 计数，**不抛**；rebuild 仍可跑。
-// 允许依赖：R00（棋谱形状）；派生重算时按需动态 import R04/R05/R07/R06（缺失则显式 skipped，
+// 允许依赖：R00（棋谱形状）；R09 claim 的**纯函数** `applyTemporalInvalidation`（零 I/O，只做判定）；
+//   派生重算时按需动态 import R04/R05/R07/R06（缺失则显式 skipped，
 //   不假装成功）。零第三方依赖，只用 node: 内置模块。
 //
 // 用法（入档方）：
@@ -50,6 +56,8 @@ export const STORE_VERSION = 1;
 export const STORE_SCHEMA = 'dsh-kifuin/memory-store@1';
 
 import { readKindBundleCached, writeKindBundle, WALK_BUNDLE_KINDS } from './walkbundle.mjs';
+// T-15 / P1-1：双时态失效的**判据**只有一份，在 R09（纯函数、零 I/O）；R15 只负责把它接到写盘前。
+import { applyTemporalInvalidation } from './claim.mjs';
 
 /**
  * manifest.json 对外面 schema 版本（整数）。与 `version` 分工不同：
@@ -1000,6 +1008,15 @@ export function createStore(opts = {}) {
       for (const field of ['recordedAt', 'createdAt']) {
         if (previous[field] !== undefined) candidate[field] = previous[field];
       }
+      // T-15：失效标注是"只增不改"的追加字段 ⇒ 已判定的不因重放/重算消失或改口。
+      //   · expiredAt = **首次判定时刻**（历史判定不搬家）
+      //   · invalidAt = 失效起点，证据累积只会更早 ⇒ 取更小的那个（两处都遵守同一条规则）
+      if (Number.isFinite(previous.invalidAt)) {
+        candidate.invalidAt = Number.isFinite(candidate.invalidAt)
+          ? Math.min(previous.invalidAt, candidate.invalidAt)
+          : previous.invalidAt;
+      }
+      if (Number.isFinite(previous.expiredAt)) candidate.expiredAt = previous.expiredAt;
     }
     if (sameExceptClocks(candidate, previous)) {
       // 同内容重放：不写盘、不追加 journal、不动 updatedAt（幂等）
@@ -1023,24 +1040,76 @@ export function createStore(opts = {}) {
     return { changed: true, id: rec.id, path: rel, sha256: hash };
   }
 
+  /**
+   * T-15 / P1-1：双时态失效的**写入侧规划**（判据本体在 R09 `applyTemporalInvalidation`，这里不做任何判断）。
+   *
+   * 为什么必须在写盘**前**算：判定要看「库内既有 + 本轮提交」的合成视图（新值到达 ⇒ 旧值失效；
+   * 旧值这次才被本轮带进来 ⇒ 也要当场打区间），写完再算就要重写一遍，journal 会多出一倍条目。
+   *
+   * @param {object[]} incoming 本轮提交的 claims（顺序即写盘顺序）
+   * @param {number|null} at 判定时刻
+   * @returns {{incoming: object[], alsoWrite: object[], expired: {count:number, ids:string[], written:number}}}
+   *   - `incoming`：本轮提交的条目（被判失效的已带上 invalidAt/expiredAt），长度与顺序不变
+   *   - `alsoWrite`：**既有**条目里这次新被判失效、且不在本轮提交里的（只追加这两个字段）
+   *   - `expired.written`：`alsoWrite` 里真的写盘（内容变了）的条数
+   */
+  function planClaimExpiry(incoming, at) {
+    const stored = list('claims').map((entry) => entry.record).filter((r) => r && typeof r.id === 'string');
+    const merged = new Map(stored.map((record) => [record.id, record]));
+    for (const record of incoming) merged.set(record.id, record); // 本轮内容为准（与本轮写盘口径一致）
+    const judged = applyTemporalInvalidation({ claims: [...merged.values()], now: Number.isFinite(at) ? at : clock() });
+    const empty = { count: 0, ids: [], written: 0 };
+    if (judged.expired.length === 0) return { incoming, alsoWrite: [], expired: empty };
+
+    const nextById = new Map(judged.claims.map((claim) => [claim.id, claim]));
+    const incomingIds = new Set(incoming.map((record) => record.id));
+    const batch = incoming.map((record) => nextById.get(record.id) ?? record);
+    const alsoWrite = [];
+    const ids = [];
+    for (const row of judged.expired) {
+      if (!row.changed) continue; // 已判定过的标注不重复写（幂等）
+      ids.push(row.id);
+      if (incomingIds.has(row.id)) continue; // 本轮提交的条目走正常写盘路径
+      // 盘面为准：`list()` 在生产 store 上可能来自 bundle 快照（同一进程里可能已旧），
+      // 拿旧副本回写会把该条目的其他更新一起冲掉 ⇒ 这里逐条读原文再只加两个字段。
+      const fresh = readRecord('claims', row.id) ?? nextById.get(row.id);
+      if (!fresh) continue;
+      alsoWrite.push({ ...fresh, invalidAt: row.invalidAt, expiredAt: row.expiredAt });
+    }
+    return { incoming: batch, alsoWrite, expired: { count: ids.length, ids, written: 0 } };
+  }
+
   function putMany(kind, records, putOpts = {}) {
     const list = (Array.isArray(records) ? records : []).filter(Boolean);
     const ordered = [...list].sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+    const at = Number.isFinite(putOpts.at) ? putOpts.at : clock();
     JOURNAL_BATCH += 1;
     let results;
+    let expiry = null;
     try {
-      results = ordered.map((record) => put(kind, record, putOpts));
+      // 双时态失效只对 claim 生效（link 侧同类规则由 P1-2 独立落地，本 room 不越界）。
+      const plan = kind === 'claims' && ordered.length > 0
+        ? planClaimExpiry(ordered, at)
+        : { incoming: ordered, alsoWrite: [], expired: { count: 0, ids: [], written: 0 } };
+      results = plan.incoming.map((record) => put(kind, record, putOpts));
+      const appended = plan.alsoWrite.map((record) => put(kind, record, putOpts));
+      if (plan.expired.count > 0 || appended.length > 0) {
+        expiry = { count: plan.expired.count, ids: plan.expired.ids, written: appended.filter((r) => r.changed).length };
+      }
     } finally {
       JOURNAL_BATCH -= 1;
       flushJournal(); // T393：批次末统一落盘（一次 fsync）
     }
-    return {
+    const out = {
       kind,
       total: results.length,
       written: results.filter((r) => r.changed).length,
       unchanged: results.filter((r) => !r.changed).length,
       results,
     };
+    // 只增字段：没发生双时态失效的批次返回值与旧版逐键相同（不凭空多出 expired 键）
+    if (expiry) out.expired = expiry;
+    return out;
   }
 
   function get(kind, id) {

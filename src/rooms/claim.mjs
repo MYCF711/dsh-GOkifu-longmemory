@@ -40,7 +40,9 @@
 
 //     counters:{support, counter, injections:0, lastInjectedAt:null},
 
-//     supersedes:null, level? }
+//     supersedes:null, level?,
+
+//     invalidAt?, expiredAt? }   // T-15 双时态失效：**可选**，只在被判失效后出现（见 applyTemporalInvalidation）
 
 // 三类机械来源：
 
@@ -1288,6 +1290,174 @@ export function promoteClaim({ episodes = [], signals = null, now = null, option
 
 
 
+/* ── T-15 / P1-1：双时态失效（Graphiti `_apply_temporal_invalidation` 的本仓同构） ──
+ *
+ * 上游依据（代码级）：`graphiti_core/utils/maintenance/edge_operations.py#_apply_temporal_invalidation`
+ * —— 新事实与旧事实**互斥**时，旧边 `invalid_at = 新事实.valid_at`（世界时间的失效**起点**）、
+ *   `expired_at = now()`（做判定的**时刻**），**打区间不删行**；检索侧默认不排除已失效边。
+ *
+ * 本仓同构，判据全机械（不做"意思相反"这类语义判断）：
+ *   ① 主体+属性键 `temporalSubjectOf(claim)` = `<scopeKey>\0<validity.type>\0<主体>`；
+ *      只对**能机械取到主体**的两类 validity 成立：
+ *        · `version`：主体 = 包名（`pkg@1.2.3` / `@scope/pkg@1.2.3` 里 `@` 之前那段）；
+ *          裸版本（`version=1.2.3`，没写包名）没有主体 ⇒ 不判（不凭空认定"同一个东西"）。
+ *        · `file`   ：主体 = 归一后的路径，属性 = 存在性，取值 ∈ {missing, present}；
+ *          没有显式 `expect` 的 file 事实语义不明（这份证据既没说"在"也没说"不在"）⇒ 不判。
+ *   ② 互斥取值 `temporalValueOf(claim)`：version → 版本串；file → `expect`。
+ *   ③ 判定：**同键、取值不同、`occurredAt` 严格更晚** ⇒ 旧值失效：
+ *        `invalidAt = 比它更晚且取值不同的最早那条的 occurredAt`（第一根压倒它的新证据）
+ *        `expiredAt = 判定时刻`（调用方传入的 now；**已判定过的不搬家** = 首次判定为准）
+ *   ④ 同值重放 ⇒ **不置位**（幂等：同一件事实再被记录一次不是"新证据"）；
+ *      同刻（`occurredAt` 相等）取值不同 ⇒ **不判**（分不出先后就不编先后）。
+ *   ⑤ `supersedes` 链同样生效：`B.supersedes === A.id` 且 `B.occurredAt > A.occurredAt` ⇒ A 失效。
+ *   ⑥ 跨作用域不互相失效（方案 §4.10）：键里带 `scopeKey`，`w:a` 的版本不会杀掉 `w:b` 的版本。
+ *   ⑦ 无时不入：`occurredAt` 不是有限数的 claim 不参与判定（缺时间 = 假记忆）。
+ *
+ * 只增不改（AGENTS §2.3）：`invalidAt/expiredAt` 是**追加的时间区间标注**，
+ * `text` / `support` / `counter` / `state` **一字不改**，旧行照常可读、可查、可注入
+ * （读侧遮蔽判据仍是 `state === 'invalidated'`，与这两个字段无关）。
+ *
+ * 纯函数：不改入参（判定结果落在浅拷贝上）；同一 (claims, now) 两次同结果。
+ */
+
+/** 取值必须是"缺失/存在"这种二值才可能互斥；没写 `expect` ⇒ 语义不明 ⇒ 不判。 */
+export const TEMPORAL_FILE_EXPECTS = Object.freeze(['missing', 'present']);
+
+const VERSION_LITERAL_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.]+)?$/;
+
+function validityOf(claim) {
+  const v = claim?.validity;
+  return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
+}
+
+/**
+ * 「主体 + 属性」键：同键的两条记录说的是**同一件事**，才谈得上互斥。
+ * @returns {string|null} null = 这条 claim 的 validity 取不出机械主体（不参与自动失效）
+ */
+export function temporalSubjectOf(claim) {
+  const validity = validityOf(claim);
+  if (!validity) return null;
+  const scopeKey = typeof claim?.scopeKey === 'string' && claim.scopeKey !== '' ? claim.scopeKey : '';
+  if (scopeKey === '') return null;
+  const type = String(validity.type ?? '');
+  if (type === 'version') {
+    const raw = typeof validity.value === 'string' ? validity.value.trim() : '';
+    const at = raw.lastIndexOf('@');
+    if (at <= 0) return null;                       // 没有包名 ⇒ 没有主体
+    const name = raw.slice(0, at);
+    if (!VERSION_LITERAL_RE.test(raw.slice(at + 1))) return null;
+    return `${scopeKey}\u0000version\u0000${name}`;
+  }
+  if (type === 'file') {
+    const value = typeof validity.value === 'string' ? validity.value.trim() : '';
+    if (value === '') return null;
+    if (!TEMPORAL_FILE_EXPECTS.includes(validity.expect)) return null;
+    return `${scopeKey}\u0000file\u0000${value}`;
+  }
+  return null;
+}
+
+/**
+ * 互斥取值：同键下取值不同 = 互斥（版本 1.0.0 vs 1.2.0；路径 missing vs present）。
+ * @returns {string|null}
+ */
+export function temporalValueOf(claim) {
+  const validity = validityOf(claim);
+  if (!validity) return null;
+  if (temporalSubjectOf(claim) === null) return null;
+  const type = String(validity.type ?? '');
+  if (type === 'version') {
+    const raw = String(validity.value ?? '').trim();
+    return raw.slice(raw.lastIndexOf('@') + 1);
+  }
+  if (type === 'file') return String(validity.expect);
+  return null;
+}
+
+/**
+ * 机械失效：给被更新的旧值打上 `invalidAt` / `expiredAt`（只增不改，不删行）。
+ *
+ * @param {{claims?: object[], now?: number|null}} [input]
+ *   `now` = 判定时刻（epoch ms）。**必须显式给**：缺省不判定（不拿 Date.now() 冒充）。
+ * @returns {{claims: object[], expired: Array<{id:string, invalidAt:number, expiredAt:number, changed:boolean}>,
+ *            stats: {considered:number, groups:number, expired:number, skippedNoTime:number, skippedNoClock:number}}}
+ */
+export function applyTemporalInvalidation({ claims = [], now = null } = {}) {
+  const list = (Array.isArray(claims) ? claims : [])
+    .filter((c) => c && typeof c === 'object' && typeof c.id === 'string' && c.id !== '');
+  const judgedAt = Number.isFinite(now) ? now : null;
+  const stats = { considered: 0, groups: 0, expired: 0, skippedNoTime: 0, skippedNoClock: 0 };
+
+  // 1) 分组：只有"能取出主体 + 取值 + 事件时间"的条目才参与
+  const groups = new Map();
+  for (const claim of list) {
+    const key = temporalSubjectOf(claim);
+    if (key === null) continue;
+    const value = temporalValueOf(claim);
+    if (value === null) continue;
+    stats.considered += 1;
+    if (!Number.isFinite(claim.occurredAt)) { stats.skippedNoTime += 1; continue; }
+    const members = groups.get(key) ?? [];
+    members.push({ claim, value, at: claim.occurredAt });
+    groups.set(key, members);
+  }
+  stats.groups = groups.size;
+
+  // 2) 失效起点：**最早**那根"更晚且取值不同"的证据（多条新证据并存时取最早 = 第一根压倒它的）
+  const invalidAtById = new Map();
+  const note = (id, at) => {
+    const prev = invalidAtById.get(id);
+    if (prev === undefined || at < prev) invalidAtById.set(id, at);
+  };
+  for (const members of groups.values()) {
+    if (members.length < 2) continue;
+    for (const a of members) {
+      let first = null;
+      for (const b of members) {
+        if (b === a) continue;
+        if (b.value === a.value) continue;   // 同值 ⇒ 不是新证据（幂等）
+        if (!(b.at > a.at)) continue;        // 同刻分不出先后 ⇒ 不判
+        if (first === null || b.at < first) first = b.at;
+      }
+      if (first !== null) note(a.claim.id, first);
+    }
+  }
+
+  // 3) supersedes 链：显式声明的覆盖关系同样按世界时间打区间
+  const byId = new Map(list.map((c) => [c.id, c]));
+  for (const claim of list) {
+    const targetId = typeof claim.supersedes === 'string' ? claim.supersedes : '';
+    if (targetId === '') continue;
+    const target = byId.get(targetId);
+    if (!target) continue;
+    if (!Number.isFinite(claim.occurredAt) || !Number.isFinite(target.occurredAt)) continue;
+    if (!(claim.occurredAt > target.occurredAt)) continue;
+    note(target.id, claim.occurredAt);
+  }
+
+  // 4) 落字段（浅拷贝；只增不改）
+  const expired = [];
+  const out = list.map((claim) => {
+    const computed = invalidAtById.get(claim.id);
+    if (computed === undefined) return claim;
+    stats.expired += 1;
+    if (judgedAt === null) { stats.skippedNoClock += 1; return claim; }
+    const prevInvalid = Number.isFinite(claim.invalidAt) ? claim.invalidAt : null;
+    const prevExpired = Number.isFinite(claim.expiredAt) ? claim.expiredAt : null;
+    // invalidAt 随证据累积可前移（取更早）；expiredAt = 首次判定时刻，不再搬家（重放不改历史判定）
+    const invalidAt = prevInvalid === null ? computed : Math.min(prevInvalid, computed);
+    const expiredAt = prevExpired === null ? judgedAt : prevExpired;
+    if (claim.invalidAt === invalidAt && claim.expiredAt === expiredAt) {
+      expired.push({ id: claim.id, invalidAt, expiredAt, changed: false });
+      return claim;
+    }
+    expired.push({ id: claim.id, invalidAt, expiredAt, changed: true });
+    return { ...claim, invalidAt, expiredAt };
+  });
+
+  return { claims: out, expired, stats };
+}
+
 /**
 
  * N10（2026-11-02）：把「人纠错」（L4）机械地回填到 claim。
@@ -1419,5 +1589,5 @@ export function ensureClassClaims({ claims = [], minSupport = 2, maxQuote = 200 
   return { claims, added };
 }
 
-export default { promoteClaim, applyAdjudications, ensureClassClaims, errorKeyOf, errorLineOf, isGenericErrorText, extractPaths, extractVersionLiterals, isIndependentEpisode, hasIndependentPair, DEFAULT_CLAIM_OPTIONS };
+export default { promoteClaim, applyAdjudications, ensureClassClaims, applyTemporalInvalidation, temporalSubjectOf, temporalValueOf, errorKeyOf, errorLineOf, isGenericErrorText, extractPaths, extractVersionLiterals, isIndependentEpisode, hasIndependentPair, DEFAULT_CLAIM_OPTIONS };
 
