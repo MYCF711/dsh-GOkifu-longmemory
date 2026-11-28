@@ -14,6 +14,17 @@
 //
 // 「通用主题不建边」：df === N 的主题每局都有（如 tool:bash），它不提供判别信息，
 // 因此只保留在 mention 里，不参与棋谱↔棋谱建边（否则 N 局两两全连，图退化成一张全连图）。
+//
+// P1-2（2026-11-28）：**生成期从「两两全量配对」改成「端点对限定」**。
+// 上游依据（代码级）：Graphiti `edge_operations.py#_pair_search_filter` / `find_exact_duplicate_edge`
+// —— 边的候选检索只在**同一对端点**内进行，搜索空间不随全图增长；这也是它敢做在线增量的根因[外]。
+// 本仓旧实现把每一对 (A,B) 都过一遍判据；判据本身（硬/软主题是否共享）只与本对端点有关，所以
+// 可以先把「可能产出边」的局对算出来，再只对这些对跑判据：
+//   · 硬边候选 = 共享 ≥1 个**可建边硬主题**（非 error、判别性通过）的局对；
+//   · 软边候选 = 共享 ≥2 个**可建边软主题**的局对。
+// 两条之外的对，判据必然一个都不命中 ⇒ 边集合与全量配对**逐条相同**（test/link-pairs.test.mjs 钉住）。
+// 稠密语料下候选集合可能反而比全量更大（每个主题都是高 df），此时退回全量遍历：两条路结果等价，
+// 取的只是更省的那条（`options.pairStrategy: 'full'` 可显式走旧口径，用于对照/回滚）。
 
 import { HARD_KINDS, SOFT_KINDS, isGenericErrorKey } from './topic.mjs';
 // task-9 / P0-4：每局边数上限的唯一权威值在 `./limits.mjs`（上游对应：Graphiti 无存量级边上限，
@@ -34,6 +45,9 @@ export const DEFAULT_LINK_OPTIONS = Object.freeze({
   // 这只是**截断候选**，不改任何判据；被截掉的邻居仍可由 `holdersByTopic`（walk cache 里已有）按需展开。
   // 值来自 `./limits.mjs` 的 MAX_LINKS_PER_EPISODE（单一来源，不在本文件写第二份）。
   maxLinksPerEpisode: MAX_LINKS_PER_EPISODE,
+  // P1-2：生成期候选范围。'scoped' = 只枚举可能产出边的端点对（默认）；
+  // 'full' = 旧的全量两两配对（对照/回滚用，输出与 'scoped' 逐条等价）。
+  pairStrategy: 'scoped',
 });
 
 function clamp(x, lo, hi) {
@@ -144,6 +158,63 @@ export function capLinksPerEpisode(links, k) {
   return kept;
 }
 
+/**
+ * P1-2「端点对限定」：只枚举**可能产出棋谱↔棋谱边**的局对，替代两两全量遍历。
+ *
+ * 候选判据（与建边判据同源，只是提前到枚举阶段）：
+ *   · 硬：共享 ≥1 个可建边硬主题（判别性通过、且不是 error）⇒ 这一对必是候选；
+ *   · 软：共享 ≥2 个可建边软主题 ⇒ 这一对是候选（逐主题累加交集计数，不展开第二次交集）。
+ * 两条都不满足的对，第 3 步的判据一个也不会命中 ⇒ 不枚举它们不改变边集合。
+ *
+ * 成本闸：候选的登记代价 = Σ C(df,2)（硬主题 + 软主题）。若它已不低于「全量两两」的 C(N,2)，
+ * 说明语料很稠密，退回全量遍历反而更省 —— 两条路输出等价，这里只选便宜的那条。
+ *
+ * @param {Map<string,{hard:Array,soft:Array}>} pairView 每局的可建边主题（只与本局有关）
+ * @param {number} pairSpace 全量两两对数 C(N,2)
+ * @param {string[]} dupIds 同一个 id 出现多次的棋谱（旧口径会产出一条自连边，这里保留同等行为）
+ * @returns {string[]|null} 升序的 `a\u0000b` 键（a ≤ b）；null ⇒ 调用方走全量遍历
+ */
+function endpointPairKeys(pairView, pairSpace, dupIds = []) {
+  const hardHolders = new Map(); // topicId -> [episodeId…]
+  const softHolders = new Map();
+  for (const [epId, view] of pairView) {
+    for (const t of view.hard) {
+      const arr = hardHolders.get(t.id);
+      if (arr) arr.push(epId); else hardHolders.set(t.id, [epId]);
+    }
+    for (const t of view.soft) {
+      const arr = softHolders.get(t.id);
+      if (arr) arr.push(epId); else softHolders.set(t.id, [epId]);
+    }
+  }
+  const c2 = (m) => (m * (m - 1)) / 2;
+  let work = 0;
+  for (const h of hardHolders.values()) work += c2(h.length);
+  for (const h of softHolders.values()) work += c2(h.length);
+  if (work > pairSpace) return null;
+
+  const keyOf = (a, b) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`);
+  const pairs = new Set();
+  for (const h of hardHolders.values()) {
+    for (let i = 0; i < h.length; i += 1) {
+      for (let j = i + 1; j < h.length; j += 1) pairs.add(keyOf(h[i], h[j]));
+    }
+  }
+  const softShared = new Map(); // pairKey -> 共享的可建边软主题数
+  for (const h of softHolders.values()) {
+    for (let i = 0; i < h.length; i += 1) {
+      for (let j = i + 1; j < h.length; j += 1) {
+        const k = keyOf(h[i], h[j]);
+        softShared.set(k, (softShared.get(k) ?? 0) + 1);
+      }
+    }
+  }
+  for (const [k, n] of softShared) if (n >= 2) pairs.add(k);
+  for (const id of dupIds) pairs.add(`${id}\u0000${id}`); // 同 id 重复 ⇒ 旧口径的一条自连边
+  // `\u0000` 小于任何可见字符 ⇒ 键序等价于 (a, b) 字典序，与全量循环的 (i<j) 顺序一致。
+  return [...pairs].sort();
+}
+
 export function buildLinks({ episodes = [], topics = null, options = {} } = {}) {
   const opts = { ...DEFAULT_LINK_OPTIONS, ...options };
   const eps = (Array.isArray(episodes) ? episodes : []).filter((e) => e && e.id);
@@ -220,62 +291,95 @@ export function buildLinks({ episodes = [], topics = null, options = {} } = {}) 
     links.push(link);
   };
 
-  const episodeOrder = [...eps].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  for (let i = 0; i < episodeOrder.length; i += 1) {
-    for (let j = i + 1; j < episodeOrder.length; j += 1) {
-      const ea = episodeOrder[i];
-      const eb = episodeOrder[j];
-      const va = views.get(ea.id);
-      const vb = views.get(eb.id);
+  // 每局的可建边主题（**只看这一局**，与对端无关）：
+  //   hard = 判别性通过、且不是 error 的硬主题（error 有专属边，不参与 shared-topic）
+  //   soft = 判别性通过的软主题
+  // 判据里没有「对端」这一项 ⇒ 一次性算好；旧实现是每对端点都重算一遍（O(N²·主题数)）。
+  const pairView = new Map();
+  for (const [epId, v] of views) {
+    const hard = [];
+    const soft = [];
+    for (const view of v.occById.values()) {
+      const df = v.df(view.id);
+      if (HARD_KINDS.has(view.kind) && view.kind !== 'error' && hardLinkEligible(df, N)) hard.push(view);
+      if (SOFT_KINDS.has(view.kind) && linkEligible(df, N)) soft.push(view);
+    }
+    pairView.set(epId, { hard, soft });
+  }
 
-      const hardA = [];
-      const softA = [];
-      for (const view of va.occById.values()) {
-        const df = va.df(view.id);
-        // error 有专属边（same-error / same-file），不参与 shared-topic
-        if (HARD_KINDS.has(view.kind) && view.kind !== 'error' && hardLinkEligible(df, N)) hardA.push(view);
-        if (SOFT_KINDS.has(view.kind) && linkEligible(df, N)) softA.push(view);
-      }
-      const sharedHard = hardA.filter((t) => vb.occById.has(t.id));
-      if (sharedHard.length) {
-        sharedHard.sort((x, y) => (va.idfNorm(y.id) - va.idfNorm(x.id)) || (x.key < y.key ? -1 : 1));
-        const primaryA = firstOccurrence(sharedHard[0]);
-        const primaryB = firstOccurrence(vb.occById.get(sharedHard[0].id));
-        const at = Math.min(
-          Number.isFinite(primaryA?.occurredAt) ? primaryA.occurredAt : Infinity,
-          Number.isFinite(primaryB?.occurredAt) ? primaryB.occurredAt : Infinity,
-        );
-        push({
-          a: { episode: ea.id },
-          b: { episode: eb.id },
-          kind: 'shared-topic',
-          topics: sharedHard.map((t) => t.id),
-          why: sharedHard.map((t) => t.key).join(', '),
-          weight: 1,
-          occurredAt: Number.isFinite(at) ? at : (ea.startedAt ?? null),
-        });
-        continue; // 硬边命中即定边；软边只用于无硬边时的候选
-      }
+  /** 单对端点定边（判据与重构前逐条一致，只是入参改成预计算的主题视图）。 */
+  const linkPair = (aId, bId) => {
+    const va = views.get(aId);
+    const vb = views.get(bId);
+    const { hard: hardA, soft: softA } = pairView.get(aId);
 
-      const sharedSoft = softA.filter((t) => vb.occById.has(t.id));
-      if (sharedSoft.length >= 2) {
-        sharedSoft.sort((x, y) => (va.idfNorm(y.id) - va.idfNorm(x.id)) || (x.key < y.key ? -1 : 1));
-        const mean = sharedSoft.reduce((s, t) => s + va.idfNorm(t.id), 0) / sharedSoft.length;
-        const primaryA = firstOccurrence(sharedSoft[0]);
-        const primaryB = firstOccurrence(vb.occById.get(sharedSoft[0].id));
-        const at = Math.min(
-          Number.isFinite(primaryA?.occurredAt) ? primaryA.occurredAt : Infinity,
-          Number.isFinite(primaryB?.occurredAt) ? primaryB.occurredAt : Infinity,
-        );
-        push({
-          a: { episode: ea.id },
-          b: { episode: eb.id },
-          kind: 'shared-topic',
-          topics: sharedSoft.map((t) => t.id),
-          why: sharedSoft.map((t) => t.key).join(', '),
-          weight: round4(0.5 * mean),
-          occurredAt: Number.isFinite(at) ? at : (ea.startedAt ?? null),
-        });
+    const sharedHard = hardA.filter((t) => vb.occById.has(t.id));
+    if (sharedHard.length) {
+      sharedHard.sort((x, y) => (va.idfNorm(y.id) - va.idfNorm(x.id)) || (x.key < y.key ? -1 : 1));
+      const primaryA = firstOccurrence(sharedHard[0]);
+      const primaryB = firstOccurrence(vb.occById.get(sharedHard[0].id));
+      const at = Math.min(
+        Number.isFinite(primaryA?.occurredAt) ? primaryA.occurredAt : Infinity,
+        Number.isFinite(primaryB?.occurredAt) ? primaryB.occurredAt : Infinity,
+      );
+      push({
+        a: { episode: aId },
+        b: { episode: bId },
+        kind: 'shared-topic',
+        topics: sharedHard.map((t) => t.id),
+        why: sharedHard.map((t) => t.key).join(', '),
+        weight: 1,
+        occurredAt: Number.isFinite(at) ? at : (va.episode.startedAt ?? null),
+      });
+      return; // 硬边命中即定边；软边只用于无硬边时的候选
+    }
+
+    const sharedSoft = softA.filter((t) => vb.occById.has(t.id));
+    if (sharedSoft.length >= 2) {
+      sharedSoft.sort((x, y) => (va.idfNorm(y.id) - va.idfNorm(x.id)) || (x.key < y.key ? -1 : 1));
+      const mean = sharedSoft.reduce((s, t) => s + va.idfNorm(t.id), 0) / sharedSoft.length;
+      const primaryA = firstOccurrence(sharedSoft[0]);
+      const primaryB = firstOccurrence(vb.occById.get(sharedSoft[0].id));
+      const at = Math.min(
+        Number.isFinite(primaryA?.occurredAt) ? primaryA.occurredAt : Infinity,
+        Number.isFinite(primaryB?.occurredAt) ? primaryB.occurredAt : Infinity,
+      );
+      push({
+        a: { episode: aId },
+        b: { episode: bId },
+        kind: 'shared-topic',
+        topics: sharedSoft.map((t) => t.id),
+        why: sharedSoft.map((t) => t.key).join(', '),
+        weight: round4(0.5 * mean),
+        occurredAt: Number.isFinite(at) ? at : (va.episode.startedAt ?? null),
+      });
+    }
+  };
+
+  // 候选范围：默认「端点对限定」（P1-2）；'full' 走旧的全量两两（对照/回滚）。
+  const pairSpace = N > 1 ? (N * (N - 1)) / 2 : 0; // N=0 时别算出 -0（Object.is 上与 0 不等）
+  const requestedStrategy = opts.pairStrategy === 'full' ? 'full' : 'scoped';
+  let pairsExamined = 0;
+  let candidatePairs = null;
+  if (requestedStrategy === 'scoped') {
+    const idCount = new Map();
+    for (const ep of eps) idCount.set(ep.id, (idCount.get(ep.id) ?? 0) + 1);
+    const dupIds = [...idCount].filter(([, c]) => c > 1).map(([id]) => id);
+    candidatePairs = endpointPairKeys(pairView, pairSpace, dupIds);
+  }
+  if (candidatePairs) {
+    for (const key of candidatePairs) {
+      const cut = key.indexOf('\u0000');
+      pairsExamined += 1;
+      linkPair(key.slice(0, cut), key.slice(cut + 1));
+    }
+  } else {
+    // 全量两两：对照/回滚路径，以及语料过稠时（候选登记比全扫更贵）的回退。
+    const episodeOrder = [...eps].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    for (let i = 0; i < episodeOrder.length; i += 1) {
+      for (let j = i + 1; j < episodeOrder.length; j += 1) {
+        pairsExamined += 1;
+        linkPair(episodeOrder[i].id, episodeOrder[j].id);
       }
     }
   }
@@ -394,7 +498,22 @@ export function buildLinks({ episodes = [], topics = null, options = {} } = {}) 
   const finalStats = capped.length === links.length
     ? stats
     : { ...stats, linksBeforeCap: links.length, linksAfterCap: capped.length };
-  return { mentions, links: capped, stats: finalStats };
+  const out = { mentions, links: capped, stats: finalStats };
+  // 诊断（`options.diagnostics: true` 才返回，默认输出形状不变）：
+  //   pairSpace     全量两两的对数 C(N,2)
+  //   pairsExamined 实际跑过判据的端点数（端点对限定下 = candidatePairs.length）
+  //   candidatePairs 端点对限定算出的候选对数（走全量时为 null）
+  // 它是「生成期候选范围」的唯一可观测量：删掉端点对过滤 ⇒ pairsExamined 会等于 pairSpace。
+  if (opts.diagnostics) {
+    out.scan = {
+      requested: requestedStrategy,
+      effective: candidatePairs ? 'scoped' : 'full',
+      pairSpace,
+      candidatePairs: candidatePairs ? candidatePairs.length : null,
+      pairsExamined,
+    };
+  }
+  return out;
 }
 
 export default { buildLinks, idfNorm, LINK_KIND_ORDER };
