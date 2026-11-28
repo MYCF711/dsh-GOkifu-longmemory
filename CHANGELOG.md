@@ -17,6 +17,44 @@
   并在 `scripts/release.mjs` 发版前强制运行 —— 此前 `check` / `ledger-check` / CI 全都只看工作树，看不见 tag。
 - **依据**：0.118.0 发版前的手工核对（`node scripts/tag-audit.mjs` 当时输出 1 条硬红，即本条）。
 
+## 0.8.165（2026-11-28）
+
+### P0/P1 四项落地：双时态失效 + links 端点对限定 + 内容身份去重 + A7 缓存指标
+
+**版本说明**：改 `src/**` 行为（新增字段/新指标/新生成路径）⇒ **patch**（`v0.9.0` 被旧线占用）。
+
+**P1-1 · claim 双时态失效**（吸收 Graphiti `_apply_temporal_invalidation`）
+claim 新增 `invalidAt`（= 压垮它的新证据 `occurredAt`）/ `expiredAt`（= 判定时刻），可选字段，**旧行不删不改仍可查**。
+机械判据 F1–F10 写进 `docs/数据契约.md §9.1`：同 `(scopeKey, validity.type, 主体)` + 取值不同 + `occurredAt` 严格更晚 ⇒ 旧值打区间；
+只对能机械取到主体的 `version`（包名）与 `file`（归一化路径 + 显式 `expect`）生效，其余一律不判。新增 12 条测试；两档墓碑（删判据 ⇒ 7/12 红；只删写入接线 ⇒ 3/12 红）。
+
+**P1-2 · links 生成改端点对限定**（吸收 Graphiti `_pair_search_filter`）
+
+| 指标 | 前 | 后 |
+|---|---|---|
+| 枚举局对 | 61,075 | **11,061（−82%）** |
+| `buildLinks` 单测 | 396ms | **208ms（1.9×）** |
+| archive derive 段 | 888/887ms | **648/464ms** |
+| links 边数（等价性） | 38,985 | **38,985（逐条相同，差异 0）** |
+
+等价性用「改动前实现逐字副本」对拍 + 测试内独立朴素 oracle；`pairStrategy` 默认 `scoped`，`full` 可回滚对照；稠密语料自动回退全量。
+
+**P0-2 · 记忆侧去重键改内容身份**（Mem0 的 md5+top_k=10 被 issue #7123 证明挡不住复述）
+键 = `scopeKey␟episodeId␟seq␟claimId`，落 `<root>/claim-evidence.json`；只存渲染行 sha256，不存正文。
+整卡全是已投证据 ⇒ `action:skip (restated-evidence)`；有任何新证据 ⇒ 照常投（fail-open）。判重窗口**只来自持久账本，不吃本轮 top-k**。
+跨重启三路证明（新 apply 实例 / 新 store 实例 / 独立 node 进程只读 sidecar）；开关关 ⇒ 5 红 ⇒ tombstone 成立。新增 14 条测试。
+
+**P0-5 · A7.cacheBreak 缓存成本指标**（Anthropic 前缀累积哈希规则）
+每轮记录注入前后 prefixHash（对 `role+正文` 的稳定投影，刻意不带 id/时间戳）与注入字符数，落 `<root>/cache-breaks.jsonl`；
+按「上一轮条数在当前序列重算前缀」判 `tail-append` / `prefix-changed` / `prefix-shrunk`。
+`metrics-guard` 约束行新增 `A7.cacheBreak=breaks/rounds（只统计·不判红）`，无观测打 `n/a`，**永不进 fails**。新增 17 条测试；两道墓碑（改坏 `prefixHashOf` ⇒ 12/5；删埋点 ⇒ 13/4）。
+
+**文档**：`docs/数据契约.md` 清掉早已不存在的 `fromJSON`，补 `schemaVersion` 契约与三个注入侧账本的口径。
+
+**判据**：`gate --fast` 2/2（tests 1401 → **1432**，fail 恒 0）· A2b **46.6%/79.7%**、A6 **100%**、A1=0、A5=0 全程逐位不变 · `archive.test`+`archive-stale.test` 19/19 · `dump-contracts --check` 3/3。
+
+**未验**：A7 真实读数需宿主重启后才有（当前 n/a）；`A1.redundant` 与 `A1.opposite` 仍「未通电」（n=0）；行粒度去重（混合卡里旧行随卡复述）需改 `inject-card`，未做。
+
 ## 0.8.164（2026-11-26）
 
 ### 繁复收敛重构（A/E/F 三期）：全绿一条命令 + 归档 63s → 17s + 常量单一来源
