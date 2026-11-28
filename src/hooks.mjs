@@ -6,7 +6,9 @@
 // 把"事件绑在哪、每步做什么"收在一个文件里，才能逐条对照 docs/记忆的职责边界.md 检查。
 //
 // 边界：
-//   · **不做任何写盘**（观测留痕由组合根注入的 `telemetry` 负责）—— 唯一的输出就是返回的 decision；
+//   · **不直接写盘**：观测留痕由组合根注入的 `telemetry` 负责；钩子这里唯一的输出就是返回的 decision。
+//     （唯一例外是 A7 缓存读数：它委托 `cache.mjs` 追加 `cache-breaks.jsonl`，与 `trials.jsonl` /
+//      `live-stats.jsonl` 同属观测留痕，失败只 warn、绝不影响本轮注入 —— 见 `recordCacheBreak`。）
 //   · 任何异常都收敛成"原样返回下游 decision"（这个文件里没有"失败"分支，只有"少说一句"）；
 //   · 依赖方向：hooks → lifecycle → cache（无环；hooks 不 import 组合根）。
 import { createHash, randomUUID } from 'node:crypto';
@@ -31,7 +33,7 @@ import {
 import { classifyErrorClass } from './rooms/claim.mjs';
 import { errorClassKeyOf } from './rooms/topic.mjs';
 import { DIGEST_GATE_CODES_LIMIT } from './rooms/limits.mjs';
-import { lastResolvedScope, openReadStore, probeCardValidity, rememberLastScope, resolveSessionScope, walkCacheFor } from './cache.mjs';
+import { appendCacheBreak, lastCacheBreakRow, lastResolvedScope, openReadStore, planCacheBreakRow, probeCardValidity, rememberLastScope, resolveSessionScope, walkCacheFor } from './cache.mjs';
 import { clockOf, resolveDeps, resolveShadowDir, resolveStoreRoot, scheduleAutoBuild, warn } from './lifecycle.mjs';
 
 /** 插件名（宿主用来标识这个插件）。 */
@@ -63,6 +65,28 @@ export function messageText(message) {
   if (content && typeof content === 'object' && typeof content.text === 'string') return content.text.trim();
   if (typeof message.text === 'string') return message.text.trim();
   return '';
+}
+
+/**
+ * A7（P0-5）：一条消息的**稳定投影** —— 缓存前缀判据的单位。
+ *
+ * 只取 `role + 文本`，**不带 `id` / 时间戳**：宿主每步都可能重建消息对象
+ * （`createUserMessage` 内部就是 `randomUUID()`），把 id 算进 hash 会让"内容一个字都没变"
+ * 也判成变化 —— 那等于把判据变成噪声（A7 恒为 100%）。这是本仓从 T49 起一贯的口径：
+ * 判"同一段内容"看正文，不看对象身份。
+ *
+ * 已知边界（诚实写清，不假装全覆盖）：非文本块（`tool_use` 的参数体 / `tool_result` 的结构）
+ * 不进投影 —— 它们变化不会被记成 break。注入的卡本身是一条**文本消息**，所以
+ * "注入有没有改掉前缀"这件事被完整覆盖。
+ */
+export function cacheTokenOf(message) {
+  const role = message && typeof message === 'object' && typeof message.role === 'string' ? message.role : '';
+  return `${role}\u001f${messageText(message)}`;
+}
+
+/** 整段消息序列的稳定投影（A7 用；`count` 取前缀由 `prefixHashOf` 负责）。 */
+export function cacheTokensOf(messages) {
+  return (Array.isArray(messages) ? messages : []).map(cacheTokenOf);
 }
 
 /** 本轮信号：`payload.messages` 里**最后一条有文本的 user 消息**。 */
@@ -710,6 +734,51 @@ export function createPreStepHandler({ ctx, config, lifecycle, state, telemetry 
     }
   };
 
+  /**
+   * A7（P0-5）· **缓存成本读数**：每轮记一条"注入前 / 注入后"的稳定前缀 hash + 注入字符数。
+   *
+   * 上游依据（Anthropic prompt caching 规则，见 `evidence/research/mem-vendors.md` §1）：
+   * 缓存是**前缀累积哈希**（`tools → system → messages`），改早层 ⇒ 其后全废；
+   * **只有尾部追加能全命中**。所以判据只有一句：这一轮有没有把上一轮已经发出去的前缀改掉
+   * （`planCacheBreakRow` 用「上一轮 `msgsAfter` 条消息的 hash 是否等于上一轮 `afterHash`」判）。
+   *
+   * 判据的权威来源是 **sidecar 账本**（跨 apply / 跨重启成立），进程内 Map 只是快路 ——
+   * 与 P0-1 的槽位账本、P0-2 的内容身份账本同一条纪律：内存状态只做"本实例已投"的备忘。
+   *
+   * 失败只 warn 一次、**绝不影响本轮注入**（观测留痕坏了不许吞卡）。
+   * 不写盘的情况：没有 storeRoot / 库不存在（`appendCacheBreak` 返回 `absent`）。
+   */
+  const cacheBreakPrev = new Map(); // sid -> 最近一条读数（快路）
+  const cacheBreakNotified = new Set(); // storeRoot -> 已 warn 过一次
+  const recordCacheBreak = ({ sessionId, action, beforeMessages, afterMessages, injectedChars }) => {
+    let root = null;
+    try { root = resolveStoreRoot(config); } catch { root = null; }
+    if (!root) return null;
+    const key = sessionId ?? '(no-id)';
+    let prev = cacheBreakPrev.get(key) ?? null;
+    if (!prev) {
+      try { prev = lastCacheBreakRow({ storeRoot: root, sessionId }) ?? null; } catch { prev = null; }
+    }
+    const { row } = planCacheBreakRow({
+      at: clockOf(config),
+      sessionId,
+      action,
+      beforeTokens: cacheTokensOf(beforeMessages),
+      afterTokens: cacheTokensOf(afterMessages),
+      injectedChars,
+      prev,
+    });
+    const write = appendCacheBreak({ storeRoot: root, row });
+    if (write?.status === 'written' || write?.status === 'rotated' || write?.status === 'absent') {
+      cacheBreakPrev.set(key, row);
+    }
+    if (write?.status === 'failed' && !cacheBreakNotified.has(root)) {
+      cacheBreakNotified.add(root);
+      warn(ctx, `缓存读数写盘失败（继续本轮）：${String(write.error ?? 'unknown')}`);
+    }
+    return row;
+  };
+
   return async (payload, next) => {
     const decision = await next();
     try {
@@ -753,6 +822,18 @@ export function createPreStepHandler({ ctx, config, lifecycle, state, telemetry 
                   telemetry.writeRepeatTelemetry({ config, trigger, card: inner.card, digest: inner.digest, at: Date.now() });
                 } catch (error) {
                   warn(ctx, `D5 遥测写入失败（忽略）：${String(error?.message ?? error)}`);
+                }
+                // A7（P0-5）：D5 补卡也是一次真注入 —— 同样记一条缓存读数，否则"补卡把前缀改掉"看不见。
+                try {
+                  recordCacheBreak({
+                    sessionId,
+                    action: 'inject',
+                    beforeMessages: decision.messages,
+                    afterMessages: inner.decision?.messages,
+                    injectedChars: cardText(inner.card).length,
+                  });
+                } catch (error) {
+                  warn(ctx, `缓存读数记录失败（继续本轮）：${String(error?.message ?? error)}`);
                 }
                 return inner.decision;
               }
@@ -806,6 +887,25 @@ export function createPreStepHandler({ ctx, config, lifecycle, state, telemetry 
       const dedupeScope = sessionId ? (lastResolvedScope(sessionId)?.scope ?? null) : null;
       if (result.action === 'inject' && cardIsRestatedEvidence(dedupeScope, result.card, payload?.messages)) {
         result = { ...result, action: 'skip', reason: 'restated-evidence', decision };
+      }
+      // A7（P0-5）· 缓存成本读数。位置在**所有降级判定之后**：此时 `result` 才是真正要交给宿主的那一份
+      // （含 `already-in-context` / `restated-evidence` 的 skip —— 降级后没注入，字符数记 0，读数仍要留）。
+      // `disabled` 不记：默认配置关注入时账本只会被噪声填满（与上面 liveStats 同一条纪律）。
+      // 早退路径（oncePerSession / 非 enter）不记：那两种情况下我们**没碰过 messages**，
+      // 前缀不可能因我们而变（读数记的是"我们有没有改掉前缀"）。
+      if (!(result.action === 'skip' && result.reason === 'disabled')) {
+        try {
+          const finalMessages = Array.isArray(result?.decision?.messages) ? result.decision.messages : decision.messages;
+          recordCacheBreak({
+            sessionId,
+            action: result.action ?? 'skip',
+            beforeMessages: decision.messages,
+            afterMessages: finalMessages,
+            injectedChars: result.action === 'inject' ? cardText(result.card).length : 0,
+          });
+        } catch (error) {
+          warn(ctx, `缓存读数记录失败（继续本轮）：${String(error?.message ?? error)}`);
+        }
       }
       // enabled=false 时的 "skip disabled" 没有诊断价值，别写（任何库内调用都会带出来一堆噪声）。
       if (config.liveStats === true && !(result.action === 'skip' && result.reason === 'disabled')) {

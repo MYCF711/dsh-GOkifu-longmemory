@@ -33,6 +33,7 @@
 //   A5 越界   = 0
 //   A6 溯源   = 100%
 //   A4 p50    ≤ 50ms
+//   A7 缓存失效次数 / 轮数 —— **只打印，无门槛、不参与 exit code**（task-18 / P0-5）
 //   repeatFailureRate（V1）—— 只打印，无门槛
 
 import { execFile, spawn } from 'node:child_process';
@@ -43,6 +44,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // task-9 / P0-4：六轴门槛的唯一权威表。A4 门槛曾在本文件与 ledger-check 各写一份 50（D7 只改一半，
 // 两个版本连撞两次发版），现在两边都读这里的同一个冻结对象。
 import { LIMITS as SHARED_LIMITS } from '../src/rooms/limits.mjs';
+// task-18 / P0-5：A7 缓存读数的**判据与落盘**都在 `src/cache.mjs`（纯函数 + append-only 账本），
+// 本文件只负责"读出来 + 打印"，不重算哈希、不写账本 —— 门槛与判据只有一份实现。
+import { readCacheBreakStats } from '../src/cache.mjs';
 
 const execFileAsync = promisify(execFile);
 const REPO = fileURLToPath(new URL('..', import.meta.url));
@@ -94,9 +98,11 @@ const GATE_LIMITS = Object.freeze({
  * @param {{n?:number, strict?:number, cover?:number, sampleSource?:string}|null} [a2bOverride]
  *        T242：主判据的**样本来源**由调用方决定。给了 override 就用它（考卷口径），
  *        否则退回 m5 报告里的 injectionRecall（旧口径，只作对照）。
+ * @param {object|null} [cacheBreak]  task-18：A7 缓存读数（`readCacheBreakStats` 的产物）。
+ *        **只进 values / 只打印，绝不进 fails** —— 见函数里 A7 那一段的理由。
  */
 let a4RelativeNote = null;
-export function judge(report, limits = GATE_LIMITS, a2bOverride = null) {
+export function judge(report, limits = GATE_LIMITS, a2bOverride = null, cacheBreak = null) {
   const axes = report?.axes ?? report ?? {};
   const fails = [];
   const a1 = axes.A1?.value;
@@ -194,6 +200,19 @@ export function judge(report, limits = GATE_LIMITS, a2bOverride = null) {
   // 它是"记忆有没有被下游用起来"的证据，不是本仓的验收面（见文件头「指标不可归因」）。
   const repeatFailureRate = Number.isFinite(axes.A2?.value) ? axes.A2.value : null;
 
+  // ── 成本读数：A7.cacheBreak（task-18 / P0-5）—— **只统计，不判红** ────────
+  // 口径：**前缀变化次数 / 轮数**（`rows` = 账本里有效行数；首轮永远记 0 次变化）。
+  // 为什么先不判红（与 docs/优化方案-对标市场记忆系统.md §2 P0-5 的验收一致）：
+  //   ① 阈值要等真实语料攒够轮数才能定 —— 拍一个数就卡红，等于用一把没校准的尺子定生死；
+  //   ② 它衡量的是**成本**而不是**正确性**，把成本塞进 exit code 会让"记忆变贵"与"记忆变错"混成一条红；
+  //   ③ 「指标先有消费者」：先让它出现在每次输出里被人看见，再谈卡不卡。
+  // 因此：**A7 任何取值都不 push 进 fails**，读不到账本也只打 n/a（不是红）。
+  const a7 = cacheBreak && typeof cacheBreak === 'object' ? cacheBreak : null;
+  const a7Rounds = Number.isFinite(a7?.rounds) ? a7.rounds : null;
+  const a7Breaks = Number.isFinite(a7?.breaks) ? a7.breaks : null;
+  // 分母为 0 ⇒ rate 记 null（**0/0 的 0% 不是"没有失效"，是"没有观测"** —— 与 A1.opposite 同一条纪律）
+  const a7Rate = a7Rounds && a7Rounds > 0 && Number.isFinite(a7Breaks) ? a7Breaks / a7Rounds : null;
+
   fails.push(...main, ...constraints);
   return {
     ok: fails.length === 0,
@@ -222,6 +241,13 @@ export function judge(report, limits = GATE_LIMITS, a2bOverride = null) {
       a2bN,
       sampleSource,
       repeatFailureRate,
+      // task-18 / P0-5：A7 缓存成本读数（`rate` = 前缀变化次数 / 轮数；分母 0 ⇒ null，不编造 0%）
+      a7Rounds,
+      a7Breaks,
+      a7CacheBreak: a7Rate,
+      a7InjectedChars: Number.isFinite(a7?.injectedChars) ? a7.injectedChars : null,
+      a7ByReason: a7?.byReason ?? null,
+      a7LastAt: Number.isFinite(a7?.lastAt) ? a7.lastAt : null,
     },
   };
 }
@@ -307,14 +333,43 @@ function relativeA4Verdict(p50) {
   return { ok: true, note: `A4 p50 ${p50.toFixed(2)}ms 高于绝对阈值 ${GATE_LIMITS.a4P50MaxMs}ms，但同语料下对基线 ${base.medianOfMedians}ms 为 ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%（未退化 >20%）` };
 }
 
+/** task-18 / P0-5：A7 账本所在目录的覆盖开关（并行 worktree / 测试用；默认 `<DSH_HOME>/memory-context`）。 */
+export const CACHE_BREAKS_ROOT_ENV = 'KIFU_CACHE_BREAKS_ROOT';
+
+/**
+ * A7 账本目录：默认真库 sidecar（`<DSH_HOME>/memory-context`），可用 `KIFU_CACHE_BREAKS_ROOT` 覆盖。
+ * 为什么不从 m5 报告里拿：账本由**注入侧**（`src/hooks.mjs` → `src/cache.mjs`）写，
+ * m5-report 只做离线统计、不读它 —— 让本文件直接读，读数就是**线上真正写过的那份**，不经二次加工。
+ */
+export function cacheBreakRoot({ env = process.env } = {}) {
+  const override = String(env[CACHE_BREAKS_ROOT_ENV] ?? '').trim();
+  if (override) return path.resolve(override);
+  return path.join(HOME, 'memory-context');
+}
+
+/**
+ * 读 A7 读数（只统计）。**读不到不是红**：账本不存在 / 库还没建 ⇒ rounds=0、rate=null，打印 n/a。
+ * 返回对象直接喂给 `judge(report, limits, a2bOverride, cacheBreak)`。
+ */
+export function collectCacheBreak({ root = null, env = process.env, maxBytes = undefined } = {}) {
+  const dir = root ?? cacheBreakRoot({ env });
+  const stats = readCacheBreakStats({ storeRoot: dir, ...(Number.isFinite(maxBytes) ? { maxBytes } : {}) });
+  return { ...stats, dir };
+}
+
 export function renderSummary(out, verdict) {
   const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
+  // task-18 / P0-5：A7 的打印形态是 **次数/轮数**（不是百分比）—— 一眼能看出"几轮里有几次失效"，
+  // 比"33.3%"更能直接对照账本里的行。没有观测（分母 0 / 读不到账本）⇒ n/a，**不编造 0**。
+  const a7 = Number.isFinite(out.values.a7Rounds) && out.values.a7Rounds > 0
+    ? `${Number.isFinite(out.values.a7Breaks) ? out.values.a7Breaks : 0}/${out.values.a7Rounds}`
+    : 'n/a';
   return [
     `metrics-guard ${verdict.ok ? 'PASS' : 'FAIL'}`,
     `  主判据 · A2b 召回相关度（sampleSource=${out.values.sampleSource}，n=${out.values.a2bN}）：严格=${pct(out.values.a2bStrict)} 覆盖=${pct(out.values.a2bCover)}`,
     // T362：分母不同源、跨口径不可比 —— 这行是给下一个人看的，不许悄悄消失（T369 用测试钉住）
     '    分母来源：holdout 抽样（非全量）· 与 scripts/eval.mjs 的按签名口径**不可比**（详见 evidence/T362-eval-stratification.md）',
-    `  约束条件 · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A4.p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'}`,
+    `  约束条件 · A1=${out.values.a1}${out.values.a1Vacuous ? '（空转：validity 覆盖 0）' : ''} A5=${out.values.a5} A6=${out.values.a6} A4.p50=${Number.isFinite(out.values.p50) ? out.values.p50.toFixed(2) + 'ms' : 'n/a'} · A7.cacheBreak=${a7}（只统计·不判红）`,
     `  A1 三轴 · A1.stale=${pct(out.values.a1)} A1.opposite=${pct(out.values.a1Opposite)}（可判率 ${pct(out.values.a1OppositeDecidability)}，n=${out.values.a1OppositeN ?? 'null'}，${out.values.a1OppositeDecisionGrade ? '已通电·参与 exit code' : '未通电·不参与 exit code（0 次触发 ≠ 无反向记忆）'}）`,
     `    A1.redundant=浪费 ${pct(out.values.a1Redundant)} · 必要重注 ${pct(out.values.a1RedundantNecessary)}（会话级同卡再投；n=${out.values.a1RedundantN ?? 'null'}，${out.values.a1RedundantPowered ? '已通电·参与 exit code（浪费 > 1% 才红）' : '未通电·不参与 exit code（窗口样本不足）'}）`,
     `  下游参考 · repeatFailureRate=${pct(out.values.repeatFailureRate)}（V1 · 不参与 exit code）`,
@@ -396,8 +451,10 @@ if (invokedDirectly) {
     process.exit(2);
   }
   const report = got.report;
-  const verdict = judge(report, limits, holdout ? { n: holdout.n, strict: holdout.strict, cover: holdout.cover, sampleSource: holdout.sampleSource } : null);
-  const out = { at: new Date().toISOString(), root: HOME, limits, ...verdict };
+  // task-18 / P0-5：A7 缓存读数（**只统计不判红**；读不到 ⇒ n/a，绝不影响 exit code）。
+  const cacheBreak = collectCacheBreak();
+  const verdict = judge(report, limits, holdout ? { n: holdout.n, strict: holdout.strict, cover: holdout.cover, sampleSource: holdout.sampleSource } : null, cacheBreak);
+  const out = { at: new Date().toISOString(), root: HOME, limits, cacheBreak: { dir: cacheBreak.dir, rows: cacheBreak.rows, error: cacheBreak.error ?? null }, ...verdict };
   try {
     fs.mkdirSync(path.join(REPO, 'evidence'), { recursive: true });
     fs.writeFileSync(path.join(REPO, 'evidence/metrics-guard.json'), JSON.stringify(out, null, 2) + '\n');
