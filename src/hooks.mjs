@@ -16,7 +16,13 @@ import { hasRelevantClaim, hasReliableHandle } from './rooms/abstain.mjs';
 import { filterHitsByScope, recordInjectionTrials, signalFromText } from './rooms/inject.mjs';
 import {
   INJECT_SLOT_ID,
+  cardEvidenceItems,
+  claimEvidenceEnabled,
+  contextLineHashes,
+  readClaimEvidenceLedger,
+  recordEvidence,
   recordSlot,
+  restatedEvidenceOf,
   slotContentHash,
   slotContentPresent,
   slotIdempotencyEnabled,
@@ -649,6 +655,61 @@ export function createPreStepHandler({ ctx, config, lifecycle, state, telemetry 
     }
   };
 
+  /**
+   * P0-2（记忆侧去重）：这张卡是不是**全是已经投过、且那一行还在本轮上下文里的证据**。
+   *
+   * 与槽位账本的分工：槽位账本判的是**整张卡正文的 hash**（正文一变就重投）；本判据判的是
+   * **每一行证据的来源身份** `(scopeKey, episodeId, seq, claimId)`（持久账本），所以
+   *   · 同一批证据换个渲染（索引行的局数变了 / 行序变了 / 正文措辞变了）⇒ 仍然命中 ⇒ 不重投；
+   *   · 同文本不同来源（另一局的同一句话）⇒ 身份不同 ⇒ 照常投（这正是与"文本哈希"的差别）。
+   *
+   * 判重窗口**只来自持久账本**（不吃本轮 walk 的 top-k），因此跨 apply（`session/end-seed` 后重建）
+   * 与跨重启都成立。账本不可用 ⇒ `false`（fail-open：宁可多投，不许吞卡）。
+   */
+  const cardIsRestatedEvidence = (scopeKey, card, messages) => {
+    if (!scopeKey || !claimEvidenceEnabled()) return false;
+    let root = null;
+    try { root = resolveStoreRoot(config); } catch { root = null; }
+    if (!root) return false;
+    // "还在上下文里"= 我们自己投过的卡消息里还能找到那一行（逐字 hash）。找不到 ⇒ 可能被压缩掉了。
+    const lines = contextLineHashes(injectedCardTexts(messages));
+    if (!lines.size) return false;
+    try {
+      const items = cardEvidenceItems(card, scopeKey);
+      if (!items.length) return false;
+      return restatedEvidenceOf(readClaimEvidenceLedger({ storeRoot: root }), items, lines).restated;
+    } catch (error) {
+      if (!slotLedgerNotified.has(root)) {
+        slotLedgerNotified.add(root);
+        warn(ctx, `内容身份账本不可用（本轮退回进程内去重）：${String(error?.message ?? error)}`);
+      }
+      return false;
+    }
+  };
+
+  /**
+   * 真注入成功后，把这张卡每行的**内容身份 + 渲染行 hash** 记进 sidecar（一次读写）。
+   *
+   * 只记**真注入**：影子模式（`action:'shadow'`）没进上下文，记了会把将来的真注入当成复述吞掉。
+   * 记账失败不影响本轮（卡已经投出去了），只留一次 warn。
+   */
+  const rememberDeliveredEvidence = (scopeKey, card) => {
+    if (!scopeKey || !claimEvidenceEnabled()) return;
+    let root = null;
+    try { root = resolveStoreRoot(config); } catch { root = null; }
+    if (!root) return;
+    try {
+      const items = cardEvidenceItems(card, scopeKey);
+      if (!items.length) return;
+      recordEvidence({ storeRoot: root, items, at: clockOf(config) });
+    } catch (error) {
+      if (!slotLedgerNotified.has(root)) {
+        slotLedgerNotified.add(root);
+        warn(ctx, `内容身份账本记账失败（本轮照常注入）：${String(error?.message ?? error)}`);
+      }
+    }
+  };
+
   return async (payload, next) => {
     const decision = await next();
     try {
@@ -738,6 +799,14 @@ export function createPreStepHandler({ ctx, config, lifecycle, state, telemetry 
         // **`decision` 必须是官方入参那个原对象** —— `result.decision` 已经带上了那张卡，拿它返回等于照样注入。
         result = { ...result, action: 'skip', reason: 'already-in-context', decision };
       }
+      // P0-2：T49 只挡"正文逐字相同"的卡。正文一变（多一行 / 行序变了 / 索引行的局数变了）它就漏，
+      // 卡上**模型已经看过的那些行**会被整张卡复述一遍。这里按**每一行的内容身份**再判一次：
+      // 全卡都是"已投过且那一行还在上下文里"的证据 ⇒ 没有一条新事实 ⇒ 不投。
+      // 判据只来自 sidecar 身份账本（不吃本轮 top-k），所以跨 apply / 跨重启都成立。
+      const dedupeScope = sessionId ? (lastResolvedScope(sessionId)?.scope ?? null) : null;
+      if (result.action === 'inject' && cardIsRestatedEvidence(dedupeScope, result.card, payload?.messages)) {
+        result = { ...result, action: 'skip', reason: 'restated-evidence', decision };
+      }
       // enabled=false 时的 "skip disabled" 没有诊断价值，别写（任何库内调用都会带出来一堆噪声）。
       if (config.liveStats === true && !(result.action === 'skip' && result.reason === 'disabled')) {
         const storeRootForStats = resolveStoreRoot(config);
@@ -779,9 +848,11 @@ export function createPreStepHandler({ ctx, config, lifecycle, state, telemetry 
       }
       // 真注入成功 / 影子记录写成 ⇒ 这个会话就别再来一遍（T25：按 session.id 记；无 id 才按对象）
       // task-11：同时记进 sidecar 槽位账本 —— 跨 apply / 跨重启的判据在账本里。
+      // P0-2：真注入再逐行记**内容身份**（记忆侧去重的键；影子没进上下文，不记）。
       if (result.action === 'inject' || result.action === 'shadow') {
         if (session) rememberInjectedSlot(sessionId, sessionObject, result.card);
       }
+      if (result.action === 'inject') rememberDeliveredEvidence(dedupeScope, result.card);
       return result.decision ?? decision;
     } catch (error) {
       // 兜底：任何异常都不许冒泡到宿主（否则会阻塞本轮对话）
